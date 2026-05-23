@@ -11,7 +11,10 @@ pub mod physics;
 pub mod renderer;
 pub mod resources;
 pub mod save;
+pub mod scene;
 pub mod tilemap;
+pub mod timer;
+pub mod tween;
 pub mod ui;
 
 // ── 편의 재수출 ────────────────────────────────────────────────────────────────
@@ -30,5 +33,8 @@ pub use particle::{Particle, ParticleEmitter, ParticleSystem};
 pub use physics::{PhysicsBody, PhysicsSystem, PhysicsWorld};
 pub use renderer::{DrawRect, DrawText, TextQueue, TextRenderer, UiQueue};
 pub use resources::{DebugDrawQueue, DebugRect, FontData, GameState, PendingResize, ShouldQuit, ViewportSize, WindowConfig};
+pub use scene::{Scene, SceneChange, SceneCmd};
 pub use tilemap::{Tilemap, TilemapAtlas, TilemapSystem};
+pub use timer::Timer;
+pub use tween::{Easing, Tween};
 pub use ui::{Anchor, Button, ButtonState, Label, UiEvent, UiNode, UiSystem};

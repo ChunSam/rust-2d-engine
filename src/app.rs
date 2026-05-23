@@ -16,6 +16,7 @@ use crate::{
     input::InputState,
     renderer::{DrawRect, GpuContext, SpriteRenderer, TextQueue, TextRenderer, UiQueue},
     resources::{DebugDrawQueue, FontData, GameState, PendingResize, ShouldQuit, ViewportSize, WindowConfig},
+    scene::{Scene, SceneChange, SceneCmd},
 };
 
 /// 엔진 진입점.
@@ -33,6 +34,8 @@ pub struct App {
     pub world: World,
 
     systems: Vec<Box<dyn System>>,
+    /// (씬, 해당 씬이 등록한 시스템 수). Push/Pop 시 시스템 복원에 사용.
+    scene_stack: Vec<(Box<dyn Scene>, usize)>,
     window: Option<Arc<Window>>,
     gpu: Option<GpuContext>,
     sprite_renderer: Option<SpriteRenderer>,
@@ -60,9 +63,11 @@ impl App {
         world.insert_resource(TextQueue::default());
         world.insert_resource(UiQueue::default());
         world.insert_resource(DebugDrawQueue::default());
+        world.insert_resource(SceneChange::default());
         Self {
             world,
             systems: Vec::new(),
+            scene_stack: Vec::new(),
             window: None,
             gpu: None,
             sprite_renderer: None,
@@ -120,12 +125,51 @@ impl App {
         self.world.insert_resource(TextQueue::default());
         self.world.insert_resource(UiQueue::default());
         self.world.insert_resource(DebugDrawQueue::default());
+        self.world.insert_resource(SceneChange::default());
         // 등록된 이벤트 리소스 재삽입
         let inits = std::mem::take(&mut self.event_initializers);
         for init in &inits {
             init(&mut self.world);
         }
         self.event_initializers = inits;
+    }
+
+    /// 씬을 즉시 전환한다. `run()` 호출 전·후 모두 사용 가능하다.
+    ///
+    /// 현재 씬 스택을 전부 종료하고 월드를 리셋한 뒤 `scene`을 진입시킨다.
+    pub fn set_scene(&mut self, scene: Box<dyn Scene>) {
+        self.apply_scene_cmd(SceneCmd::Replace(scene));
+    }
+
+    // ── 씬 전환 처리 ─────────────────────────────────────────────────────────
+
+    fn apply_scene_cmd(&mut self, cmd: SceneCmd) {
+        match cmd {
+            SceneCmd::Replace(mut new_scene) => {
+                for (mut scene, _) in self.scene_stack.drain(..).rev() {
+                    scene.on_exit(&mut self.world);
+                }
+                self.systems.clear();
+                self.reload_scene();
+                let before = self.systems.len();
+                new_scene.on_enter(&mut self.world, &mut self.systems);
+                let owned = self.systems.len() - before;
+                self.scene_stack.push((new_scene, owned));
+            }
+            SceneCmd::Push(mut new_scene) => {
+                let before = self.systems.len();
+                new_scene.on_enter(&mut self.world, &mut self.systems);
+                let owned = self.systems.len() - before;
+                self.scene_stack.push((new_scene, owned));
+            }
+            SceneCmd::Pop => {
+                if let Some((mut scene, owned)) = self.scene_stack.pop() {
+                    scene.on_exit(&mut self.world);
+                    let new_len = self.systems.len().saturating_sub(owned);
+                    self.systems.truncate(new_len);
+                }
+            }
+        }
     }
 
     /// 이벤트 루프를 시작한다. 창이 닫힐 때까지 블로킹된다.
@@ -154,6 +198,14 @@ impl App {
         self.event_flushers = flushers;
         if let Some(input) = self.world.resource_mut::<InputState>() {
             input.flush();
+        }
+        // 씬 전환 명령 처리 (이벤트/입력 flush 이후)
+        let cmd = self
+            .world
+            .resource_mut::<SceneChange>()
+            .and_then(|sc| sc.0.take());
+        if let Some(cmd) = cmd {
+            self.apply_scene_cmd(cmd);
         }
     }
 
