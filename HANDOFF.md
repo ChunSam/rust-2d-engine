@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
 작성일: 2026-05-23  
-엔진 버전: v0.6.0 (태그: v0.3.0, main 브랜치 기준)  
+엔진 버전: v0.7.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -26,6 +26,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 4 | `query_opt2`, `Events<E>` 이벤트 시스템, UI Widget System | `767a1d2` |
 | Phase 5 | 씬 시스템 (Scene/SceneCmd/SceneChange), Timer, Tween (Easing 6종) | `2147291` |
 | Phase 6 | UI 시스템 강화 — TextInput, ScrollView, Panel+LayoutSystem | 미커밋 |
+| Phase 7 | CollisionEvent — Rapier NarrowPhase 폴링 → `Events<CollisionEvent>` 브리징 | 미커밋 |
 
 ---
 
@@ -48,6 +49,7 @@ src/
 ├── physics/
 │   ├── world.rs      PhysicsWorld (Rapier2D 래퍼)
 │   ├── body.rs       PhysicsBody 컴포넌트
+│   ├── events.rs     CollisionEvent (Started/Stopped)              ← Phase 7
 │   └── system.rs     PhysicsSystem
 ├── collision/
 │   ├── grid.rs       SpatialGrid, CollisionGridSystem
@@ -75,7 +77,42 @@ src/
 
 ---
 
-## 이번 세션에서 한 일 (Phase 6)
+## 이번 세션에서 한 일 (Phase 7)
+
+### 물리 충돌 이벤트 — ECS 브리징
+
+**배경**: `PhysicsPipeline::step()`이 contact handler를 `&()`(no-op)으로 고정해 충돌 시작/종료를 게임 로직에서 감지할 수 없었다.
+
+**구현 방식**: Rapier `EventHandler` 트레잇 구현 대신 `NarrowPhase` 폴링 선택. `step()` 이후 `narrow_phase.contact_pairs()`를 반복해 이전 프레임 접촉 집합과 diff → `Events<CollisionEvent>` 전송. `Mutex`/`RefCell` 불필요, 기존 `has_contact()` 패턴과 일관성 유지.
+
+**추가된 파일/변경**
+- `src/physics/events.rs` (신규): `CollisionEvent { Started(Entity, Entity), Stopped(Entity, Entity) }` — `Copy + Clone`
+- `src/physics/system.rs`: `active_contacts: HashSet<(ColliderHandle, ColliderHandle)>` 필드, `run()` 내 diff 블록
+- `src/physics/mod.rs`: `pub mod events` + `CollisionEvent` re-export
+- `src/lib.rs`: `CollisionEvent` 최상위 re-export
+
+**사용 패턴**
+```rust
+app.register_event::<CollisionEvent>();         // 필수: 이벤트 버스 등록
+app.add_system(Box::new(PhysicsSystem::new(physics, 50.0)));
+app.add_system(Box::new(MySystem));             // PhysicsSystem 뒤 등록 → 같은 프레임 수신
+
+// MySystem::run() 내
+if let Some(events) = world.resource::<Events<CollisionEvent>>() {
+    for ev in events.read() {
+        match ev {
+            CollisionEvent::Started(a, b) => { /* 충돌 시작 */ }
+            CollisionEvent::Stopped(a, b) => { /* 충돌 종료 */ }
+        }
+    }
+}
+```
+
+**주의**: ECS에 `PhysicsBody`가 없는 static 콜라이더(바닥 등)와의 충돌은 `col_map.get()` 실패로 조용히 스킵. 이벤트 미등록 시에도 패닉 없음(`resource_mut` → `None` guard).
+
+---
+
+## 이전 세션에서 한 일 (Phase 6)
 
 ### UI 시스템 강화
 
@@ -131,9 +168,8 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 
 ## 미해결 / 다음 Phase 후보
 
-Phase 7 이후 계획은 미정. 사용자와 협의 필요. 아래는 가능한 방향:
+Phase 8 이후 계획은 미정. 사용자와 협의 필요. 아래는 가능한 방향:
 
-- **물리 이벤트**: Rapier contact event를 ECS `Events`로 브리징 (게임플레이 콜백 가능)
 - **Save/Load 완성**: `SaveData` serde 직렬화 구현 (현재 stub 수준)
 - **오디오 강화**: 스트리밍 재생, 3D 위치 오디오, 오디오 버스 믹서
 - **ECS 성능**: Archetype 기반 스토리지로 교체 (현재는 TypeId HashMap + Vec)
