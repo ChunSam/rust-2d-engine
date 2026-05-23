@@ -37,7 +37,7 @@ impl System for PhysicsSystem {
 
         let scale = self.pixels_per_unit;
         for (entity, handle) in pairs {
-            if let Some(body) = self.physics.rigid_body_set.get(handle) {
+            if let Some(body) = self.physics.rigid_body(handle) {
                 let t = *body.translation();
                 if let Some(tr) = world.get_mut::<Transform>(entity) {
                     tr.position = Vec2::new(t.x * scale, t.y * scale);

@@ -7,9 +7,9 @@ use crate::physics::body::PhysicsBody;
 ///
 /// `PhysicsSystem`이 소유하거나 직접 시스템 구조체에 넣어 사용한다.
 pub struct PhysicsWorld {
-    pub rigid_body_set: RigidBodySet,
-    pub collider_set: ColliderSet,
-    pub narrow_phase: NarrowPhase,
+    pub(crate) rigid_body_set: RigidBodySet,
+    pub(crate) collider_set: ColliderSet,
+    pub(crate) narrow_phase: NarrowPhase,
     gravity: Vector<f32>,
     integration_params: IntegrationParameters,
     physics_pipeline: PhysicsPipeline,
