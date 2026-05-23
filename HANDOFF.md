@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 12 갱신: 2026-05-24)  
-엔진 버전: v0.12.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 13 갱신: 2026-05-24)  
+엔진 버전: v0.13.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -31,7 +31,8 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 9 | ECS Archetype 스토리지 — TypeId HashMap+Vec → Archetype 밀집 컬럼 스토리지 | `a8b49cc` |
 | Phase 10 | 포스트프로세싱 — 비네팅, 색수차, 근사 블룸 (PostProcessConfig 리소스) | `a8b49cc` |
 | Phase 11 | 오디오 강화 — 위치 오디오, 버스 믹서, 페이드인/아웃 | `a8b49cc` |
-| Phase 12 | Transform 계층 — Parent/Children/GlobalTransform, HierarchySystem, attach/detach | (이번 세션) |
+| Phase 12 | Transform 계층 — Parent/Children/GlobalTransform, HierarchySystem, attach/detach | `3862f8d` |
+| Phase 13 | 물리 레이캐스트 + 캐릭터 컨트롤러 — RaycastHit, add_kinematic_*, move_character | (이번 세션) |
 
 ---
 
@@ -53,8 +54,9 @@ src/
 │   ├── state.rs      InputState (키보드, 마우스, 스크롤, 문자 입력 버퍼)
 │   └── map.rs        InputMap (키 리바인딩)
 ├── physics/
-│   ├── world.rs      PhysicsWorld (Rapier2D 래퍼)
+│   ├── world.rs      PhysicsWorld (Rapier2D 래퍼) + RaycastHit + 레이캐스트/캐릭터 메서드 ← Phase 13
 │   ├── body.rs       PhysicsBody 컴포넌트
+│   ├── character.rs  CharacterController (KinematicCharacterController 래퍼)           ← Phase 13
 │   ├── events.rs     CollisionEvent (Started/Stopped)              ← Phase 7
 │   └── system.rs     PhysicsSystem
 ├── collision/
@@ -89,6 +91,79 @@ src/
 │       └── post_process.wgsl                                      ← Phase 10
 └── save.rs           RON 세이브/불러오기 (save/load/load_or_default/exists/delete)
 ```
+
+---
+
+## 이번 세션에서 한 일 (Phase 13)
+
+### Phase 13 — 물리 레이캐스트 + 캐릭터 컨트롤러
+
+**배경**: 시야 판정·마우스 픽킹·총기 탄착 계산 등을 위한 레이캐스트가 없었고, 경사면·계단 처리를 포함하는 게임 특화 캐릭터 이동 기능이 필요했다.
+
+**추가된 파일**: `src/physics/character.rs`  
+**변경된 파일**: `src/physics/world.rs`, `src/physics/mod.rs`, `src/lib.rs`
+
+#### 레이캐스트 (`PhysicsWorld`)
+
+```rust
+// 단순 레이캐스트 — 최초 충돌 콜라이더 핸들 + toi
+let result: Option<(ColliderHandle, f32)> =
+    physics.cast_ray(origin_physics, dir, max_toi, solid);
+
+// 법선 포함 — RaycastHit { collider_handle, point, normal, toi }
+let hit: Option<RaycastHit> =
+    physics.cast_ray_with_normal(origin_physics, dir, max_toi, solid);
+```
+
+- 모든 좌표는 **물리 단위** (픽셀 ÷ pixels_per_unit).
+- `step()` 이후 `query_pipeline`이 갱신된 뒤에 호출해야 최신 상태가 반영된다.
+
+#### 키네마틱 바디
+
+```rust
+// 중력 비반응, 수동 위치 제어
+let (rb, col) = physics.add_kinematic_box(pos / PPU, half_w, half_h);
+let (rb, col) = physics.add_kinematic_circle(pos / PPU, radius);
+```
+
+#### 캐릭터 컨트롤러 (`CharacterController` 컴포넌트)
+
+```rust
+use engine::{CharacterController, PhysicsBody};
+
+// 엔티티 생성
+let (rb, col) = physics.add_kinematic_box(start / PPU, 0.4, 0.9);
+world.add_component(player, PhysicsBody { rigid_body_handle: rb, collider_handle: col });
+world.add_component(player, CharacterController::new()
+    .with_max_slope_deg(45.0)
+    .with_snap_to_ground(0.15));
+
+// 커스텀 시스템 run() 내 — PhysicsSystem 이전에 등록 필수
+let desired = Vec2::new(move_x * speed * dt, gravity_vel * dt);
+physics.move_character(
+    controller, body.rigid_body_handle, body.collider_handle,
+    desired, dt, PIXELS_PER_UNIT,
+);
+if controller.grounded { /* 접지 = 점프 가능 */ }
+```
+
+**구조 특이사항**
+- `CharacterController::inner`의 `up = -Y` — 엔진 화면 좌표(Y+는 아래)에 맞춰 설정.
+  Rapier 기본값(+Y)을 그대로 쓰면 바닥/천장 판정이 뒤집힌다.
+- `move_character()`는 내부적으로 `set_next_kinematic_translation()`을 호출하므로
+  다음 `step()` 때 위치가 실제로 반영된다.
+- `PhysicsSystem::run()` 이전에 캐릭터 이동을 처리하는 전용 시스템을 등록해야 올바른 순서로 동작한다.
+
+**신규 테스트** (`src/physics/world.rs`): 7개
+- `cast_ray_hits_static_box` — 정적 박스에 레이 충돌 확인
+- `cast_ray_misses_when_no_obstacle` — 장애물 없으면 None
+- `cast_ray_with_normal_returns_correct_normal` — 법선 방향 검증
+- `add_kinematic_box_creates_body` — 키네마틱 바디 생성
+- `add_kinematic_circle_creates_body` — 키네마틱 원형 바디 생성
+- `move_character_grounded_on_floor` — 바닥 위 접지 판정
+- `character_controller_builder_methods` — 빌더 메서드 파라미터 설정
+
+**검증**: `cargo test` 61개 단위 + 11개 doc 테스트 전부 통과 (`rust-survivors` 빌드 무영향)
 
 ---
 
@@ -349,7 +424,7 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 
 | Phase | 기능 | 난이도 | 비고 |
 |-------|------|--------|------|
-| Phase 13 | 물리 레이캐스트 + 캐릭터 컨트롤러 | M | Rapier `query_pipeline` 활용 |
+| ~~Phase 13~~ | ~~물리 레이캐스트 + 캐릭터 컨트롤러~~ | — | 완료 |
 | Phase 14 | 애니메이션 상태 머신 | M | Phase 12 이후 캐릭터 애니메이션 완성 |
 | Phase 15 | 게임패드(gilrs) + UI Slider/CheckBox | M | 입력 레이어 완성 |
 | Phase 16 | 씬 직렬화 + 프리팹 시스템 | L | RON 기반 레벨 저장/로드 |

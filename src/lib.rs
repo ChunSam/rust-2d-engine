@@ -33,7 +33,9 @@ pub use hierarchy::{attach, detach, Children, GlobalTransform, HierarchySystem, 
 pub use ecs::{Entity, Events, System, World};
 pub use input::{InputMap, InputState};
 pub use particle::{Particle, ParticleEmitter, ParticleSystem};
-pub use physics::{CollisionEvent, PhysicsBody, PhysicsSystem, PhysicsWorld};
+pub use physics::{
+    CharacterController, CollisionEvent, PhysicsBody, PhysicsSystem, PhysicsWorld, RaycastHit,
+};
 pub use renderer::{DrawRect, DrawText, PostProcessConfig, TextQueue, TextRenderer, UiQueue};
 pub use resources::{DebugDrawQueue, DebugRect, FontData, GameState, PendingResize, ShouldQuit, ViewportSize, WindowConfig};
 pub use scene::{Scene, SceneChange, SceneCmd};

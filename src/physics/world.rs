@@ -2,6 +2,22 @@ use glam::Vec2;
 use rapier2d::prelude::*;
 
 use crate::physics::body::PhysicsBody;
+use crate::physics::character::CharacterController;
+
+// ── 레이캐스트 결과 ──────────────────────────────────────────────────────────
+
+/// 레이캐스트 충돌 결과.
+#[derive(Debug, Clone, Copy)]
+pub struct RaycastHit {
+    /// 충돌한 콜라이더 핸들.
+    pub collider_handle: ColliderHandle,
+    /// 월드 공간 충돌 지점 (물리 단위).
+    pub point: Vec2,
+    /// 충돌 면의 법선 벡터 (정규화됨).
+    pub normal: Vec2,
+    /// 레이 시작점으로부터의 거리 배율 (`origin + direction * toi` = 충돌 지점).
+    pub toi: f32,
+}
 
 /// rapier2d 2D 물리 시뮬레이션 세계.
 ///
@@ -153,6 +169,171 @@ impl PhysicsWorld {
         self.collider_set.get_mut(handle)
     }
 
+    /// 키네마틱 박스 바디를 추가한다 (중력 비반응, 수동 위치 제어).
+    pub fn add_kinematic_box(
+        &mut self,
+        position: Vec2,
+        half_w: f32,
+        half_h: f32,
+    ) -> (RigidBodyHandle, ColliderHandle) {
+        let body = RigidBodyBuilder::kinematic_position_based()
+            .translation(vector![position.x, position.y])
+            .build();
+        let handle = self.rigid_body_set.insert(body);
+        let collider = ColliderBuilder::cuboid(half_w, half_h).build();
+        let col_handle =
+            self.collider_set
+                .insert_with_parent(collider, handle, &mut self.rigid_body_set);
+        (handle, col_handle)
+    }
+
+    /// 키네마틱 원형 바디를 추가한다 (중력 비반응, 수동 위치 제어).
+    pub fn add_kinematic_circle(
+        &mut self,
+        position: Vec2,
+        radius: f32,
+    ) -> (RigidBodyHandle, ColliderHandle) {
+        let body = RigidBodyBuilder::kinematic_position_based()
+            .translation(vector![position.x, position.y])
+            .build();
+        let handle = self.rigid_body_set.insert(body);
+        let collider = ColliderBuilder::ball(radius).build();
+        let col_handle =
+            self.collider_set
+                .insert_with_parent(collider, handle, &mut self.rigid_body_set);
+        (handle, col_handle)
+    }
+
+    // ── 레이캐스트 ─────────────────────────────────────────────────────────────
+
+    /// 단순 레이캐스트. 최초 충돌 콜라이더 핸들과 toi(레이 이동 거리 배율)를 반환한다.
+    ///
+    /// - `origin` / `direction` — 물리 단위 (픽셀 ÷ pixels_per_unit).
+    /// - `max_toi` — 최대 레이 길이 배율 (보통 최대 거리 / direction.length()).
+    /// - `solid` — `true`이면 레이 시작점이 콜라이더 내부일 때도 교차로 처리.
+    pub fn cast_ray(
+        &self,
+        origin: Vec2,
+        direction: Vec2,
+        max_toi: f32,
+        solid: bool,
+    ) -> Option<(ColliderHandle, f32)> {
+        let ray = Ray::new(
+            point![origin.x, origin.y],
+            vector![direction.x, direction.y],
+        );
+        self.query_pipeline.cast_ray(
+            &self.rigid_body_set,
+            &self.collider_set,
+            &ray,
+            max_toi,
+            solid,
+            QueryFilter::default(),
+        )
+    }
+
+    /// 레이캐스트 — 충돌 지점과 법선 벡터를 포함한 `RaycastHit`를 반환한다.
+    ///
+    /// 물리 단위 기준. 픽셀 단위를 쓰려면 `origin`과 `direction`을 `pixels_per_unit`으로 나눠 전달하고,
+    /// 반환된 `RaycastHit::point`에 `pixels_per_unit`을 곱해 변환한다.
+    pub fn cast_ray_with_normal(
+        &self,
+        origin: Vec2,
+        direction: Vec2,
+        max_toi: f32,
+        solid: bool,
+    ) -> Option<RaycastHit> {
+        let ray = Ray::new(
+            point![origin.x, origin.y],
+            vector![direction.x, direction.y],
+        );
+        self.query_pipeline
+            .cast_ray_and_get_normal(
+                &self.rigid_body_set,
+                &self.collider_set,
+                &ray,
+                max_toi,
+                solid,
+                QueryFilter::default(),
+            )
+            .map(|(handle, intersection)| {
+                let hit_point = ray.point_at(intersection.time_of_impact);
+                RaycastHit {
+                    collider_handle: handle,
+                    point: Vec2::new(hit_point.x, hit_point.y),
+                    normal: Vec2::new(
+                        intersection.normal.x,
+                        intersection.normal.y,
+                    ),
+                    toi: intersection.time_of_impact,
+                }
+            })
+    }
+
+    // ── 캐릭터 컨트롤러 ────────────────────────────────────────────────────────
+
+    /// `CharacterController`를 이용해 충돌 해결 후 키네마틱 바디를 이동한다.
+    ///
+    /// `desired_translation` — **픽셀 단위** 이동 벡터.
+    /// 내부에서 `pixels_per_unit`으로 물리 단위로 변환하고,
+    /// 충돌 해결 후 `set_next_kinematic_translation()`으로 바디에 적용한다.
+    /// 다음 `step()` 호출 시 해당 위치로 이동한다.
+    ///
+    /// `controller.grounded`가 갱신되므로 이 메서드를 `PhysicsSystem::run()` 이전에 호출해야 한다.
+    pub fn move_character(
+        &mut self,
+        controller: &mut CharacterController,
+        body_handle: RigidBodyHandle,
+        col_handle: ColliderHandle,
+        desired_translation: Vec2,
+        dt: f32,
+        pixels_per_unit: f32,
+    ) {
+        let ppu = pixels_per_unit;
+        let desired = vector![
+            desired_translation.x / ppu,
+            desired_translation.y / ppu
+        ];
+
+        // 콜라이더 위치와 shape를 먼저 복사해 borrow 분리
+        let (col_pos, shape_type) = match self.collider_set.get(col_handle) {
+            Some(c) => (*c.position(), c.shape().shape_type()),
+            None => return,
+        };
+
+        // shape를 collider_set에서 재획득 (두 번째 불변 참조 — Rust 허용)
+        let shape = match self.collider_set.get(col_handle) {
+            Some(c) => c.shape(),
+            None => return,
+        };
+        let _ = shape_type; // 타입 힌트용으로 저장, 실제 사용은 shape 참조
+
+        let output = controller.inner.move_shape(
+            dt,
+            &self.rigid_body_set,
+            &self.collider_set,
+            &self.query_pipeline,
+            shape,
+            &col_pos,
+            desired,
+            QueryFilter::default().exclude_collider(col_handle),
+            |_| {},
+        );
+
+        controller.grounded = output.grounded;
+
+        // 바디 현재 위치 + 이동 벡터로 next_kinematic_translation 설정
+        let body_t = self
+            .rigid_body_set
+            .get(body_handle)
+            .map(|b| *b.translation())
+            .unwrap_or_default();
+        let new_t = body_t + output.translation;
+        if let Some(body) = self.rigid_body_set.get_mut(body_handle) {
+            body.set_next_kinematic_translation(new_t);
+        }
+    }
+
     /// 바디와 연결된 모든 콜라이더를 제거한 뒤 강체를 삭제한다.
     pub fn remove_body(&mut self, body: &PhysicsBody) {
         self.rigid_body_set.remove(
@@ -163,5 +344,113 @@ impl PhysicsWorld {
             &mut self.multibody_joint_set,
             true,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::physics::character::CharacterController;
+
+    fn make_world() -> PhysicsWorld {
+        PhysicsWorld::new(Vec2::new(0.0, 9.8))
+    }
+
+    #[test]
+    fn cast_ray_hits_static_box() {
+        let mut pw = make_world();
+        // Y=0 에 두께 1 바닥
+        pw.add_static_box(Vec2::new(0.0, 0.0), 5.0, 0.5);
+        pw.step(1.0 / 60.0); // query_pipeline 갱신
+
+        // Y=-5 에서 아래(+Y)로 레이캐스트
+        let result = pw.cast_ray(Vec2::new(0.0, -5.0), Vec2::new(0.0, 1.0), 10.0, true);
+        assert!(result.is_some(), "바닥에 레이가 맞아야 함");
+        let (_, toi) = result.unwrap();
+        assert!(toi > 0.0 && toi < 10.0, "toi 범위 확인: {toi}");
+    }
+
+    #[test]
+    fn cast_ray_misses_when_no_obstacle() {
+        let mut pw = make_world();
+        pw.add_static_box(Vec2::new(100.0, 0.0), 5.0, 0.5); // 멀리 있음
+        pw.step(1.0 / 60.0);
+
+        // X 방향으로 레이캐스트 — 바닥이 Y 방향에 있으므로 맞지 않음
+        let result = pw.cast_ray(Vec2::new(0.0, -5.0), Vec2::new(0.0, -1.0), 5.0, true);
+        assert!(result.is_none(), "반대 방향은 맞지 않아야 함");
+    }
+
+    #[test]
+    fn cast_ray_with_normal_returns_correct_normal() {
+        let mut pw = make_world();
+        pw.add_static_box(Vec2::new(0.0, 0.0), 5.0, 0.5);
+        pw.step(1.0 / 60.0);
+
+        let hit = pw.cast_ray_with_normal(
+            Vec2::new(0.0, -5.0),
+            Vec2::new(0.0, 1.0),
+            20.0,
+            true,
+        );
+        assert!(hit.is_some());
+        let h = hit.unwrap();
+        // 위에서 아래로 쐈으므로 법선은 위쪽 (Y < 0 in physics coords)
+        assert!(
+            h.normal.y < 0.0,
+            "법선은 레이 반대 방향이어야 함: {:?}",
+            h.normal
+        );
+    }
+
+    #[test]
+    fn add_kinematic_box_creates_body() {
+        let mut pw = make_world();
+        let (rb, col) = pw.add_kinematic_box(Vec2::new(1.0, 2.0), 0.5, 1.0);
+        assert!(pw.rigid_body(rb).is_some());
+        assert!(pw.get_collider(col).is_some());
+        let body = pw.rigid_body(rb).unwrap();
+        assert!(body.is_kinematic(), "키네마틱 바디여야 함");
+    }
+
+    #[test]
+    fn add_kinematic_circle_creates_body() {
+        let mut pw = make_world();
+        let (rb, _col) = pw.add_kinematic_circle(Vec2::new(0.0, 0.0), 0.5);
+        let body = pw.rigid_body(rb).unwrap();
+        assert!(body.is_kinematic());
+    }
+
+    #[test]
+    fn move_character_grounded_on_floor() {
+        let mut pw = make_world();
+        // 바닥: Y=2.0, half_h=0.5 → 상단이 Y=1.5
+        pw.add_static_box(Vec2::new(0.0, 2.0), 5.0, 0.5);
+        // 캐릭터: Y=0.0, half_h=0.5 → 하단이 Y=0.5 (바닥과 1.0 떨어짐)
+        let (rb, col) = pw.add_kinematic_box(Vec2::new(0.0, 0.0), 0.4, 0.5);
+        pw.step(1.0 / 60.0);
+
+        let mut ctrl = CharacterController::new();
+        // 아래로 이동 시도 (픽셀 단위, ppu=1)
+        pw.move_character(
+            &mut ctrl,
+            rb,
+            col,
+            Vec2::new(0.0, 5.0), // 아래로 이동
+            1.0 / 60.0,
+            1.0,
+        );
+        pw.step(1.0 / 60.0);
+
+        assert!(ctrl.grounded, "바닥에 닿으면 grounded=true여야 함");
+    }
+
+    #[test]
+    fn character_controller_builder_methods() {
+        let ctrl = CharacterController::new()
+            .with_max_slope_deg(30.0)
+            .with_autostep(0.5, 0.2)
+            .with_snap_to_ground(0.2);
+        assert!((ctrl.max_slope_angle - 30_f32.to_radians()).abs() < 1e-5);
     }
 }

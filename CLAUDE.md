@@ -1,6 +1,6 @@
 # CLAUDE.md — rust-2d-engine 에이전트 참조 문서
 
-> 버전 v0.11.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
+> 버전 v0.13.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
 > 상세 API: `REFERENCE.md` | 개발 이력/아키텍처 결정: `HANDOFF.md`
 
 ---
@@ -22,6 +22,8 @@
 | Camera (좌표 변환, zoom) | `src/camera.rs` |
 | InputState, InputMap | `src/input/` |
 | PhysicsWorld, PhysicsBody, PhysicsSystem, CollisionEvent | `src/physics/` |
+| CharacterController, RaycastHit, cast_ray, cast_ray_with_normal, move_character | `src/physics/character.rs`, `src/physics/world.rs` |
+| add_kinematic_box, add_kinematic_circle | `src/physics/world.rs` |
 | SpatialGrid, Collider, CollisionLayer | `src/collision/` |
 | AnimationPlayer, AnimationClip, AnimationSystem | `src/animation/` |
 | UI (UiNode, Button, Label, TextInput, ScrollView, Panel, LayoutSystem, UiEvent) | `src/ui/` |
