@@ -1,201 +1,292 @@
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, VecDeque};
 
-/// 게임 오브젝트를 식별하는 고유 ID
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Entity(pub u32);
+
+type ArchetypeId = usize;
+
+/// 동일한 컴포넌트 집합을 가진 엔티티 묶음.
+/// columns[T][i]는 entities[i]의 T 컴포넌트이다 (항상 동일한 길이).
+struct Archetype {
+    type_set: Vec<TypeId>, // 정렬된 TypeId 목록
+    entities: Vec<Entity>,
+    columns: HashMap<TypeId, Vec<Box<dyn Any>>>,
+}
+
+impl Archetype {
+    fn new(type_set: Vec<TypeId>) -> Self {
+        let columns = type_set.iter().map(|&t| (t, Vec::<Box<dyn Any>>::new())).collect();
+        Self { type_set, entities: Vec::new(), columns }
+    }
+
+    fn contains(&self, tid: TypeId) -> bool {
+        self.type_set.binary_search(&tid).is_ok()
+    }
+}
 
 /// ECS의 중심 저장소
 ///
 /// - 엔티티(Entity): 단순한 u32 ID
-/// - 컴포넌트: TypeId 기준으로 구분되는 Vec<Option<Box<dyn Any>>>
-/// - 리소스: 전역 싱글턴 데이터 (입력 상태, 물리 세계 등)
+/// - 컴포넌트: Archetype 기반 밀집 컬럼 스토리지
+/// - 리소스: 전역 싱글턴 데이터
 pub struct World {
     next_id: u32,
-    entities: Vec<Entity>,
-    // 서바이버처럼 수천 개 생성/소멸이 반복될 때 ID 누수를 막기 위한 재사용 큐
     free_ids: VecDeque<u32>,
-    // TypeId -> Vec indexed by entity id (없으면 None)
-    components: HashMap<TypeId, Vec<Option<Box<dyn Any>>>>,
+    entities: Vec<Entity>,
+    archetypes: Vec<Archetype>,
+    archetype_index: HashMap<Vec<TypeId>, ArchetypeId>,
+    entity_location: HashMap<Entity, (ArchetypeId, usize)>,
     resources: HashMap<TypeId, Box<dyn Any>>,
 }
 
 impl World {
     pub fn new() -> Self {
+        let empty_arch = Archetype::new(vec![]);
+        let mut archetype_index = HashMap::new();
+        archetype_index.insert(vec![], 0);
         Self {
             next_id: 0,
-            entities: Vec::new(),
             free_ids: VecDeque::new(),
-            components: HashMap::new(),
+            entities: Vec::new(),
+            archetypes: vec![empty_arch],
+            archetype_index,
+            entity_location: HashMap::new(),
             resources: HashMap::new(),
         }
     }
 
     /// 빈 엔티티를 생성하고 반환한다.
-    /// free_ids 에 반납된 ID가 있으면 재사용, 없으면 next_id 증가.
     pub fn spawn(&mut self) -> Entity {
         let id = if let Some(reused) = self.free_ids.pop_front() {
-            reused // despawn 때 None 처리가 보장되므로 슬롯은 이미 깨끗하다
+            reused
         } else {
             let id = self.next_id;
             self.next_id += 1;
             id
         };
         let entity = Entity(id);
+        let row = self.archetypes[0].entities.len();
+        self.archetypes[0].entities.push(entity);
+        self.entity_location.insert(entity, (0, row));
         self.entities.push(entity);
-        // 기존 컴포넌트 저장소를 새 엔티티 크기만큼 확장
-        for vec in self.components.values_mut() {
-            while vec.len() <= entity.0 as usize {
-                vec.push(None);
-            }
-        }
         entity
     }
 
-    /// 엔티티를 제거하고 모든 컴포넌트를 해제한다.
-    /// 같은 엔티티를 두 번 호출해도 panic 하지 않는다 (멱등성).
+    /// 엔티티를 제거하고 모든 컴포넌트를 해제한다. 멱등성 보장.
     pub fn despawn(&mut self, entity: Entity) {
-        let idx = entity.0 as usize;
+        let (arch_id, row) = match self.entity_location.get(&entity) {
+            Some(&loc) => loc,
+            None => return,
+        };
 
-        // entities 에서 swap_remove: O(1), &[Entity] 시그니처를 유지할 수 있다
+        let arch_len = self.archetypes[arch_id].entities.len();
+        let type_set: Vec<TypeId> = self.archetypes[arch_id].type_set.clone();
+
+        for &tid in &type_set {
+            self.archetypes[arch_id].columns.get_mut(&tid).unwrap().swap_remove(row);
+        }
+        self.archetypes[arch_id].entities.swap_remove(row);
+
+        if row < arch_len - 1 {
+            let swapped = self.archetypes[arch_id].entities[row];
+            self.entity_location.insert(swapped, (arch_id, row));
+        }
+
         if let Some(pos) = self.entities.iter().position(|&e| e == entity) {
             self.entities.swap_remove(pos);
-
-            // 모든 컴포넌트 슬롯을 None 으로 비운다
-            for vec in self.components.values_mut() {
-                if let Some(slot) = vec.get_mut(idx) {
-                    *slot = None;
-                }
-            }
-
-            // ID를 재사용 큐에 반납
-            self.free_ids.push_back(entity.0);
         }
-        // entities 에 없으면 이미 despawn 된 엔티티 → 아무것도 하지 않는다
+
+        self.entity_location.remove(&entity);
+        self.free_ids.push_back(entity.0);
     }
 
-    /// 엔티티에서 컴포넌트 T를 제거한다. 엔티티는 유지된다.
-    /// 해당 컴포넌트가 없어도 panic 하지 않는다 (멱등성).
+    /// 엔티티에서 컴포넌트 T를 제거한다. 없어도 panic 하지 않는다.
     pub fn remove_component<T: 'static>(&mut self, entity: Entity) {
-        if let Some(vec) = self.components.get_mut(&TypeId::of::<T>()) {
-            if let Some(slot) = vec.get_mut(entity.0 as usize) {
-                *slot = None;
-            }
+        let tid = TypeId::of::<T>();
+        let (arch_id, _) = match self.entity_location.get(&entity) {
+            Some(&loc) => loc,
+            None => return,
+        };
+
+        if !self.archetypes[arch_id].contains(tid) {
+            return;
         }
+
+        let new_sig: Vec<TypeId> = self.archetypes[arch_id]
+            .type_set
+            .iter()
+            .copied()
+            .filter(|&t| t != tid)
+            .collect();
+
+        let new_arch_id = self.get_or_create_archetype(new_sig);
+        self.move_entity(entity, new_arch_id);
     }
 
-    /// 엔티티에 컴포넌트를 붙인다.
+    /// 엔티티에 컴포넌트를 붙인다. 이미 있으면 교체한다.
     pub fn add_component<T: 'static>(&mut self, entity: Entity, component: T) {
-        let vec = self
-            .components
-            .entry(TypeId::of::<T>())
-            .or_insert_with(Vec::new);
-        while vec.len() <= entity.0 as usize {
-            vec.push(None);
+        let tid = TypeId::of::<T>();
+        let (arch_id, _) = match self.entity_location.get(&entity) {
+            Some(&loc) => loc,
+            None => return,
+        };
+
+        if self.archetypes[arch_id].contains(tid) {
+            let (a, row) = self.entity_location[&entity];
+            self.archetypes[a].columns.get_mut(&tid).unwrap()[row] = Box::new(component);
+            return;
         }
-        vec[entity.0 as usize] = Some(Box::new(component));
+
+        let new_sig: Vec<TypeId> = {
+            let arch = &self.archetypes[arch_id];
+            let mut sig = arch.type_set.clone();
+            let pos = sig.binary_search(&tid).unwrap_err();
+            sig.insert(pos, tid);
+            sig
+        };
+
+        let new_arch_id = self.get_or_create_archetype(new_sig);
+        self.move_entity(entity, new_arch_id);
+
+        let (na, _) = self.entity_location[&entity];
+        self.archetypes[na].columns.get_mut(&tid).unwrap().push(Box::new(component));
     }
 
     /// 엔티티의 컴포넌트를 불변 참조로 가져온다.
     pub fn get<T: 'static>(&self, entity: Entity) -> Option<&T> {
-        self.components
+        let &(arch_id, row) = self.entity_location.get(&entity)?;
+        self.archetypes[arch_id]
+            .columns
             .get(&TypeId::of::<T>())?
-            .get(entity.0 as usize)?
-            .as_ref()?
+            .get(row)?
             .downcast_ref::<T>()
     }
 
     /// 엔티티의 컴포넌트를 가변 참조로 가져온다.
     pub fn get_mut<T: 'static>(&mut self, entity: Entity) -> Option<&mut T> {
-        self.components
+        let &(arch_id, row) = self.entity_location.get(&entity)?;
+        self.archetypes[arch_id]
+            .columns
             .get_mut(&TypeId::of::<T>())?
-            .get_mut(entity.0 as usize)?
-            .as_mut()?
+            .get_mut(row)?
             .downcast_mut::<T>()
     }
 
-    /// 특정 컴포넌트 T를 가진 모든 (Entity, &T) 쌍을 순회한다.
+    /// T를 가진 모든 (Entity, &T) 쌍을 순회한다.
     pub fn query<T: 'static>(&self) -> impl Iterator<Item = (Entity, &T)> {
-        let type_id = TypeId::of::<T>();
-        let entities = &self.entities;
-        let components = self.components.get(&type_id);
-        entities.iter().filter_map(move |&entity| {
-            let comp = components?
-                .get(entity.0 as usize)?
-                .as_ref()?
-                .downcast_ref::<T>()?;
-            Some((entity, comp))
-        })
+        let tid = TypeId::of::<T>();
+        self.archetypes
+            .iter()
+            .filter(move |arch| arch.contains(tid))
+            .flat_map(move |arch| {
+                let col = arch.columns.get(&tid).unwrap();
+                arch.entities.iter().zip(col.iter()).map(|(&e, c)| {
+                    (e, c.downcast_ref::<T>().unwrap())
+                })
+            })
     }
 
-    /// 컴포넌트 A, B 를 모두 가진 엔티티를 순회한다.
-    /// 둘 중 하나라도 없는 엔티티는 건너뛴다.
+    /// A, B 를 모두 가진 엔티티를 순회한다.
     pub fn query2<A: 'static, B: 'static>(&self) -> impl Iterator<Item = (Entity, &A, &B)> {
-        // 두 타입의 슬라이스를 미리 꺼내 클로저 안에서 재빌림 없이 사용한다
-        // (클로저가 &self 전체를 캡처하면 lifetime 추론이 복잡해지므로 분리)
-        let ca = self.components.get(&TypeId::of::<A>());
-        let cb = self.components.get(&TypeId::of::<B>());
-        self.entities.iter().filter_map(move |&entity| {
-            let idx = entity.0 as usize;
-            let a = ca?.get(idx)?.as_ref()?.downcast_ref::<A>()?;
-            let b = cb?.get(idx)?.as_ref()?.downcast_ref::<B>()?;
-            Some((entity, a, b))
-        })
+        let ta = TypeId::of::<A>();
+        let tb = TypeId::of::<B>();
+        self.archetypes
+            .iter()
+            .filter(move |arch| arch.contains(ta) && arch.contains(tb))
+            .flat_map(move |arch| {
+                let ca = arch.columns.get(&ta).unwrap();
+                let cb = arch.columns.get(&tb).unwrap();
+                arch.entities.iter().enumerate().map(move |(i, &e)| {
+                    (
+                        e,
+                        ca[i].downcast_ref::<A>().unwrap(),
+                        cb[i].downcast_ref::<B>().unwrap(),
+                    )
+                })
+            })
     }
 
-    /// 컴포넌트 A, B, C 를 모두 가진 엔티티를 순회한다.
+    /// A, B, C 를 모두 가진 엔티티를 순회한다.
     pub fn query3<A: 'static, B: 'static, C: 'static>(
         &self,
     ) -> impl Iterator<Item = (Entity, &A, &B, &C)> {
-        let ca = self.components.get(&TypeId::of::<A>());
-        let cb = self.components.get(&TypeId::of::<B>());
-        let cc = self.components.get(&TypeId::of::<C>());
-        self.entities.iter().filter_map(move |&entity| {
-            let idx = entity.0 as usize;
-            let a = ca?.get(idx)?.as_ref()?.downcast_ref::<A>()?;
-            let b = cb?.get(idx)?.as_ref()?.downcast_ref::<B>()?;
-            let c = cc?.get(idx)?.as_ref()?.downcast_ref::<C>()?;
-            Some((entity, a, b, c))
-        })
+        let ta = TypeId::of::<A>();
+        let tb = TypeId::of::<B>();
+        let tc = TypeId::of::<C>();
+        self.archetypes
+            .iter()
+            .filter(move |arch| arch.contains(ta) && arch.contains(tb) && arch.contains(tc))
+            .flat_map(move |arch| {
+                let ca = arch.columns.get(&ta).unwrap();
+                let cb = arch.columns.get(&tb).unwrap();
+                let cc = arch.columns.get(&tc).unwrap();
+                arch.entities.iter().enumerate().map(move |(i, &e)| {
+                    (
+                        e,
+                        ca[i].downcast_ref::<A>().unwrap(),
+                        cb[i].downcast_ref::<B>().unwrap(),
+                        cc[i].downcast_ref::<C>().unwrap(),
+                    )
+                })
+            })
     }
 
-    /// 컴포넌트 A, B, C, D 를 모두 가진 엔티티를 순회한다.
+    /// A, B, C, D 를 모두 가진 엔티티를 순회한다.
     pub fn query4<A: 'static, B: 'static, C: 'static, D: 'static>(
         &self,
     ) -> impl Iterator<Item = (Entity, &A, &B, &C, &D)> {
-        let ca = self.components.get(&TypeId::of::<A>());
-        let cb = self.components.get(&TypeId::of::<B>());
-        let cc = self.components.get(&TypeId::of::<C>());
-        let cd = self.components.get(&TypeId::of::<D>());
-        self.entities.iter().filter_map(move |&entity| {
-            let idx = entity.0 as usize;
-            let a = ca?.get(idx)?.as_ref()?.downcast_ref::<A>()?;
-            let b = cb?.get(idx)?.as_ref()?.downcast_ref::<B>()?;
-            let c = cc?.get(idx)?.as_ref()?.downcast_ref::<C>()?;
-            let d = cd?.get(idx)?.as_ref()?.downcast_ref::<D>()?;
-            Some((entity, a, b, c, d))
-        })
+        let ta = TypeId::of::<A>();
+        let tb = TypeId::of::<B>();
+        let tc = TypeId::of::<C>();
+        let td = TypeId::of::<D>();
+        self.archetypes
+            .iter()
+            .filter(move |arch| {
+                arch.contains(ta) && arch.contains(tb) && arch.contains(tc) && arch.contains(td)
+            })
+            .flat_map(move |arch| {
+                let ca = arch.columns.get(&ta).unwrap();
+                let cb = arch.columns.get(&tb).unwrap();
+                let cc = arch.columns.get(&tc).unwrap();
+                let cd = arch.columns.get(&td).unwrap();
+                arch.entities.iter().enumerate().map(move |(i, &e)| {
+                    (
+                        e,
+                        ca[i].downcast_ref::<A>().unwrap(),
+                        cb[i].downcast_ref::<B>().unwrap(),
+                        cc[i].downcast_ref::<C>().unwrap(),
+                        cd[i].downcast_ref::<D>().unwrap(),
+                    )
+                })
+            })
     }
 
-    /// A 를 가진 모든 엔티티를 순회한다. B 는 있으면 `Some`, 없으면 `None`.
+    /// A 를 가진 모든 엔티티를 순회한다. B 는 있으면 Some, 없으면 None.
     pub fn query_opt2<A: 'static, B: 'static>(
         &self,
     ) -> impl Iterator<Item = (Entity, &A, Option<&B>)> {
-        let ca = self.components.get(&TypeId::of::<A>());
-        let cb = self.components.get(&TypeId::of::<B>());
-        self.entities.iter().filter_map(move |&entity| {
-            let idx = entity.0 as usize;
-            let a = ca?.get(idx)?.as_ref()?.downcast_ref::<A>()?;
-            let b = cb.and_then(|v| v.get(idx)?.as_ref()?.downcast_ref::<B>());
-            Some((entity, a, b))
-        })
+        let ta = TypeId::of::<A>();
+        let tb = TypeId::of::<B>();
+        self.archetypes
+            .iter()
+            .filter(move |arch| arch.contains(ta))
+            .flat_map(move |arch| {
+                let ca = arch.columns.get(&ta).unwrap();
+                let cb = arch.columns.get(&tb);
+                arch.entities.iter().enumerate().map(move |(i, &e)| {
+                    let a = ca[i].downcast_ref::<A>().unwrap();
+                    let b = cb.map(|col| col[i].downcast_ref::<B>().unwrap());
+                    (e, a, b)
+                })
+            })
     }
 
     pub fn entities(&self) -> &[Entity] {
         &self.entities
     }
 
-    // ── 리소스 (전역 싱글턴) ────────────────────────────────────────────────
+    // ── 리소스 ────────────────────────────────────────────────────────────────
 
     pub fn insert_resource<T: 'static>(&mut self, resource: T) {
         self.resources.insert(TypeId::of::<T>(), Box::new(resource));
@@ -209,6 +300,63 @@ impl World {
         self.resources
             .get_mut(&TypeId::of::<T>())?
             .downcast_mut::<T>()
+    }
+
+    // ── 내부 헬퍼 ─────────────────────────────────────────────────────────────
+
+    fn get_or_create_archetype(&mut self, sig: Vec<TypeId>) -> ArchetypeId {
+        if let Some(&id) = self.archetype_index.get(&sig) {
+            return id;
+        }
+        let id = self.archetypes.len();
+        self.archetypes.push(Archetype::new(sig.clone()));
+        self.archetype_index.insert(sig, id);
+        id
+    }
+
+    /// entity를 target_arch_id로 이동한다. 공통 컴포넌트를 이전하며,
+    /// 새로 추가되는 컴포넌트 push는 호출자가 담당한다.
+    fn move_entity(&mut self, entity: Entity, target_arch_id: ArchetypeId) {
+        let (src_arch_id, src_row) = self.entity_location[&entity];
+        if src_arch_id == target_arch_id {
+            return;
+        }
+
+        let src_len = self.archetypes[src_arch_id].entities.len();
+        let src_type_set: Vec<TypeId> = self.archetypes[src_arch_id].type_set.clone();
+
+        let mut extracted: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
+        for &tid in &src_type_set {
+            let comp = self.archetypes[src_arch_id]
+                .columns
+                .get_mut(&tid)
+                .unwrap()
+                .swap_remove(src_row);
+            extracted.insert(tid, comp);
+        }
+
+        self.archetypes[src_arch_id].entities.swap_remove(src_row);
+
+        if src_row < src_len - 1 {
+            let swapped = self.archetypes[src_arch_id].entities[src_row];
+            self.entity_location.insert(swapped, (src_arch_id, src_row));
+        }
+
+        let dst_row = self.archetypes[target_arch_id].entities.len();
+        self.archetypes[target_arch_id].entities.push(entity);
+
+        let dst_type_set: Vec<TypeId> = self.archetypes[target_arch_id].type_set.clone();
+        for &tid in &dst_type_set {
+            if let Some(comp) = extracted.remove(&tid) {
+                self.archetypes[target_arch_id]
+                    .columns
+                    .get_mut(&tid)
+                    .unwrap()
+                    .push(comp);
+            }
+        }
+
+        self.entity_location.insert(entity, (target_arch_id, dst_row));
     }
 }
 
@@ -224,17 +372,11 @@ mod tests {
     use super::*;
 
     #[allow(dead_code)]
-    struct Position {
-        x: f32,
-        y: f32,
-    }
+    struct Position { x: f32, y: f32 }
     #[allow(dead_code)]
     struct Health(u32);
     #[allow(dead_code)]
-    struct Velocity {
-        vx: f32,
-        vy: f32,
-    }
+    struct Velocity { vx: f32, vy: f32 }
 
     #[test]
     fn spawn_and_query() {
@@ -257,7 +399,6 @@ mod tests {
         assert_eq!(*world.resource::<u32>().unwrap(), 42);
     }
 
-    /// despawn 한 엔티티는 query 결과에서 사라져야 한다.
     #[test]
     fn despawn_removes_entity_from_query() {
         let mut world = World::new();
@@ -272,21 +413,18 @@ mod tests {
 
         let positions: Vec<_> = world.query::<Position>().collect();
         assert_eq!(positions.len(), 2);
-        // e1 은 결과에 없어야 한다
         assert!(positions.iter().all(|(e, _)| *e != e1));
     }
 
-    /// 같은 엔티티를 두 번 despawn 해도 panic 하지 않아야 한다.
     #[test]
     fn despawn_is_idempotent() {
         let mut world = World::new();
         let e = world.spawn();
         world.add_component(e, Health(50));
         world.despawn(e);
-        world.despawn(e); // 두 번째 호출 — panic 없이 조용히 무시
+        world.despawn(e);
     }
 
-    /// despawn 후 spawn 하면 같은 ID 가 재사용되고, 이전 컴포넌트는 없어야 한다.
     #[test]
     fn spawn_reuses_freed_id() {
         let mut world = World::new();
@@ -296,26 +434,20 @@ mod tests {
         world.despawn(e_first);
 
         let e_second = world.spawn();
-        // 반납된 ID 가 재사용돼야 한다
         assert_eq!(e_first.0, e_second.0);
-        // 이전 컴포넌트가 남아있으면 안 된다
         assert!(world.get::<Health>(e_second).is_none());
     }
 
-    /// query2 는 A, B 를 모두 가진 엔티티만 반환해야 한다.
     #[test]
     fn query2_returns_only_entities_with_both() {
         let mut world = World::new();
 
-        // A 만 있는 엔티티
         let ea = world.spawn();
         world.add_component(ea, Position { x: 0.0, y: 0.0 });
 
-        // B 만 있는 엔티티
         let eb = world.spawn();
         world.add_component(eb, Health(10));
 
-        // A + B 를 모두 가진 엔티티
         let eab = world.spawn();
         world.add_component(eab, Position { x: 1.0, y: 1.0 });
         world.add_component(eab, Health(20));
@@ -325,7 +457,6 @@ mod tests {
         assert_eq!(results[0].0, eab);
     }
 
-    /// remove_component 는 해당 컴포넌트만 지우고 엔티티는 유지해야 한다.
     #[test]
     fn remove_component_keeps_entity_alive() {
         let mut world = World::new();
@@ -335,38 +466,32 @@ mod tests {
 
         world.remove_component::<Position>(e);
 
-        // Position 은 사라졌지만
         assert!(world.get::<Position>(e).is_none());
-        // Health 는 남아있고 엔티티도 살아있어야 한다
         assert_eq!(world.get::<Health>(e).unwrap().0, 50);
         assert!(world.entities().contains(&e));
     }
 
-    /// remove_component 는 없는 컴포넌트를 지워도 panic 하지 않아야 한다.
     #[test]
     fn remove_component_nonexistent_is_noop() {
         let mut world = World::new();
         let e = world.spawn();
-        world.remove_component::<Position>(e); // Position 없음 — panic 없어야 함
+        world.remove_component::<Position>(e);
         world.add_component(e, Health(10));
-        world.remove_component::<Velocity>(e); // Velocity 없음 — panic 없어야 함
+        world.remove_component::<Velocity>(e);
         assert_eq!(world.get::<Health>(e).unwrap().0, 10);
     }
 
-    /// query4 는 A, B, C, D 를 모두 가진 엔티티만 반환해야 한다.
     #[test]
     fn query4_returns_only_entities_with_all_four() {
         struct Tag;
 
         let mut world = World::new();
 
-        // A + B + C 만 있는 엔티티
         let eabc = world.spawn();
         world.add_component(eabc, Position { x: 0.0, y: 0.0 });
         world.add_component(eabc, Health(1));
         world.add_component(eabc, Velocity { vx: 0.0, vy: 0.0 });
 
-        // A + B + C + D 를 모두 가진 엔티티
         let eabcd = world.spawn();
         world.add_component(eabcd, Position { x: 1.0, y: 1.0 });
         world.add_component(eabcd, Health(2));
@@ -378,21 +503,17 @@ mod tests {
         assert_eq!(results[0].0, eabcd);
     }
 
-    /// query_opt2: A 를 가진 엔티티를 모두 반환하고, B 는 있으면 Some, 없으면 None.
     #[test]
     fn query_opt2_returns_a_with_optional_b() {
         let mut world = World::new();
 
-        // A 만 있는 엔티티
         let ea = world.spawn();
         world.add_component(ea, Position { x: 1.0, y: 0.0 });
 
-        // A + B 를 모두 가진 엔티티
         let eab = world.spawn();
         world.add_component(eab, Position { x: 2.0, y: 0.0 });
         world.add_component(eab, Health(50));
 
-        // B 만 있는 엔티티 (결과에서 제외되어야 한다)
         let eb = world.spawn();
         world.add_component(eb, Health(99));
 
@@ -400,23 +521,20 @@ mod tests {
         assert_eq!(results.len(), 2);
 
         let ea_result = results.iter().find(|(e, _, _)| *e == ea).unwrap();
-        assert!(ea_result.2.is_none()); // B 없음
+        assert!(ea_result.2.is_none());
 
         let eab_result = results.iter().find(|(e, _, _)| *e == eab).unwrap();
-        assert_eq!(eab_result.2.unwrap().0, 50); // B 있음
+        assert_eq!(eab_result.2.unwrap().0, 50);
     }
 
-    /// query3 는 A, B, C 를 모두 가진 엔티티만 반환해야 한다.
     #[test]
     fn query3_returns_only_entities_with_all_three() {
         let mut world = World::new();
 
-        // A + B 만 있는 엔티티
         let eab = world.spawn();
         world.add_component(eab, Position { x: 0.0, y: 0.0 });
         world.add_component(eab, Health(5));
 
-        // A + B + C 를 모두 가진 엔티티
         let eabc = world.spawn();
         world.add_component(eabc, Position { x: 1.0, y: 1.0 });
         world.add_component(eabc, Health(10));
@@ -425,5 +543,34 @@ mod tests {
         let results: Vec<_> = world.query3::<Position, Health, Velocity>().collect();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, eabc);
+    }
+
+    #[test]
+    fn archetype_reuse_across_entities() {
+        let mut world = World::new();
+
+        let e1 = world.spawn();
+        world.add_component(e1, Position { x: 1.0, y: 0.0 });
+        world.add_component(e1, Health(10));
+
+        let e2 = world.spawn();
+        world.add_component(e2, Position { x: 2.0, y: 0.0 });
+        world.add_component(e2, Health(20));
+
+        // 같은 컴포넌트 집합 → 같은 Archetype에 배치되어야 한다
+        let (arch1, _) = world.entity_location[&e1];
+        let (arch2, _) = world.entity_location[&e2];
+        assert_eq!(arch1, arch2);
+        assert_eq!(world.query2::<Position, Health>().count(), 2);
+    }
+
+    #[test]
+    fn add_component_replaces_existing() {
+        let mut world = World::new();
+        let e = world.spawn();
+        world.add_component(e, Health(10));
+        world.add_component(e, Health(99)); // replace
+        assert_eq!(world.get::<Health>(e).unwrap().0, 99);
+        assert_eq!(world.query::<Health>().count(), 1);
     }
 }

@@ -14,7 +14,7 @@ use crate::{
     camera::Camera,
     ecs::{Events, System, World},
     input::InputState,
-    renderer::{DrawRect, GpuContext, SpriteRenderer, TextQueue, TextRenderer, UiQueue},
+    renderer::{DrawRect, GpuContext, PostProcessConfig, PostProcessRenderer, SpriteRenderer, TextQueue, TextRenderer, UiQueue},
     resources::{DebugDrawQueue, FontData, GameState, PendingResize, ShouldQuit, ViewportSize, WindowConfig},
     scene::{Scene, SceneChange, SceneCmd},
 };
@@ -41,6 +41,8 @@ pub struct App {
     sprite_renderer: Option<SpriteRenderer>,
     /// 스프라이트 pass 직후 텍스트를 덮어쓴다. GPU 초기화 이후 Some으로 채워진다.
     text_renderer: Option<TextRenderer>,
+    /// PostProcessConfig 리소스가 enabled=true일 때 활성화된다.
+    post_renderer: Option<PostProcessRenderer>,
     last_frame: Option<Instant>,
     /// GPU 초기화 전에 등록된 텍스처 경로를 보관한다. resumed()에서 실제로 로드한다.
     pending_textures: Vec<String>,
@@ -72,6 +74,7 @@ impl App {
             gpu: None,
             sprite_renderer: None,
             text_renderer: None,
+            post_renderer: None,
             last_frame: None,
             pending_textures: Vec::new(),
             event_flushers: Vec::new(),
@@ -215,8 +218,27 @@ impl App {
             None => return Ok(()),
         };
 
+        // PostProcessConfig 리소스 확인 (enabled=true일 때만 중간 텍스처 사용)
+        let pp_config: Option<PostProcessConfig> =
+            self.world.resource::<PostProcessConfig>().copied();
+        let use_post = pp_config.map(|c| c.enabled).unwrap_or(false);
+
+        // 포스트프로세스 렌더러 초기화 / 리사이즈
+        if use_post {
+            let (w, h, fmt) = (gpu.config.width, gpu.config.height, gpu.config.format);
+            match &mut self.post_renderer {
+                None => {
+                    self.post_renderer = Some(PostProcessRenderer::new(&gpu.device, w, h, fmt));
+                }
+                Some(pr) if pr.width != w || pr.height != h => {
+                    pr.resize(&gpu.device, w, h);
+                }
+                _ => {}
+            }
+        }
+
         let frame = gpu.surface.get_current_texture()?;
-        let view = frame
+        let final_view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         let mut enc = gpu
@@ -225,7 +247,15 @@ impl App {
                 label: Some("frame encoder"),
             });
 
-        // 1단계: 배경 Clear (색상은 WindowConfig 리소스에서 읽음)
+        // 렌더 타겟: 포스트프로세싱 사용 시 중간 텍스처, 아니면 스왑체인 직접
+        // post_renderer와 gpu/sprite_renderer/text_renderer는 서로 다른 필드이므로 동시 빌림 허용.
+        let render_view: &wgpu::TextureView = if use_post {
+            &self.post_renderer.as_ref().unwrap().target_view
+        } else {
+            &final_view
+        };
+
+        // 1단계: 배경 Clear
         let [cr, cg, cb, ca] = self
             .world
             .resource::<WindowConfig>()
@@ -235,14 +265,11 @@ impl App {
             let _pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("clear pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: render_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: cr,
-                            g: cg,
-                            b: cb,
-                            a: ca,
+                            r: cr, g: cg, b: cb, a: ca,
                         }),
                         store: wgpu::StoreOp::Store,
                     },
@@ -258,7 +285,7 @@ impl App {
             sr.render(
                 &gpu.device,
                 &gpu.queue,
-                &view,
+                render_view,
                 &mut enc,
                 &self.world,
                 gpu.config.width,
@@ -266,8 +293,7 @@ impl App {
             );
         }
 
-        // 2.5단계: UI 사각형 그리기 (스프라이트 위, 텍스트 아래)
-        // DebugDrawQueue → UiQueue 로 변환 (레이어 경계: 순수 데이터 → 렌더러 타입)
+        // 2.5단계: UI 사각형 그리기 (DebugDrawQueue → UiQueue 변환)
         let debug_rects: Vec<DrawRect> = self
             .world
             .resource_mut::<DebugDrawQueue>()
@@ -276,10 +302,8 @@ impl App {
                     .into_iter()
                     .map(|r| {
                         DrawRect::new(
-                            r.min.x,
-                            r.min.y,
-                            r.max.x - r.min.x,
-                            r.max.y - r.min.y,
+                            r.min.x, r.min.y,
+                            r.max.x - r.min.x, r.max.y - r.min.y,
                             r.color,
                         )
                         .with_z(r.z)
@@ -291,7 +315,6 @@ impl App {
             q.items.extend(debug_rects);
         }
 
-        // UiQueue items를 먼저 drain해 로컬 Vec에 보관 → sprite_renderer 가변 빌림과 충돌 방지
         let ui_rects: Vec<DrawRect> = self
             .world
             .resource_mut::<UiQueue>()
@@ -302,7 +325,7 @@ impl App {
                 sr.render_ui_rects_from_slice(
                     &gpu.device,
                     &gpu.queue,
-                    &view,
+                    render_view,
                     &mut enc,
                     &ui_rects,
                     gpu.config.width,
@@ -311,12 +334,18 @@ impl App {
             }
         }
 
-        // 3단계: 텍스트 그리기 (스프라이트 위에 LoadOp::Load 로 합성)
-        // gpu(self.gpu 필드 빌림)와 self.text_renderer는 서로 다른 필드이므로
-        // NLL(Non-Lexical Lifetimes) 하에서 동시 빌림이 허용된다.
+        // 3단계: 텍스트 그리기
         let (w, h) = (gpu.config.width, gpu.config.height);
         if let Some(tr) = &mut self.text_renderer {
-            tr.render(&gpu.device, &gpu.queue, &mut enc, &view, &mut self.world, w, h);
+            tr.render(&gpu.device, &gpu.queue, &mut enc, render_view, &mut self.world, w, h);
+        }
+
+        // 4단계: 포스트프로세스 패스 (중간 텍스처 → 스왑체인)
+        if use_post {
+            if let (Some(pr), Some(cfg)) = (&self.post_renderer, pp_config.as_ref()) {
+                pr.update_uniforms(&gpu.queue, cfg);
+                pr.run_pass(&mut enc, &final_view);
+            }
         }
 
         gpu.queue.submit(std::iter::once(enc.finish()));

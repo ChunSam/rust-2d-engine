@@ -1,6 +1,6 @@
 # CLAUDE.md — rust-2d-engine 에이전트 참조 문서
 
-> 버전 v0.8.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
+> 버전 v0.11.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
 > 상세 API: `REFERENCE.md` | 개발 이력/아키텍처 결정: `HANDOFF.md`
 
 ---
@@ -28,8 +28,9 @@
 | Timer, Tween, Easing | `src/timer.rs`, `src/tween.rs` |
 | ParticleEmitter, ParticleSystem | `src/particle.rs` |
 | Tilemap, TilemapAtlas, TilemapSystem | `src/tilemap.rs` |
-| AudioManager | `src/audio.rs` |
+| AudioManager (재생, 위치 오디오, 버스 믹서, 페이드) | `src/audio.rs` |
 | save / load / load_or_default / exists / delete / save_path / SaveError | `src/save.rs` |
+| PostProcessConfig, PostProcessRenderer | `src/renderer/post_process.rs` |
 | wgpu 렌더링 파이프라인 (직접 수정 드묾) | `src/renderer/` |
 
 ---

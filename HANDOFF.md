@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-23  
-엔진 버전: v0.8.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24  
+엔진 버전: v0.11.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -28,6 +28,9 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 6 | UI 시스템 강화 — TextInput, ScrollView, Panel+LayoutSystem | `e98b893` |
 | Phase 7 | CollisionEvent — Rapier NarrowPhase 폴링 → `Events<CollisionEvent>` 브리징 | `b4a931d` |
 | Phase 8 | Save/Load 완성 — `load_or_default`, `exists`, `delete`, lib.rs re-export | `01f983b` |
+| Phase 9 | ECS Archetype 스토리지 — TypeId HashMap+Vec → Archetype 밀집 컬럼 스토리지 | (이번 세션) |
+| Phase 10 | 포스트프로세싱 — 비네팅, 색수차, 근사 블룸 (PostProcessConfig 리소스) | (이번 세션) |
+| Phase 11 | 오디오 강화 — 위치 오디오, 버스 믹서, 페이드인/아웃 | (이번 세션) |
 
 ---
 
@@ -72,9 +75,100 @@ src/
 │   ├── scroll_view.rs ScrollView (내부 Vec 기반 스크롤 목록)    ← Phase 6
 │   ├── panel.rs      Panel, LayoutDir, LayoutSystem             ← Phase 6
 │   └── system.rs     UiSystem, UiEvent (5종)
-├── renderer/         wgpu 렌더링 (직접 수정 빈도 낮음)
+├── renderer/
+│   ├── context.rs    GpuContext (wgpu Surface/Device/Queue 래퍼)
+│   ├── post_process.rs PostProcessRenderer, PostProcessConfig     ← Phase 10
+│   ├── sprite.rs     SpriteRenderer (인스턴스드 렌더링)
+│   ├── text.rs       TextRenderer, TextQueue, DrawText
+│   ├── texture.rs    Texture
+│   ├── ui.rs         UiQueue, DrawRect
+│   └── shaders/
+│       ├── sprite.wgsl
+│       └── post_process.wgsl                                      ← Phase 10
 └── save.rs           RON 세이브/불러오기 (save/load/load_or_default/exists/delete)
 ```
+
+---
+
+## 이번 세션에서 한 일 (Phase 9~11)
+
+### Phase 9 — ECS Archetype 스토리지
+
+**배경**: 기존 ECS는 `HashMap<TypeId, Vec<Option<Box<dyn Any>>>>` 구조로, 엔티티 수가 늘면 쿼리 루프마다 `None` 체크가 발생했다.
+
+**변경**: `src/ecs/world.rs` 전면 재작성 — Archetype 기반 밀집 컬럼 스토리지.
+- `Archetype` 내부 구조: `type_set: Vec<TypeId>` (정렬) + `entities: Vec<Entity>` + `columns: HashMap<TypeId, Vec<Box<dyn Any>>>`
+- 같은 컴포넌트 집합을 가진 엔티티들이 동일 Archetype에 모이므로 쿼리 시 `None` 체크 불필요
+- `add_component` / `remove_component` 시 `move_entity()` 헬퍼로 Archetype 간 이동 (swap_remove + 위치 맵 업데이트)
+- 공개 API 완전 호환 유지: `spawn`, `despawn`, `get`, `get_mut`, `query1~4`, `query_opt2`, `entities()`, 리소스 메서드
+- 신규 테스트 2개 추가: `archetype_reuse_across_entities`, `add_component_replaces_existing` (총 14개)
+
+**아키텍처 결정**: `entities: Vec<Entity>` 보조 필드를 유지해 `entities() -> &[Entity]` 시그니처를 변경 없이 보존.
+
+### Phase 10 — 포스트프로세싱
+
+**추가된 파일**
+- `src/renderer/post_process.rs`: `PostProcessConfig` + `PostProcessRenderer`
+- `src/renderer/shaders/post_process.wgsl`: 비네팅·색수차·근사 블룸 WGSL 셰이더
+
+**구조**
+1. `PostProcessConfig` 리소스를 World에 삽입하고 `enabled: true` 설정
+2. `App::render()` 가 중간 텍스처(`target_view`)에 씬 전체를 렌더링
+3. 포스트프로세스 패스: 중간 텍스처 → 스왑체인 (풀스크린 삼각형, 버텍스 버퍼 불필요)
+
+**효과 설명**
+- **비네팅**: 화면 가장자리 어두움 (`vignette_strength`, `vignette_radius`)
+- **색수차**: RGB 채널을 방사형으로 다른 UV에서 샘플 (`chroma_offset`)
+- **근사 블룸**: 4-tap threshold 샘플링으로 밝은 영역 번짐 (`bloom_threshold`, `bloom_intensity`)
+
+**사용 패턴**
+```rust
+app.world.insert_resource(PostProcessConfig {
+    enabled: true,
+    vignette_strength: 0.5,
+    chroma_offset: 0.003,
+    bloom_intensity: 0.4,
+    ..Default::default()
+});
+```
+
+**주의**: 리소스 없거나 `enabled: false`면 중간 텍스처 패스 완전 건너뜀 (제로 오버헤드).
+
+### Phase 11 — 오디오 강화
+
+**변경 파일**: `src/audio.rs` (기존 API 완전 호환 유지)
+
+**추가된 기능**
+
+#### 위치 오디오
+```rust
+// 1회성 위치 재생
+am.play_at("sfx", "boom.wav", false, source_pos, listener_pos, 500.0);
+
+// 움직이는 소리 발생원 — 매 프레임 호출
+am.update_position("sfx", enemy_pos, player_pos, 500.0);
+```
+- `(볼륨, 팬)` = 거리 선형 감쇠 + X 방향 스테레오 팬 자동 계산
+
+#### 오디오 버스 믹서
+```rust
+am.assign_bus("bgm",      "music");
+am.assign_bus("sfx_jump", "sfx");
+am.set_bus_volume("music", 0.5);   // 음악 전체 절반으로
+am.set_bus_volume("sfx",   0.8);   // 효과음 전체 80%
+```
+
+#### 페이드
+```rust
+am.play_fade_in("bgm", "music.ogg", true, 2.0);  // 2초 페이드인
+am.fade_out("bgm", 3.0);                          // 3초 페이드아웃 후 정지
+am.fade_volume("sfx", 0.3, 1.5);                  // 1.5초 동안 0.3으로
+
+// System::run() 내에서 매 프레임 호출 필수
+world.resource_mut::<AudioManager>().map(|am| am.update(dt));
+```
+
+**테스트**: 위치 오디오 파라미터 계산 4개 (`spatial_params_*`)
 
 ---
 
