@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
 작성일: 2026-05-23  
-엔진 버전: v0.7.0 (태그: v0.3.0, main 브랜치 기준)  
+엔진 버전: v0.8.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -25,8 +25,9 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 3 | `PhysicsWorld` 캡슐화 (접근자 메서드, pub(crate) 내부화) | `fa9013c` |
 | Phase 4 | `query_opt2`, `Events<E>` 이벤트 시스템, UI Widget System | `767a1d2` |
 | Phase 5 | 씬 시스템 (Scene/SceneCmd/SceneChange), Timer, Tween (Easing 6종) | `2147291` |
-| Phase 6 | UI 시스템 강화 — TextInput, ScrollView, Panel+LayoutSystem | 미커밋 |
-| Phase 7 | CollisionEvent — Rapier NarrowPhase 폴링 → `Events<CollisionEvent>` 브리징 | 미커밋 |
+| Phase 6 | UI 시스템 강화 — TextInput, ScrollView, Panel+LayoutSystem | `e98b893` |
+| Phase 7 | CollisionEvent — Rapier NarrowPhase 폴링 → `Events<CollisionEvent>` 브리징 | `b4a931d` |
+| Phase 8 | Save/Load 완성 — `load_or_default`, `exists`, `delete`, lib.rs re-export | `01f983b` |
 
 ---
 
@@ -205,7 +206,7 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 
 ## 미해결 / 다음 Phase 후보
 
-Phase 8 이후 계획은 미정. 사용자와 협의 필요. 아래는 가능한 방향:
+Phase 9 이후 계획은 미정. 사용자와 협의 필요. 아래는 가능한 방향:
 
 - **오디오 강화**: 스트리밍 재생, 3D 위치 오디오, 오디오 버스 믹서
 - **ECS 성능**: Archetype 기반 스토리지로 교체 (현재는 TypeId HashMap + Vec)
