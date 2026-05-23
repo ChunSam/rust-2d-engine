@@ -12,10 +12,10 @@ use winit::{
 
 use crate::{
     camera::Camera,
-    components::{FontData, GameState, PendingResize, ShouldQuit, ViewportSize, WindowConfig},
     ecs::{System, World},
     input::InputState,
     renderer::{DrawRect, GpuContext, SpriteRenderer, TextQueue, TextRenderer, UiQueue},
+    resources::{DebugDrawQueue, FontData, GameState, PendingResize, ShouldQuit, ViewportSize, WindowConfig},
 };
 
 /// 엔진 진입점.
@@ -55,6 +55,7 @@ impl App {
         world.insert_resource(Camera::default());
         world.insert_resource(TextQueue::default());
         world.insert_resource(UiQueue::default());
+        world.insert_resource(DebugDrawQueue::default());
         Self {
             world,
             systems: Vec::new(),
@@ -95,6 +96,7 @@ impl App {
         self.world.insert_resource(Camera::default());
         self.world.insert_resource(TextQueue::default());
         self.world.insert_resource(UiQueue::default());
+        self.world.insert_resource(DebugDrawQueue::default());
     }
 
     /// 이벤트 루프를 시작한다. 창이 닫힐 때까지 블로킹된다.
@@ -177,6 +179,30 @@ impl App {
         }
 
         // 2.5단계: UI 사각형 그리기 (스프라이트 위, 텍스트 아래)
+        // DebugDrawQueue → UiQueue 로 변환 (레이어 경계: 순수 데이터 → 렌더러 타입)
+        let debug_rects: Vec<DrawRect> = self
+            .world
+            .resource_mut::<DebugDrawQueue>()
+            .map(|q| {
+                std::mem::take(&mut q.items)
+                    .into_iter()
+                    .map(|r| {
+                        DrawRect::new(
+                            r.min.x,
+                            r.min.y,
+                            r.max.x - r.min.x,
+                            r.max.y - r.min.y,
+                            r.color,
+                        )
+                        .with_z(r.z)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(q) = self.world.resource_mut::<UiQueue>() {
+            q.items.extend(debug_rects);
+        }
+
         // UiQueue items를 먼저 drain해 로컬 Vec에 보관 → sprite_renderer 가변 빌림과 충돌 방지
         let ui_rects: Vec<DrawRect> = self
             .world
@@ -198,20 +224,11 @@ impl App {
         }
 
         // 3단계: 텍스트 그리기 (스프라이트 위에 LoadOp::Load 로 합성)
-        // self.gpu 와 self.text_renderer 는 서로 다른 필드이므로 동시 빌림 가능하다.
-        // 단, `gpu` 변수가 `self.gpu.as_mut()` 에서 온 &mut 참조이므로,
-        // 동일 스코프에서 self.text_renderer 를 빌리면 컴파일러가 경계한다.
-        // → gpu 에서 필요한 값을 미리 복사/참조로 뽑아두고 text_renderer 를 열면 된다.
+        // gpu(self.gpu 필드 빌림)와 self.text_renderer는 서로 다른 필드이므로
+        // NLL(Non-Lexical Lifetimes) 하에서 동시 빌림이 허용된다.
         let (w, h) = (gpu.config.width, gpu.config.height);
-        let device = &gpu.device as *const wgpu::Device; // 포인터만 저장 (Drop 없음)
-        let queue = &gpu.queue as *const wgpu::Queue;
         if let Some(tr) = &mut self.text_renderer {
-            // SAFETY: `device`/`queue` 포인터는 `gpu`(self.gpu) 가 살아있는 동안 유효하다.
-            // wgpu Device/Queue 는 내부적으로 Arc<T> 로 관리되어 여러 참조가 안전하다.
-            // 이 스코프에서 gpu 의 device/queue 를 mutation 하지 않는다.
-            let device = unsafe { &*device };
-            let queue = unsafe { &*queue };
-            tr.render(device, queue, &mut enc, &view, &mut self.world, w, h);
+            tr.render(&gpu.device, &gpu.queue, &mut enc, &view, &mut self.world, w, h);
         }
 
         gpu.queue.submit(std::iter::once(enc.finish()));

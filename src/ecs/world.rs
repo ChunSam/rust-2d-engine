@@ -159,6 +159,24 @@ impl World {
         })
     }
 
+    /// 컴포넌트 A, B, C, D 를 모두 가진 엔티티를 순회한다.
+    pub fn query4<A: 'static, B: 'static, C: 'static, D: 'static>(
+        &self,
+    ) -> impl Iterator<Item = (Entity, &A, &B, &C, &D)> {
+        let ca = self.components.get(&TypeId::of::<A>());
+        let cb = self.components.get(&TypeId::of::<B>());
+        let cc = self.components.get(&TypeId::of::<C>());
+        let cd = self.components.get(&TypeId::of::<D>());
+        self.entities.iter().filter_map(move |&entity| {
+            let idx = entity.0 as usize;
+            let a = ca?.get(idx)?.as_ref()?.downcast_ref::<A>()?;
+            let b = cb?.get(idx)?.as_ref()?.downcast_ref::<B>()?;
+            let c = cc?.get(idx)?.as_ref()?.downcast_ref::<C>()?;
+            let d = cd?.get(idx)?.as_ref()?.downcast_ref::<D>()?;
+            Some((entity, a, b, c, d))
+        })
+    }
+
     pub fn entities(&self) -> &[Entity] {
         &self.entities
     }
@@ -319,6 +337,31 @@ mod tests {
         world.add_component(e, Health(10));
         world.remove_component::<Velocity>(e); // Velocity 없음 — panic 없어야 함
         assert_eq!(world.get::<Health>(e).unwrap().0, 10);
+    }
+
+    /// query4 는 A, B, C, D 를 모두 가진 엔티티만 반환해야 한다.
+    #[test]
+    fn query4_returns_only_entities_with_all_four() {
+        struct Tag;
+
+        let mut world = World::new();
+
+        // A + B + C 만 있는 엔티티
+        let eabc = world.spawn();
+        world.add_component(eabc, Position { x: 0.0, y: 0.0 });
+        world.add_component(eabc, Health(1));
+        world.add_component(eabc, Velocity { vx: 0.0, vy: 0.0 });
+
+        // A + B + C + D 를 모두 가진 엔티티
+        let eabcd = world.spawn();
+        world.add_component(eabcd, Position { x: 1.0, y: 1.0 });
+        world.add_component(eabcd, Health(2));
+        world.add_component(eabcd, Velocity { vx: 1.0, vy: 0.0 });
+        world.add_component(eabcd, Tag);
+
+        let results: Vec<_> = world.query4::<Position, Health, Velocity, Tag>().collect();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, eabcd);
     }
 
     /// query3 는 A, B, C 를 모두 가진 엔티티만 반환해야 한다.

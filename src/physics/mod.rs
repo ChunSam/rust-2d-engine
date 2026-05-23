@@ -1,3 +1,7 @@
+pub mod body;
 pub mod system;
+pub mod world;
 
-pub use system::{PhysicsBody, PhysicsSystem, PhysicsWorld};
+pub use body::PhysicsBody;
+pub use system::PhysicsSystem;
+pub use world::PhysicsWorld;

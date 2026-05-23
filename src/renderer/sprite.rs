@@ -5,8 +5,9 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Quat, Vec3};
 use wgpu::util::DeviceExt;
 
+use crate::animation::player::UvRect;
 use crate::camera::Camera;
-use crate::components::{AnimationPlayer, Sprite, Transform, UvRect};
+use crate::components::{Sprite, Transform};
 use crate::ecs::World;
 use crate::renderer::texture::Texture;
 use crate::renderer::ui::DrawRect;
@@ -322,8 +323,8 @@ impl SpriteRenderer {
         for (entity, sprite) in world.query::<Sprite>() {
             if let Some(transform) = world.get::<Transform>(entity) {
                 let uv = world
-                    .get::<AnimationPlayer>(entity)
-                    .map(|p| p.current_uv())
+                    .get::<UvRect>(entity)
+                    .copied()
                     .unwrap_or(UvRect::FULL);
                 sprites.push((
                     transform.z,
