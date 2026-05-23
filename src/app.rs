@@ -12,7 +12,7 @@ use winit::{
 
 use crate::{
     camera::Camera,
-    ecs::{System, World},
+    ecs::{Events, System, World},
     input::InputState,
     renderer::{DrawRect, GpuContext, SpriteRenderer, TextQueue, TextRenderer, UiQueue},
     resources::{DebugDrawQueue, FontData, GameState, PendingResize, ShouldQuit, ViewportSize, WindowConfig},
@@ -41,6 +41,10 @@ pub struct App {
     last_frame: Option<Instant>,
     /// GPU 초기화 전에 등록된 텍스처 경로를 보관한다. resumed()에서 실제로 로드한다.
     pending_textures: Vec<String>,
+    /// 매 프레임 종료 시 이벤트 큐를 비우는 클로저 목록.
+    event_flushers: Vec<Box<dyn Fn(&mut World)>>,
+    /// reload_scene 시 이벤트 리소스를 재삽입하는 클로저 목록.
+    event_initializers: Vec<Box<dyn Fn(&mut World)>>,
 }
 
 impl App {
@@ -65,7 +69,26 @@ impl App {
             text_renderer: None,
             last_frame: None,
             pending_textures: Vec::new(),
+            event_flushers: Vec::new(),
+            event_initializers: Vec::new(),
         }
+    }
+
+    /// 이벤트 타입 `E` 를 등록한다.
+    ///
+    /// - `Events::<E>` 리소스를 World에 삽입한다.
+    /// - 매 프레임 종료 시 자동으로 `flush()` 가 호출된다.
+    /// - `reload_scene()` 호출 시에도 이벤트 리소스가 재삽입된다.
+    pub fn register_event<E: 'static>(&mut self) {
+        self.world.insert_resource(Events::<E>::default());
+        self.event_flushers.push(Box::new(|world: &mut World| {
+            if let Some(events) = world.resource_mut::<Events<E>>() {
+                events.flush();
+            }
+        }));
+        self.event_initializers.push(Box::new(|world: &mut World| {
+            world.insert_resource(Events::<E>::default());
+        }));
     }
 
     /// 시스템을 등록한다. 매 프레임 등록 순서대로 실행된다.
@@ -97,6 +120,12 @@ impl App {
         self.world.insert_resource(TextQueue::default());
         self.world.insert_resource(UiQueue::default());
         self.world.insert_resource(DebugDrawQueue::default());
+        // 등록된 이벤트 리소스 재삽입
+        let inits = std::mem::take(&mut self.event_initializers);
+        for init in &inits {
+            init(&mut self.world);
+        }
+        self.event_initializers = inits;
     }
 
     /// 이벤트 루프를 시작한다. 창이 닫힐 때까지 블로킹된다.
@@ -116,6 +145,13 @@ impl App {
         for system in &mut self.systems {
             system.run(&mut self.world, dt);
         }
+        // 모든 시스템 실행 후 이벤트 큐를 비운다.
+        // std::mem::take 으로 꺼내야 &mut self.world 와 충돌하지 않는다.
+        let flushers = std::mem::take(&mut self.event_flushers);
+        for flush in &flushers {
+            flush(&mut self.world);
+        }
+        self.event_flushers = flushers;
         if let Some(input) = self.world.resource_mut::<InputState>() {
             input.flush();
         }

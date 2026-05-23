@@ -177,6 +177,20 @@ impl World {
         })
     }
 
+    /// A 를 가진 모든 엔티티를 순회한다. B 는 있으면 `Some`, 없으면 `None`.
+    pub fn query_opt2<A: 'static, B: 'static>(
+        &self,
+    ) -> impl Iterator<Item = (Entity, &A, Option<&B>)> {
+        let ca = self.components.get(&TypeId::of::<A>());
+        let cb = self.components.get(&TypeId::of::<B>());
+        self.entities.iter().filter_map(move |&entity| {
+            let idx = entity.0 as usize;
+            let a = ca?.get(idx)?.as_ref()?.downcast_ref::<A>()?;
+            let b = cb.and_then(|v| v.get(idx)?.as_ref()?.downcast_ref::<B>());
+            Some((entity, a, b))
+        })
+    }
+
     pub fn entities(&self) -> &[Entity] {
         &self.entities
     }
@@ -362,6 +376,34 @@ mod tests {
         let results: Vec<_> = world.query4::<Position, Health, Velocity, Tag>().collect();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, eabcd);
+    }
+
+    /// query_opt2: A 를 가진 엔티티를 모두 반환하고, B 는 있으면 Some, 없으면 None.
+    #[test]
+    fn query_opt2_returns_a_with_optional_b() {
+        let mut world = World::new();
+
+        // A 만 있는 엔티티
+        let ea = world.spawn();
+        world.add_component(ea, Position { x: 1.0, y: 0.0 });
+
+        // A + B 를 모두 가진 엔티티
+        let eab = world.spawn();
+        world.add_component(eab, Position { x: 2.0, y: 0.0 });
+        world.add_component(eab, Health(50));
+
+        // B 만 있는 엔티티 (결과에서 제외되어야 한다)
+        let eb = world.spawn();
+        world.add_component(eb, Health(99));
+
+        let results: Vec<_> = world.query_opt2::<Position, Health>().collect();
+        assert_eq!(results.len(), 2);
+
+        let ea_result = results.iter().find(|(e, _, _)| *e == ea).unwrap();
+        assert!(ea_result.2.is_none()); // B 없음
+
+        let eab_result = results.iter().find(|(e, _, _)| *e == eab).unwrap();
+        assert_eq!(eab_result.2.unwrap().0, 50); // B 있음
     }
 
     /// query3 는 A, B, C 를 모두 가진 엔티티만 반환해야 한다.

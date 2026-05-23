@@ -12,6 +12,7 @@ pub mod renderer;
 pub mod resources;
 pub mod save;
 pub mod tilemap;
+pub mod ui;
 
 // ── 편의 재수출 ────────────────────────────────────────────────────────────────
 
@@ -23,10 +24,11 @@ pub use collision::{
     Collider, CollisionDebugSystem, CollisionGridSystem, CollisionLayer, DebugConfig, SpatialGrid,
 };
 pub use components::{Sprite, Transform};
-pub use ecs::{Entity, System, World};
+pub use ecs::{Entity, Events, System, World};
 pub use input::{InputMap, InputState};
 pub use particle::{Particle, ParticleEmitter, ParticleSystem};
 pub use physics::{PhysicsBody, PhysicsSystem, PhysicsWorld};
 pub use renderer::{DrawRect, DrawText, TextQueue, TextRenderer, UiQueue};
 pub use resources::{DebugDrawQueue, DebugRect, FontData, GameState, PendingResize, ShouldQuit, ViewportSize, WindowConfig};
 pub use tilemap::{Tilemap, TilemapAtlas, TilemapSystem};
+pub use ui::{Anchor, Button, ButtonState, Label, UiEvent, UiNode, UiSystem};
