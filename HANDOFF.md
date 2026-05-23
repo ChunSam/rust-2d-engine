@@ -34,7 +34,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 12 | Transform 계층 — Parent/Children/GlobalTransform, HierarchySystem, attach/detach | `3862f8d` |
 | Phase 13 | 물리 레이캐스트 + 캐릭터 컨트롤러 — RaycastHit, add_kinematic_*, move_character | `eee451d` |
 | Phase 14 | 애니메이션 상태 머신 — AnimationStateMachine, StateMachineSystem, TransitionCond, AnimParam | `93eb65f` |
-| Phase 15 | 게임패드(gilrs) + UI Slider/CheckBox — GamepadState, Slider, CheckBox, UiEvent 확장 | TBD |
+| Phase 15 | 게임패드(gilrs) + UI Slider/CheckBox — GamepadState, Slider, CheckBox, UiEvent 확장 | `30d1b9e` |
 
 ---
 
