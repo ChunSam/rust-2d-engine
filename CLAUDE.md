@@ -1,6 +1,6 @@
 # CLAUDE.md — rust-2d-engine 에이전트 참조 문서
 
-> 버전 v0.14.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
+> 버전 v0.15.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
 > 상세 API: `REFERENCE.md` | 개발 이력/아키텍처 결정: `HANDOFF.md`
 
 ---
@@ -21,6 +21,7 @@
 | WindowConfig, GameState, ShouldQuit, DebugDrawQueue | `src/resources.rs` |
 | Camera (좌표 변환, zoom) | `src/camera.rs` |
 | InputState, InputMap | `src/input/` |
+| GamepadState, GamepadButton, GamepadAxis | `src/input/gamepad.rs` |
 | PhysicsWorld, PhysicsBody, PhysicsSystem, CollisionEvent | `src/physics/` |
 | CharacterController, RaycastHit, cast_ray, cast_ray_with_normal, move_character | `src/physics/character.rs`, `src/physics/world.rs` |
 | add_kinematic_box, add_kinematic_circle | `src/physics/world.rs` |
@@ -28,6 +29,7 @@
 | AnimationPlayer, AnimationClip, AnimationSystem | `src/animation/player.rs`, `src/animation/system.rs` |
 | AnimationStateMachine, StateMachineSystem, TransitionCond, AnimParam | `src/animation/state_machine.rs` |
 | UI (UiNode, Button, Label, TextInput, ScrollView, Panel, LayoutSystem, UiEvent) | `src/ui/` |
+| Slider (수평 슬라이더), CheckBox (토글 체크박스) | `src/ui/slider.rs`, `src/ui/checkbox.rs` |
 | Timer, Tween, Easing | `src/timer.rs`, `src/tween.rs` |
 | ParticleEmitter, ParticleSystem | `src/particle.rs` |
 | Tilemap, TilemapAtlas, TilemapSystem | `src/tilemap.rs` |

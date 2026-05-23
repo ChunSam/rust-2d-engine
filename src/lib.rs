@@ -34,7 +34,7 @@ pub use collision::{
 pub use components::{Sprite, Transform};
 pub use hierarchy::{attach, detach, Children, GlobalTransform, HierarchySystem, Parent};
 pub use ecs::{Entity, Events, System, World};
-pub use input::{InputMap, InputState};
+pub use input::{GamepadAxis, GamepadButton, GamepadState, InputMap, InputState};
 pub use particle::{Particle, ParticleEmitter, ParticleSystem};
 pub use physics::{
     CharacterController, CollisionEvent, PhysicsBody, PhysicsSystem, PhysicsWorld, RaycastHit,
@@ -46,6 +46,6 @@ pub use tilemap::{Tilemap, TilemapAtlas, TilemapSystem};
 pub use timer::Timer;
 pub use tween::{Easing, Tween};
 pub use ui::{
-    Anchor, Button, ButtonState, Label, LayoutDir, LayoutSystem, Panel, ScrollView, TextInput,
-    UiEvent, UiNode, UiSystem,
+    Anchor, Button, ButtonState, CheckBox, Label, LayoutDir, LayoutSystem, Panel, ScrollView,
+    Slider, TextInput, UiEvent, UiNode, UiSystem,
 };

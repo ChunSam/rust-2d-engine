@@ -7,12 +7,14 @@ use crate::renderer::{DrawRect, DrawText, TextQueue, UiQueue};
 use crate::resources::ViewportSize;
 
 use super::button::{Button, ButtonState};
+use super::checkbox::CheckBox;
 use super::label::Label;
 use super::node::UiNode;
 use super::scroll_view::ScrollView;
+use super::slider::Slider;
 use super::text_input::TextInput;
 
-/// `UiNode` + `Button` / `Label` / `TextInput` / `ScrollView` 엔티티를 처리하는 시스템.
+/// `UiNode` + `Button` / `Label` / `TextInput` / `ScrollView` / `Slider` / `CheckBox` 엔티티를 처리하는 시스템.
 ///
 /// 매 프레임 실행 순서:
 /// 1. 입력 상태 스냅샷
@@ -297,7 +299,138 @@ impl System for UiSystem {
             }
         }
 
-        // ── 6. 렌더 큐 제출 ──────────────────────────────────────────────────
+        // ── 6. Slider 패스 ───────────────────────────────────────────────────
+        let slider_entities: Vec<Entity> = world
+            .query2::<UiNode, Slider>()
+            .map(|(e, _, _)| e)
+            .collect();
+
+        for entity in slider_entities {
+            let (pos, size, z, visible) = match world.get::<UiNode>(entity) {
+                Some(n) => (n.screen_pos(&viewport), n.size, n.z, n.visible),
+                None => continue,
+            };
+            if !visible {
+                continue;
+            }
+
+            let thumb_w = world.get::<Slider>(entity).map_or(14.0, |s| s.thumb_width);
+            let track_len = (size.x - thumb_w).max(0.0);
+
+            // 마우스 누름 → 드래그 시작
+            if just_pressed && in_bounds(cursor, pos, size) {
+                if let Some(slider) = world.get_mut::<Slider>(entity) {
+                    let t = ((cursor.x - pos.x - thumb_w / 2.0) / track_len.max(f32::EPSILON))
+                        .clamp(0.0, 1.0);
+                    slider.set_normalized(t);
+                    slider.dragging = true;
+                    let v = slider.value;
+                    ui_events.push(UiEvent::SliderChanged(entity, v));
+                }
+            }
+
+            // 드래그 중
+            {
+                let dragging = world.get::<Slider>(entity).map_or(false, |s| s.dragging);
+                if dragging {
+                    if is_held {
+                        if let Some(slider) = world.get_mut::<Slider>(entity) {
+                            let t = ((cursor.x - pos.x - thumb_w / 2.0)
+                                / track_len.max(f32::EPSILON))
+                            .clamp(0.0, 1.0);
+                            let new_val = slider.min + t * (slider.max - slider.min);
+                            if (new_val - slider.value).abs() > f32::EPSILON {
+                                slider.value = new_val;
+                                let v = slider.value;
+                                ui_events.push(UiEvent::SliderChanged(entity, v));
+                            }
+                        }
+                    } else if let Some(slider) = world.get_mut::<Slider>(entity) {
+                        slider.dragging = false;
+                    }
+                }
+            }
+
+            let (norm, track_col, fill_col, thumb_col, thumb_hover_col) = {
+                let s = match world.get::<Slider>(entity) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                (s.normalized(), s.track_color, s.fill_color, s.thumb_color, s.thumb_hovered_color)
+            };
+
+            let thumb_x = pos.x + norm * track_len;
+            let thumb_hovered = in_bounds(cursor, Vec2::new(thumb_x, pos.y), Vec2::new(thumb_w, size.y));
+
+            rects.push(DrawRect::new(pos.x, pos.y, size.x, size.y, track_col).with_z(z));
+            rects.push(DrawRect::new(pos.x, pos.y, thumb_x - pos.x + thumb_w / 2.0, size.y, fill_col).with_z(z + 0.001));
+            let tc = if thumb_hovered { thumb_hover_col } else { thumb_col };
+            rects.push(DrawRect::new(thumb_x, pos.y, thumb_w, size.y, tc).with_z(z + 0.002));
+        }
+
+        // ── 7. CheckBox 패스 ─────────────────────────────────────────────────
+        let checkbox_entities: Vec<Entity> = world
+            .query2::<UiNode, CheckBox>()
+            .map(|(e, _, _)| e)
+            .collect();
+
+        for entity in checkbox_entities {
+            let (pos, size, z, visible) = match world.get::<UiNode>(entity) {
+                Some(n) => (n.screen_pos(&viewport), n.size, n.z, n.visible),
+                None => continue,
+            };
+            if !visible {
+                continue;
+            }
+
+            // 클릭 → 토글
+            if just_pressed && in_bounds(cursor, pos, size) {
+                if let Some(cb) = world.get_mut::<CheckBox>(entity) {
+                    cb.checked = !cb.checked;
+                    let checked = cb.checked;
+                    ui_events.push(UiEvent::CheckBoxToggled(entity, checked));
+                }
+            }
+
+            let (checked, box_size, border_col, checked_col, unchecked_col, label, text_color, font_size) = {
+                let cb = match world.get::<CheckBox>(entity) {
+                    Some(c) => c,
+                    None => continue,
+                };
+                (
+                    cb.checked,
+                    cb.box_size,
+                    cb.border_color,
+                    cb.checked_color,
+                    cb.unchecked_color,
+                    cb.label.clone(),
+                    cb.text_color,
+                    cb.font_size,
+                )
+            };
+
+            let box_y = pos.y + (size.y - box_size) / 2.0;
+            let pad = 2.0;
+            // 테두리
+            rects.push(DrawRect::new(pos.x, box_y, box_size, box_size, border_col).with_z(z));
+            // 내부 채움
+            let inner_col = if checked { checked_col } else { unchecked_col };
+            rects.push(
+                DrawRect::new(pos.x + pad, box_y + pad, box_size - pad * 2.0, box_size - pad * 2.0, inner_col)
+                    .with_z(z + 0.001),
+            );
+            // 레이블 텍스트
+            if !label.is_empty() {
+                texts.push(DrawText {
+                    text: label,
+                    position: Vec2::new(pos.x + box_size + 6.0, pos.y + (size.y - font_size) / 2.0),
+                    size: font_size,
+                    color: text_color,
+                });
+            }
+        }
+
+        // ── 8. 렌더 큐 제출 ──────────────────────────────────────────────────
         if let Some(ui_queue) = world.resource_mut::<UiQueue>() {
             for rect in rects {
                 ui_queue.push(rect);
@@ -309,7 +442,7 @@ impl System for UiSystem {
             }
         }
 
-        // ── 7. 이벤트 일괄 발행 ──────────────────────────────────────────────
+        // ── 9. 이벤트 일괄 발행 ──────────────────────────────────────────────
         if !ui_events.is_empty() {
             if let Some(events) = world.resource_mut::<Events<UiEvent>>() {
                 for ev in ui_events {
@@ -330,6 +463,10 @@ pub enum UiEvent {
     TextSubmitted(Entity, String),
     TextFocused(Entity),
     TextBlurred(Entity),
+    /// Slider 값이 변경됨. 두 번째 필드는 새 값.
+    SliderChanged(Entity, f32),
+    /// CheckBox 상태가 토글됨. 두 번째 필드는 새 checked 값.
+    CheckBoxToggled(Entity, bool),
 }
 
 // ── 헬퍼 ─────────────────────────────────────────────────────────────────────

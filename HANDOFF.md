@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 14 갱신: 2026-05-24)  
-엔진 버전: v0.14.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 15 갱신: 2026-05-24)  
+엔진 버전: v0.15.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -34,6 +34,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 12 | Transform 계층 — Parent/Children/GlobalTransform, HierarchySystem, attach/detach | `3862f8d` |
 | Phase 13 | 물리 레이캐스트 + 캐릭터 컨트롤러 — RaycastHit, add_kinematic_*, move_character | `eee451d` |
 | Phase 14 | 애니메이션 상태 머신 — AnimationStateMachine, StateMachineSystem, TransitionCond, AnimParam | `93eb65f` |
+| Phase 15 | 게임패드(gilrs) + UI Slider/CheckBox — GamepadState, Slider, CheckBox, UiEvent 확장 | TBD |
 
 ---
 
@@ -53,6 +54,7 @@ src/
 ├── camera.rs         Camera (position, zoom, screen_to_world)
 ├── input/
 │   ├── state.rs      InputState (키보드, 마우스, 스크롤, 문자 입력 버퍼)
+│   ├── gamepad.rs    GamepadState, GamepadButton, GamepadAxis (gilrs 래퍼)  ← Phase 15
 │   └── map.rs        InputMap (키 리바인딩)
 ├── physics/
 │   ├── world.rs      PhysicsWorld (Rapier2D 래퍼) + RaycastHit + 레이캐스트/캐릭터 메서드 ← Phase 13
@@ -80,7 +82,9 @@ src/
 │   ├── text_input.rs TextInput (커서, 깜빡임, UTF-8 안전 편집)  ← Phase 6
 │   ├── scroll_view.rs ScrollView (내부 Vec 기반 스크롤 목록)    ← Phase 6
 │   ├── panel.rs      Panel, LayoutDir, LayoutSystem             ← Phase 6
-│   └── system.rs     UiSystem, UiEvent (5종)
+│   ├── slider.rs     Slider (수평 슬라이더)                     ← Phase 15
+│   ├── checkbox.rs   CheckBox (토글 체크박스)                   ← Phase 15
+│   └── system.rs     UiSystem, UiEvent (7종)
 ├── renderer/
 │   ├── context.rs    GpuContext (wgpu Surface/Device/Queue 래퍼)
 │   ├── post_process.rs PostProcessRenderer, PostProcessConfig     ← Phase 10
@@ -93,6 +97,62 @@ src/
 │       └── post_process.wgsl                                      ← Phase 10
 └── save.rs           RON 세이브/불러오기 (save/load/load_or_default/exists/delete)
 ```
+
+---
+
+## 이번 세션에서 한 일 (Phase 15)
+
+### Phase 15 — 게임패드 + UI Slider/CheckBox
+
+**배경**: 키보드/마우스만 지원하던 입력 레이어를 완성하고, 슬라이더·체크박스 UI 위젯을 추가해 설정 화면 구성 능력을 갖추는 것이 목표.
+
+**추가된 파일**: `src/input/gamepad.rs`, `src/ui/slider.rs`, `src/ui/checkbox.rs`  
+**변경된 파일**: `Cargo.toml`, `src/input/mod.rs`, `src/app.rs`, `src/ui/mod.rs`, `src/ui/system.rs`, `src/lib.rs`
+
+#### 게임패드 입력 (gilrs 0.10)
+
+| 타입 | 역할 |
+|------|------|
+| `GamepadState` | ECS 리소스. 최대 4개 패드 슬롯, 버튼/축 상태 추적 |
+| `GamepadButton` | South/East/North/West/LeftBumper/RightBumper/… 16종 |
+| `GamepadAxis` | LeftStickX/Y, RightStickX/Y, LeftTrigger, RightTrigger, DPadX/Y |
+
+```rust
+// 슬롯 0 (첫 번째 연결 패드)
+if let Some(gs) = world.resource::<GamepadState>() {
+    if gs.just_pressed(0, GamepadButton::South) { /* 점프 */ }
+    let lx = gs.axis(0, GamepadAxis::LeftStickX);
+}
+```
+
+- `App::new()` 에서 `GamepadState::default()` 자동 삽입
+- gilrs 이벤트는 `about_to_wait` 에서 폴링 → `update()` 마지막에 `flush()`
+- `Connected` / `Disconnected` gilrs 이벤트로 슬롯 동적 할당/해제
+
+#### UI Slider
+
+```rust
+let e = world.spawn();
+world.insert(e, UiNode::new(100.0, 300.0, 200.0, 20.0));
+world.insert(e, Slider::new(0.0, 100.0, 50.0));
+// UiEvent::SliderChanged(entity, new_value) 로 변경 통보
+```
+
+- 트랙 클릭 또는 썸 드래그로 값 변경
+- 색상 커스터마이즈: `track_color`, `fill_color`, `thumb_color`, `thumb_hovered_color`
+
+#### UI CheckBox
+
+```rust
+let e = world.spawn();
+world.insert(e, UiNode::new(50.0, 200.0, 160.0, 24.0));
+world.insert(e, CheckBox::new("사운드 켜기"));
+// UiEvent::CheckBoxToggled(entity, checked) 로 토글 통보
+```
+
+#### UiEvent 확장
+
+`SliderChanged(Entity, f32)`, `CheckBoxToggled(Entity, bool)` 추가 (기존 5종 → 7종).
 
 ---
 
@@ -493,7 +553,7 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 |-------|------|--------|------|
 | ~~Phase 13~~ | ~~물리 레이캐스트 + 캐릭터 컨트롤러~~ | — | 완료 |
 | ~~Phase 14~~ | ~~애니메이션 상태 머신~~ | — | 완료 |
-| Phase 15 | 게임패드(gilrs) + UI Slider/CheckBox | M | 입력 레이어 완성 |
+| ~~Phase 15~~ | ~~게임패드(gilrs) + UI Slider/CheckBox~~ | — | 완료 |
 | Phase 16 | 씬 직렬화 + 프리팹 시스템 | L | RON 기반 레벨 저장/로드 |
 | Phase 17 | 에셋 파이프라인 + 핫 리로딩 | XL | Handle 기반, Breaking Change 포함 |
 

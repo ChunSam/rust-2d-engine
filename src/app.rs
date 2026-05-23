@@ -14,7 +14,7 @@ use crate::{
     camera::Camera,
     ecs::{Events, System, World},
     hierarchy::HierarchySystem,
-    input::InputState,
+    input::{GamepadState, InputState},
     renderer::{DrawRect, GpuContext, PostProcessConfig, PostProcessRenderer, SpriteRenderer, TextQueue, TextRenderer, UiQueue},
     resources::{DebugDrawQueue, FontData, GameState, PendingResize, ShouldQuit, ViewportSize, WindowConfig},
     scene::{Scene, SceneChange, SceneCmd},
@@ -51,12 +51,16 @@ pub struct App {
     event_flushers: Vec<Box<dyn Fn(&mut World)>>,
     /// reload_scene 시 이벤트 리소스를 재삽입하는 클로저 목록.
     event_initializers: Vec<Box<dyn Fn(&mut World)>>,
+    /// gilrs 게임패드 컨텍스트. 초기화 실패 시 None (게임패드 없이 동작).
+    gilrs: Option<gilrs::Gilrs>,
 }
 
 impl App {
     pub fn new() -> Self {
+        let gilrs = gilrs::Gilrs::new().ok();
         let mut world = World::new();
         world.insert_resource(InputState::default());
+        world.insert_resource(GamepadState::default());
         world.insert_resource(GameState::Playing);
         world.insert_resource(ShouldQuit(false));
         world.insert_resource(WindowConfig::default());
@@ -80,6 +84,7 @@ impl App {
             pending_textures: Vec::new(),
             event_flushers: Vec::new(),
             event_initializers: Vec::new(),
+            gilrs,
         }
     }
 
@@ -120,6 +125,7 @@ impl App {
     pub fn reload_scene(&mut self) {
         self.world = World::new();
         self.world.insert_resource(InputState::default());
+        self.world.insert_resource(GamepadState::default());
         self.world.insert_resource(GameState::Playing);
         self.world.insert_resource(ShouldQuit(false));
         self.world.insert_resource(WindowConfig::default());
@@ -204,6 +210,9 @@ impl App {
         self.event_flushers = flushers;
         if let Some(input) = self.world.resource_mut::<InputState>() {
             input.flush();
+        }
+        if let Some(gamepad) = self.world.resource_mut::<GamepadState>() {
+            gamepad.flush();
         }
         // 씬 전환 명령 처리 (이벤트/입력 flush 이후)
         let cmd = self
@@ -526,10 +535,30 @@ impl ApplicationHandler for App {
         }
     }
 
-    /// 이벤트 큐가 비었을 때 → 매 프레임 redraw 요청
+    /// 이벤트 큐가 비었을 때 → 게임패드 폴링 후 매 프레임 redraw 요청
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        self.poll_gilrs();
         if let Some(window) = &self.window {
             window.request_redraw();
+        }
+    }
+}
+
+impl App {
+    fn poll_gilrs(&mut self) {
+        let mut events = Vec::new();
+        if let Some(gilrs) = &mut self.gilrs {
+            while let Some(event) = gilrs.next_event() {
+                events.push(event);
+            }
+        }
+        if events.is_empty() {
+            return;
+        }
+        if let Some(state) = self.world.resource_mut::<GamepadState>() {
+            for event in events {
+                state.process_event(event);
+            }
         }
     }
 }
