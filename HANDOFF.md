@@ -72,12 +72,49 @@ src/
 │   ├── panel.rs      Panel, LayoutDir, LayoutSystem             ← Phase 6
 │   └── system.rs     UiSystem, UiEvent (5종)
 ├── renderer/         wgpu 렌더링 (직접 수정 빈도 낮음)
-└── save.rs           JSON 세이브/불러오기
+└── save.rs           RON 세이브/불러오기 (save/load/load_or_default/exists/delete)
 ```
 
 ---
 
-## 이번 세션에서 한 일 (Phase 7)
+## 이번 세션에서 한 일 (Phase 8)
+
+### Save/Load 완성
+
+**추가된 함수**
+- `load_or_default<T: DeserializeOwned + Default>(path)` — 파일 없으면 `Default::default()` 반환, 파싱 에러는 그대로 전파
+- `exists(path) -> bool` — 저장 파일 존재 여부 확인
+- `delete(path) -> Result<(), SaveError>` — 저장 파일 삭제 (없으면 Ok)
+
+**lib.rs re-export 추가**: `save`, `load`, `load_or_default`, `exists`, `delete`, `save_path`, `SaveError` 최상위 노출
+
+**테스트 추가**: `load_or_default_returns_default_when_missing`, `load_or_default_returns_saved_value`, `exists_and_delete` (총 5개 → 전부 통과)
+
+**사용 패턴**
+```rust
+use engine::{load_or_default, save, save_path, delete, exists};
+
+#[derive(Serialize, Deserialize, Default)]
+struct SaveData { score: u32, level: u32 }
+
+let path = save_path("my-game", "save.ron");
+
+// 게임 시작 — 없으면 기본값
+let data: SaveData = load_or_default(&path)?;
+
+// 게임 저장
+save(&path, &data)?;
+
+// 세이브 존재 확인
+if exists(&path) { ... }
+
+// 세이브 삭제
+delete(&path)?;
+```
+
+---
+
+## 이전 세션에서 한 일 (Phase 7)
 
 ### 물리 충돌 이벤트 — ECS 브리징
 
@@ -170,7 +207,6 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 
 Phase 8 이후 계획은 미정. 사용자와 협의 필요. 아래는 가능한 방향:
 
-- **Save/Load 완성**: `SaveData` serde 직렬화 구현 (현재 stub 수준)
 - **오디오 강화**: 스트리밍 재생, 3D 위치 오디오, 오디오 버스 믹서
 - **ECS 성능**: Archetype 기반 스토리지로 교체 (현재는 TypeId HashMap + Vec)
 - **셰이더/포스트프로세싱**: wgpu 파이프라인 확장 (블룸, 색수차 등)

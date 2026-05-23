@@ -11,6 +11,7 @@ pub mod physics;
 pub mod renderer;
 pub mod resources;
 pub mod save;
+pub use save::{delete, exists, load, load_or_default, save, save_path, SaveError};
 pub mod scene;
 pub mod tilemap;
 pub mod timer;

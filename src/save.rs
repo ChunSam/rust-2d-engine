@@ -53,6 +53,29 @@ pub fn load<T: DeserializeOwned>(path: &Path) -> Result<T, SaveError> {
     ron::from_str(&s).map_err(|e| SaveError::Ron(e.to_string()))
 }
 
+/// 파일이 있으면 로드, 없으면 `T::default()` 반환. 파싱 에러는 그대로 전파.
+pub fn load_or_default<T: DeserializeOwned + Default>(path: &Path) -> Result<T, SaveError> {
+    match load(path) {
+        Ok(v) => Ok(v),
+        Err(SaveError::Io(e)) if e.kind() == io::ErrorKind::NotFound => Ok(T::default()),
+        Err(e) => Err(e),
+    }
+}
+
+/// 저장 파일이 존재하는지 확인한다.
+pub fn exists(path: &Path) -> bool {
+    path.exists()
+}
+
+/// 저장 파일을 삭제한다. 파일이 없으면 Ok(()).
+pub fn delete(path: &Path) -> Result<(), SaveError> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(SaveError::Io(e)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,5 +120,44 @@ mod tests {
             "expected SaveError::Io, got {:?}",
             result
         );
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+    struct Counter {
+        value: u32,
+    }
+
+    #[test]
+    fn load_or_default_returns_default_when_missing() {
+        let path = PathBuf::from("/nonexistent/path/counter.ron");
+        let result: Result<Counter, SaveError> = load_or_default(&path);
+        assert_eq!(result.unwrap(), Counter::default());
+    }
+
+    #[test]
+    fn load_or_default_returns_saved_value() {
+        let dir = unique_test_dir();
+        let path = dir.join("counter.ron");
+        let data = Counter { value: 42 };
+        save(&path, &data).unwrap();
+        let loaded: Counter = load_or_default(&path).unwrap();
+        assert_eq!(loaded, data);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn exists_and_delete() {
+        let dir = unique_test_dir();
+        let path = dir.join("flag.ron");
+        let data = Counter { value: 1 };
+
+        assert!(!exists(&path));
+        save(&path, &data).unwrap();
+        assert!(exists(&path));
+        delete(&path).unwrap();
+        assert!(!exists(&path));
+        // 이미 없는 파일 삭제 → Ok
+        delete(&path).unwrap();
+        fs::remove_dir_all(&dir).ok();
     }
 }
