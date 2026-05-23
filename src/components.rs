@@ -75,6 +75,11 @@ impl Default for Sprite {
     }
 }
 
+// ─── 하위 호환 재수출 ─────────────────────────────────────────────────────────
+// resources.rs로 이동한 타입들을 engine::components::* 경로로도 접근할 수 있도록 유지.
+pub use crate::resources::{FontData, GameState, PendingResize, ShouldQuit, ViewportSize, WindowConfig};
+pub use crate::animation::player::{AnimationClip, AnimationPlayer, UvRect};
+
 // ─── 단위 테스트 ───────────────────────────────────────────────────────────────
 #[cfg(test)]
 mod tests {
