@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24  
-엔진 버전: v0.11.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 12 갱신: 2026-05-24)  
+엔진 버전: v0.12.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -28,9 +28,10 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 6 | UI 시스템 강화 — TextInput, ScrollView, Panel+LayoutSystem | `e98b893` |
 | Phase 7 | CollisionEvent — Rapier NarrowPhase 폴링 → `Events<CollisionEvent>` 브리징 | `b4a931d` |
 | Phase 8 | Save/Load 완성 — `load_or_default`, `exists`, `delete`, lib.rs re-export | `01f983b` |
-| Phase 9 | ECS Archetype 스토리지 — TypeId HashMap+Vec → Archetype 밀집 컬럼 스토리지 | (이번 세션) |
-| Phase 10 | 포스트프로세싱 — 비네팅, 색수차, 근사 블룸 (PostProcessConfig 리소스) | (이번 세션) |
-| Phase 11 | 오디오 강화 — 위치 오디오, 버스 믹서, 페이드인/아웃 | (이번 세션) |
+| Phase 9 | ECS Archetype 스토리지 — TypeId HashMap+Vec → Archetype 밀집 컬럼 스토리지 | `a8b49cc` |
+| Phase 10 | 포스트프로세싱 — 비네팅, 색수차, 근사 블룸 (PostProcessConfig 리소스) | `a8b49cc` |
+| Phase 11 | 오디오 강화 — 위치 오디오, 버스 믹서, 페이드인/아웃 | `a8b49cc` |
+| Phase 12 | Transform 계층 — Parent/Children/GlobalTransform, HierarchySystem, attach/detach | (이번 세션) |
 
 ---
 
@@ -43,6 +44,7 @@ src/
 │   ├── world.rs      Entity/Component/Resource 저장소, query1~4, query_opt2
 │   ├── events.rs     Events<E> 프레임 경계 이벤트 버스
 │   └── system.rs     System 트레잇
+├── hierarchy.rs      Parent, Children, GlobalTransform, HierarchySystem, attach/detach  ← Phase 12
 ├── scene.rs          Scene 트레잇, SceneCmd, SceneChange
 ├── components.rs     Transform, Sprite
 ├── resources.rs      WindowConfig, ViewportSize, GameState, ShouldQuit, ...
@@ -87,6 +89,51 @@ src/
 │       └── post_process.wgsl                                      ← Phase 10
 └── save.rs           RON 세이브/불러오기 (save/load/load_or_default/exists/delete)
 ```
+
+---
+
+## 이번 세션에서 한 일 (Phase 12)
+
+### Phase 12 — Transform 계층 (Parent · Children · GlobalTransform)
+
+**배경**: 무기 부착, 복합 캐릭터 구성 등 엔티티 간 변환 종속성이 필요했으나, 기존 `Transform`은 독립 로컬 값만 저장하는 플랫 구조였다.
+
+**추가된 파일**: `src/hierarchy.rs`
+
+**신규 컴포넌트·타입**
+- `Parent(Entity)` — 부모 엔티티를 가리키는 컴포넌트
+- `Children(Vec<Entity>)` — 자식 엔티티 목록 (부모 측에 보관)
+- `GlobalTransform { position, scale, rotation, z }` — 매 프레임 HierarchySystem이 계산하는 월드 공간 변환 (`Copy`)
+- `HierarchySystem` — `System` 구현체. `App`이 유저 시스템 직후 자동 실행 (등록 불필요)
+- `attach(world, child, parent)` — Parent + Children 동시 관리 헬퍼
+- `detach(world, child)` — 부모 연결 해제 헬퍼
+
+**렌더러 통합** (`src/renderer/sprite.rs`)
+- `InstanceRaw::from_global()` 추가
+- `render()` 루프: `GlobalTransform` 있으면 우선 사용, 없으면 `Transform` fallback → **완전 하위 호환**
+
+**App 자동 실행** (`src/app.rs`)
+```
+유저 시스템(물리 포함) → HierarchySystem → 이벤트 flush → 렌더
+```
+물리가 `Transform.position`을 갱신한 직후 계층 전파가 실행되므로 항상 정확한 월드 변환이 보장된다.
+
+**깊이 제한**: 내부 2-pass 구조로 최대 3단계 (루트 → 자식 → 손자) 지원.
+
+**사용 패턴**
+```rust
+use engine::{attach, Transform};
+use glam::Vec2;
+
+// 무기를 플레이어에 부착
+attach(&mut world, weapon, player);
+
+// 로컬 오프셋 설정 — GlobalTransform은 매 프레임 자동 계산
+world.get_mut::<Transform>(weapon).unwrap().position = Vec2::new(30.0, 0.0);
+// → weapon의 GlobalTransform.position = player.position + (30, 0) rotated by player.rotation
+```
+
+**검증**: `cargo build` + `cargo test` (rust-2d-engine, rust-survivors 96개 테스트 전부 통과)
 
 ---
 
@@ -300,11 +347,13 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 
 ## 미해결 / 다음 Phase 후보
 
-Phase 12 이후 계획은 미정. 사용자와 협의 필요. 아래는 가능한 방향:
-
-- **멀티패스 블룸**: 현재 4-tap 근사 → 다운샘플 + 가우시안 블러 2-pass로 품질 향상
-- **네트워크 기반**: UDP P2P 또는 서버-클라이언트 구조 (새 의존성 필요)
-- **에디터 / 디버그 UI**: ImGui 스타일 인게임 디버그 패널
+| Phase | 기능 | 난이도 | 비고 |
+|-------|------|--------|------|
+| Phase 13 | 물리 레이캐스트 + 캐릭터 컨트롤러 | M | Rapier `query_pipeline` 활용 |
+| Phase 14 | 애니메이션 상태 머신 | M | Phase 12 이후 캐릭터 애니메이션 완성 |
+| Phase 15 | 게임패드(gilrs) + UI Slider/CheckBox | M | 입력 레이어 완성 |
+| Phase 16 | 씬 직렬화 + 프리팹 시스템 | L | RON 기반 레벨 저장/로드 |
+| Phase 17 | 에셋 파이프라인 + 핫 리로딩 | XL | Handle 기반, Breaking Change 포함 |
 
 ---
 

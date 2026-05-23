@@ -13,6 +13,7 @@ use winit::{
 use crate::{
     camera::Camera,
     ecs::{Events, System, World},
+    hierarchy::HierarchySystem,
     input::InputState,
     renderer::{DrawRect, GpuContext, PostProcessConfig, PostProcessRenderer, SpriteRenderer, TextQueue, TextRenderer, UiQueue},
     resources::{DebugDrawQueue, FontData, GameState, PendingResize, ShouldQuit, ViewportSize, WindowConfig},
@@ -192,6 +193,8 @@ impl App {
         for system in &mut self.systems {
             system.run(&mut self.world, dt);
         }
+        // 계층 변환 전파 — 유저 시스템(물리 포함) 이후, 렌더 직전에 실행
+        HierarchySystem.run(&mut self.world, dt);
         // 모든 시스템 실행 후 이벤트 큐를 비운다.
         // std::mem::take 으로 꺼내야 &mut self.world 와 충돌하지 않는다.
         let flushers = std::mem::take(&mut self.event_flushers);

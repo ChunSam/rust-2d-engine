@@ -9,6 +9,7 @@ use crate::animation::player::UvRect;
 use crate::camera::Camera;
 use crate::components::{Sprite, Transform};
 use crate::ecs::World;
+use crate::hierarchy::GlobalTransform;
 use crate::renderer::texture::Texture;
 use crate::renderer::ui::DrawRect;
 
@@ -56,6 +57,15 @@ impl InstanceRaw {
     fn from(transform: &Transform, sprite: &Sprite, uv: UvRect) -> Self {
         Self {
             model: transform.to_matrix().to_cols_array_2d(),
+            color: sprite.color,
+            uv_offset: [uv.u_offset, uv.v_offset],
+            uv_size: [uv.u_size, uv.v_size],
+        }
+    }
+
+    fn from_global(gt: &GlobalTransform, sprite: &Sprite, uv: UvRect) -> Self {
+        Self {
+            model: gt.to_matrix().to_cols_array_2d(),
             color: sprite.color,
             uv_offset: [uv.u_offset, uv.v_offset],
             uv_size: [uv.u_size, uv.v_size],
@@ -319,18 +329,14 @@ impl SpriteRenderer {
         queue.write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cam));
 
         // ── 전체 스프라이트 수집: (z, texture_key, InstanceRaw) ─────────
+        // GlobalTransform이 있으면 계층 합성 결과를 사용하고, 없으면 Transform으로 fallback.
         let mut sprites: Vec<(f32, Option<String>, InstanceRaw)> = Vec::new();
         for (entity, sprite) in world.query::<Sprite>() {
-            if let Some(transform) = world.get::<Transform>(entity) {
-                let uv = world
-                    .get::<UvRect>(entity)
-                    .copied()
-                    .unwrap_or(UvRect::FULL);
-                sprites.push((
-                    transform.z,
-                    sprite.texture.clone(),
-                    InstanceRaw::from(transform, sprite, uv),
-                ));
+            let uv = world.get::<UvRect>(entity).copied().unwrap_or(UvRect::FULL);
+            if let Some(gt) = world.get::<GlobalTransform>(entity) {
+                sprites.push((gt.z, sprite.texture.clone(), InstanceRaw::from_global(gt, sprite, uv)));
+            } else if let Some(transform) = world.get::<Transform>(entity) {
+                sprites.push((transform.z, sprite.texture.clone(), InstanceRaw::from(transform, sprite, uv)));
             }
         }
         if sprites.is_empty() {

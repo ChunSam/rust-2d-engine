@@ -5,6 +5,7 @@ pub mod camera;
 pub mod collision;
 pub mod components;
 pub mod ecs;
+pub mod hierarchy;
 pub mod input;
 pub mod particle;
 pub mod physics;
@@ -28,6 +29,7 @@ pub use collision::{
     Collider, CollisionDebugSystem, CollisionGridSystem, CollisionLayer, DebugConfig, SpatialGrid,
 };
 pub use components::{Sprite, Transform};
+pub use hierarchy::{attach, detach, Children, GlobalTransform, HierarchySystem, Parent};
 pub use ecs::{Entity, Events, System, World};
 pub use input::{InputMap, InputState};
 pub use particle::{Particle, ParticleEmitter, ParticleSystem};
