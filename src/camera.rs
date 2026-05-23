@@ -36,6 +36,19 @@ impl Camera {
         Self { position, zoom }
     }
 
+    /// 화면(픽셀) 좌표를 월드 좌표로 변환한다.
+    ///
+    /// `screen_pos`: `InputState::cursor()` 가 반환하는 좌상단 기준 픽셀 좌표.
+    /// `viewport_w/h`: `ViewportSize` 리소스의 width/height.
+    ///
+    /// 역연산: world = position + screen / zoom
+    pub fn screen_to_world(&self, screen_pos: Vec2) -> Vec2 {
+        Vec2::new(
+            screen_pos.x / self.zoom + self.position.x,
+            screen_pos.y / self.zoom + self.position.y,
+        )
+    }
+
     /// 뷰포트 크기 `(width, height)` 를 받아 MVP 용 직교 투영 행렬을 반환한다.
     ///
     /// left = position.x,  right = position.x + width/zoom
@@ -83,6 +96,29 @@ mod tests {
             m.abs_diff_eq(expected, 1e-6),
             "translated view_proj mismatch\ngot:      {m:?}\nexpected: {expected:?}"
         );
+    }
+
+    #[test]
+    fn screen_to_world_no_offset_no_zoom() {
+        let cam = Camera::default(); // position=(0,0), zoom=1
+        let world = cam.screen_to_world(Vec2::new(100.0, 200.0));
+        assert_eq!(world, Vec2::new(100.0, 200.0));
+    }
+
+    #[test]
+    fn screen_to_world_with_camera_offset() {
+        let cam = Camera::new(Vec2::new(50.0, 80.0), 1.0);
+        let world = cam.screen_to_world(Vec2::new(0.0, 0.0));
+        // 화면 좌상단(0,0)은 카메라 position과 같아야 한다
+        assert_eq!(world, Vec2::new(50.0, 80.0));
+    }
+
+    #[test]
+    fn screen_to_world_with_zoom() {
+        let cam = Camera::new(Vec2::ZERO, 2.0);
+        // zoom=2 → 화면 픽셀 1개 = 월드 0.5 단위
+        let world = cam.screen_to_world(Vec2::new(100.0, 60.0));
+        assert_eq!(world, Vec2::new(50.0, 30.0));
     }
 
     #[test]

@@ -74,6 +74,16 @@ impl World {
         // entities 에 없으면 이미 despawn 된 엔티티 → 아무것도 하지 않는다
     }
 
+    /// 엔티티에서 컴포넌트 T를 제거한다. 엔티티는 유지된다.
+    /// 해당 컴포넌트가 없어도 panic 하지 않는다 (멱등성).
+    pub fn remove_component<T: 'static>(&mut self, entity: Entity) {
+        if let Some(vec) = self.components.get_mut(&TypeId::of::<T>()) {
+            if let Some(slot) = vec.get_mut(entity.0 as usize) {
+                *slot = None;
+            }
+        }
+    }
+
     /// 엔티티에 컴포넌트를 붙인다.
     pub fn add_component<T: 'static>(&mut self, entity: Entity, component: T) {
         let vec = self
@@ -281,6 +291,34 @@ mod tests {
         let results: Vec<_> = world.query2::<Position, Health>().collect();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, eab);
+    }
+
+    /// remove_component 는 해당 컴포넌트만 지우고 엔티티는 유지해야 한다.
+    #[test]
+    fn remove_component_keeps_entity_alive() {
+        let mut world = World::new();
+        let e = world.spawn();
+        world.add_component(e, Position { x: 1.0, y: 2.0 });
+        world.add_component(e, Health(50));
+
+        world.remove_component::<Position>(e);
+
+        // Position 은 사라졌지만
+        assert!(world.get::<Position>(e).is_none());
+        // Health 는 남아있고 엔티티도 살아있어야 한다
+        assert_eq!(world.get::<Health>(e).unwrap().0, 50);
+        assert!(world.entities().contains(&e));
+    }
+
+    /// remove_component 는 없는 컴포넌트를 지워도 panic 하지 않아야 한다.
+    #[test]
+    fn remove_component_nonexistent_is_noop() {
+        let mut world = World::new();
+        let e = world.spawn();
+        world.remove_component::<Position>(e); // Position 없음 — panic 없어야 함
+        world.add_component(e, Health(10));
+        world.remove_component::<Velocity>(e); // Velocity 없음 — panic 없어야 함
+        assert_eq!(world.get::<Health>(e).unwrap().0, 10);
     }
 
     /// query3 는 A, B, C 를 모두 가진 엔티티만 반환해야 한다.

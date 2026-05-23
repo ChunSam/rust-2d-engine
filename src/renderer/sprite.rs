@@ -295,13 +295,9 @@ impl SpriteRenderer {
 
     /// 매 프레임: ECS World에서 스프라이트를 수집해 렌더링한다.
     ///
-    /// # z-order 구현 한계
-    /// 현재는 **텍스처 그룹 내부**에서만 z 오름차순 정렬을 수행한다.
-    /// 서로 다른 텍스처 그룹 간의 z 충돌은 해결되지 않는다
-    /// (예: 텍스처 A의 z=5 스프라이트가 텍스처 B의 z=0 스프라이트 뒤에 그려질 수 있음 —
-    ///  group_order가 등록 순서 기준이므로).
-    /// 전체 z-order 정렬은 후속 작업(모든 인스턴스를 한 번에 z 정렬 후 연속된 같은 텍스처를
-    /// 묶어 multi-draw)에서 구현할 예정이다.
+    /// # z-order
+    /// 모든 스프라이트를 z 오름차순으로 전역 정렬한 뒤, 연속으로 같은 텍스처를 쓰는
+    /// 구간마다 draw call을 한 번씩 발행한다. 텍스처가 섞이더라도 z 값이 정확히 반영된다.
     pub fn render(
         &mut self,
         device: &wgpu::Device,
@@ -313,8 +309,7 @@ impl SpriteRenderer {
         height: u32,
     ) {
         // ── 카메라: ECS 리소스에서 Camera 를 읽어 view_proj 를 계산한다 ───
-        //   Camera 리소스가 없으면 기본값(좌상단 직교 투영)으로 폴백한다.
-        let fallback = Camera::default(); // Camera 가 없을 때만 사용 (이론상 없어야 정상)
+        let fallback = Camera::default();
         let camera = world.resource::<Camera>().unwrap_or(&fallback);
         let view_proj = camera.view_proj(width as f32, height as f32);
         let cam = CameraUniform {
@@ -322,47 +317,31 @@ impl SpriteRenderer {
         };
         queue.write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cam));
 
-        // ── 텍스처별로 스프라이트를 그룹핑 ────────────────────────────────
-        // group_order: HashMap은 순서를 보장하지 않으므로 삽입 순서를 별도로 기록한다.
-        // 각 그룹에 (z, InstanceRaw) 튜플을 저장해 그룹 내 z 정렬에 사용한다.
-        let mut groups: HashMap<Option<String>, Vec<(f32, InstanceRaw)>> = HashMap::new();
-        let mut group_order: Vec<Option<String>> = Vec::new();
-
+        // ── 전체 스프라이트 수집: (z, texture_key, InstanceRaw) ─────────
+        let mut sprites: Vec<(f32, Option<String>, InstanceRaw)> = Vec::new();
         for (entity, sprite) in world.query::<Sprite>() {
             if let Some(transform) = world.get::<Transform>(entity) {
-                // AnimationPlayer가 없으면 텍스처 전체(UvRect::FULL)를 사용한다.
                 let uv = world
                     .get::<AnimationPlayer>(entity)
                     .map(|p| p.current_uv())
                     .unwrap_or(UvRect::FULL);
-
-                let key = sprite.texture.clone();
-                if !groups.contains_key(&key) {
-                    group_order.push(key.clone());
-                }
-                // z 값과 함께 저장해 그룹 내 정렬에 활용한다.
-                groups
-                    .entry(key)
-                    .or_default()
-                    .push((transform.z, InstanceRaw::from(transform, sprite, uv)));
+                sprites.push((
+                    transform.z,
+                    sprite.texture.clone(),
+                    InstanceRaw::from(transform, sprite, uv),
+                ));
             }
         }
-        if groups.is_empty() {
+        if sprites.is_empty() {
             return;
         }
 
-        // ── 각 그룹 내부에서 z 오름차순 안정 정렬 ────────────────────────
-        // z 가 같으면 등록 순서를 유지한다 (stable sort).
-        // z = 0.0(기본값) 만 있으면 순서 변화 없음 → 플랫포머 데모 회귀 없음.
-        for group in groups.values_mut() {
-            group.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-        }
+        // ── 전역 z 오름차순 안정 정렬 ────────────────────────────────────
+        // z가 같으면 수집 순서를 유지한다 (stable sort).
+        sprites.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-        // ── 모든 그룹을 하나의 버퍼에 순서대로 쓴다 ───────────────────────
-        let all_instances: Vec<InstanceRaw> = group_order
-            .iter()
-            .flat_map(|k| groups[k].iter().map(|(_, raw)| *raw))
-            .collect();
+        // ── GPU 버퍼에 전체 인스턴스 업로드 ─────────────────────────────
+        let all_instances: Vec<InstanceRaw> = sprites.iter().map(|(_, _, raw)| *raw).collect();
 
         if all_instances.len() > self.instance_capacity {
             self.instance_capacity = all_instances.len().next_power_of_two();
@@ -396,16 +375,23 @@ impl SpriteRenderer {
         pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
         pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
 
-        // 텍스처 그룹마다 바인드 그룹을 교체하고 해당 인스턴스만 그린다.
+        // ── 연속된 같은 텍스처 구간마다 draw call 1회 ────────────────────
+        // 텍스처가 바뀔 때만 bind group을 교체하므로 bind group 전환 횟수가 최소화된다.
         let instance_size = std::mem::size_of::<InstanceRaw>() as u64;
-        let mut base: u64 = 0;
-        for key in &group_order {
-            let instances = &groups[key]; // Vec<(f32, InstanceRaw)>
-            let byte_start = base * instance_size;
-            let byte_end = byte_start + instances.len() as u64 * instance_size;
+        let mut i = 0usize;
+        while i < sprites.len() {
+            let run_key = &sprites[i].1;
+            let run_start = i;
+            // 동일 텍스처가 연속되는 끝 위치를 찾는다
+            while i < sprites.len() && &sprites[i].1 == run_key {
+                i += 1;
+            }
+            let run_len = i - run_start;
 
-            // 캐시에 없거나 texture: None이면 흰색 텍스처(색상 스프라이트)로 폴백
-            let bind_group = match key {
+            let byte_start = run_start as u64 * instance_size;
+            let byte_end = byte_start + run_len as u64 * instance_size;
+
+            let bind_group = match run_key {
                 Some(path) => self
                     .texture_cache
                     .get(path)
@@ -416,9 +402,7 @@ impl SpriteRenderer {
 
             pass.set_bind_group(1, bind_group, &[]);
             pass.set_vertex_buffer(1, self.instance_buf.slice(byte_start..byte_end));
-            pass.draw_indexed(0..INDICES.len() as u32, 0, 0..instances.len() as u32);
-
-            base += instances.len() as u64;
+            pass.draw_indexed(0..INDICES.len() as u32, 0, 0..run_len as u32);
         }
     }
 
