@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 13 갱신: 2026-05-24)  
-엔진 버전: v0.13.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 14 갱신: 2026-05-24)  
+엔진 버전: v0.14.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -33,6 +33,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 11 | 오디오 강화 — 위치 오디오, 버스 믹서, 페이드인/아웃 | `a8b49cc` |
 | Phase 12 | Transform 계층 — Parent/Children/GlobalTransform, HierarchySystem, attach/detach | `3862f8d` |
 | Phase 13 | 물리 레이캐스트 + 캐릭터 컨트롤러 — RaycastHit, add_kinematic_*, move_character | `eee451d` |
+| Phase 14 | 애니메이션 상태 머신 — AnimationStateMachine, StateMachineSystem, TransitionCond, AnimParam | (이번 커밋) |
 
 ---
 
@@ -65,8 +66,9 @@ src/
 │   └── debug.rs      CollisionDebugSystem, DebugConfig
 ├── audio.rs          AudioManager (재생/정지/볼륨/팬/톤)
 ├── animation/
-│   ├── player.rs     AnimationPlayer, AnimationClip, UvRect
-│   └── system.rs     AnimationSystem
+│   ├── player.rs       AnimationPlayer, AnimationClip, UvRect
+│   ├── state_machine.rs AnimationStateMachine, StateMachineSystem, TransitionCond, AnimParam  ← Phase 14
+│   └── system.rs       AnimationSystem
 ├── particle.rs       ParticleEmitter, Particle, ParticleSystem
 ├── tilemap.rs        Tilemap, TilemapAtlas, TilemapSystem
 ├── timer.rs          Timer (once/repeating)
@@ -91,6 +93,71 @@ src/
 │       └── post_process.wgsl                                      ← Phase 10
 └── save.rs           RON 세이브/불러오기 (save/load/load_or_default/exists/delete)
 ```
+
+---
+
+## 이번 세션에서 한 일 (Phase 14)
+
+### Phase 14 — 애니메이션 상태 머신
+
+**배경**: `AnimationPlayer.play(clip_index)` 로만 클립을 전환하면 게임 로직이 직접 애니메이션 인덱스를 관리해야 했다. 캐릭터 상태(idle/run/jump/attack)가 많아질수록 조건 분기가 급증하므로, 상태 머신으로 전환 규칙을 선언적으로 분리할 필요가 있었다.
+
+**추가된 파일**: `src/animation/state_machine.rs`  
+**변경된 파일**: `src/animation/mod.rs`, `src/animation/player.rs`, `src/lib.rs`
+
+#### 신규 타입
+
+| 타입 | 역할 |
+|------|------|
+| `AnimationStateMachine` | 엔티티에 붙이는 상태 머신 컴포넌트 |
+| `AnimState` | 클립 인덱스 + 전환 엣지 목록 |
+| `AnimTransition` | 대상 상태 + AND 조건 목록 |
+| `TransitionCond` | `BoolEq` / `FloatGt` / `FloatLt` / `Trigger` / `AnimationEnd` |
+| `AnimParam` | `Bool(bool)` / `Float(f32)` / `Trigger(bool)` |
+| `StateMachineSystem` | 매 프레임 전환 평가 → `AnimationPlayer.play()` 호출 |
+
+#### 사용 패턴
+
+```rust
+// 상태 머신 생성 (초기 상태 "idle", 클립 인덱스 0)
+let mut sm = AnimationStateMachine::new("idle", 0);
+sm.add_state("run", 1)
+  .add_state("jump", 2);
+
+// 파라미터 등록
+sm.set_bool("is_running", false);
+sm.add_trigger("jump");
+
+// 전환 등록
+sm.add_transition("idle", "run",  vec![TransitionCond::BoolEq("is_running".into(), true)]);
+sm.add_transition("run",  "idle", vec![TransitionCond::BoolEq("is_running".into(), false)]);
+sm.add_transition("idle", "jump", vec![TransitionCond::Trigger("jump".into())]);
+sm.add_transition("run",  "jump", vec![TransitionCond::Trigger("jump".into())]);
+sm.add_transition("jump", "idle", vec![TransitionCond::AnimationEnd]);
+
+world.add_component(player_entity, sm);
+
+// 게임 로직에서 파라미터 조작
+world.get_mut::<AnimationStateMachine>(player).unwrap().set_bool("is_running", true);
+world.get_mut::<AnimationStateMachine>(player).unwrap().fire_trigger("jump");
+```
+
+#### 시스템 등록 순서
+
+```rust
+app.add_system(Box::new(AnimationSystem));     // 프레임 진행 + UvRect 동기화
+app.add_system(Box::new(StateMachineSystem));  // 전환 조건 평가 → play() 호출
+```
+
+`StateMachineSystem`이 `AnimationSystem` **이후에** 실행되어야 `is_finished()` 판정이 같은 프레임에 반영된다.
+
+#### 트리거 소비 규칙
+
+트리거는 `StateMachineSystem`이 실행될 때마다 소비된다(전환 여부와 무관). 따라서 한 프레임에 `fire_trigger()`를 호출해야 하며, 전환 조건이 없는 상태에서 활성화하면 그 프레임 내에 버려진다.
+
+#### `AnimationPlayer` 변경
+
+`is_finished() -> bool` 메서드 추가 — non-looping 클립의 마지막 프레임이면 `true`. `AnimationEnd` 조건의 기반.
 
 ---
 
@@ -425,7 +492,7 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | Phase | 기능 | 난이도 | 비고 |
 |-------|------|--------|------|
 | ~~Phase 13~~ | ~~물리 레이캐스트 + 캐릭터 컨트롤러~~ | — | 완료 |
-| Phase 14 | 애니메이션 상태 머신 | M | Phase 12 이후 캐릭터 애니메이션 완성 |
+| ~~Phase 14~~ | ~~애니메이션 상태 머신~~ | — | 완료 |
 | Phase 15 | 게임패드(gilrs) + UI Slider/CheckBox | M | 입력 레이어 완성 |
 | Phase 16 | 씬 직렬화 + 프리팹 시스템 | L | RON 기반 레벨 저장/로드 |
 | Phase 17 | 에셋 파이프라인 + 핫 리로딩 | XL | Handle 기반, Breaking Change 포함 |

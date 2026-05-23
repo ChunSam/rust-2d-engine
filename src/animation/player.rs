@@ -81,4 +81,15 @@ impl AnimationPlayer {
             .copied()
             .unwrap_or(UvRect::FULL)
     }
+
+    /// 현재 클립이 끝났는지 반환한다. 루핑 클립은 항상 false.
+    pub fn is_finished(&self) -> bool {
+        let Some(clip) = self.clips.get(self.current_clip) else {
+            return true;
+        };
+        if clip.looping || clip.frames.is_empty() {
+            return false;
+        }
+        self.current_frame >= clip.frames.len() - 1
+    }
 }

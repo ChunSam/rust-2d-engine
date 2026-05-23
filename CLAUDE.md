@@ -1,6 +1,6 @@
 # CLAUDE.md — rust-2d-engine 에이전트 참조 문서
 
-> 버전 v0.13.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
+> 버전 v0.14.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
 > 상세 API: `REFERENCE.md` | 개발 이력/아키텍처 결정: `HANDOFF.md`
 
 ---
@@ -25,7 +25,8 @@
 | CharacterController, RaycastHit, cast_ray, cast_ray_with_normal, move_character | `src/physics/character.rs`, `src/physics/world.rs` |
 | add_kinematic_box, add_kinematic_circle | `src/physics/world.rs` |
 | SpatialGrid, Collider, CollisionLayer | `src/collision/` |
-| AnimationPlayer, AnimationClip, AnimationSystem | `src/animation/` |
+| AnimationPlayer, AnimationClip, AnimationSystem | `src/animation/player.rs`, `src/animation/system.rs` |
+| AnimationStateMachine, StateMachineSystem, TransitionCond, AnimParam | `src/animation/state_machine.rs` |
 | UI (UiNode, Button, Label, TextInput, ScrollView, Panel, LayoutSystem, UiEvent) | `src/ui/` |
 | Timer, Tween, Easing | `src/timer.rs`, `src/tween.rs` |
 | ParticleEmitter, ParticleSystem | `src/particle.rs` |
@@ -87,6 +88,25 @@ app.add_system(Box::new(UiSystem));      // 위치 읽어 렌더
 
 `UiEvent`는 `Copy` 없이 `Clone`만 구현한다 (TextChanged/TextSubmitted가 String 포함).  
 `InputState::text_chars()` — 이번 프레임 문자 슬라이스. `'\x08'`=Backspace, `'\n'`=Enter.
+
+### 애니메이션 상태 머신 등록 순서
+
+`StateMachineSystem`은 `AnimationSystem` **이후에** 등록해야 `is_finished()` 판정이 같은 프레임에 반영된다:
+
+```rust
+app.add_system(Box::new(AnimationSystem));     // 프레임 진행 + UvRect 동기화
+app.add_system(Box::new(StateMachineSystem));  // 전환 조건 평가 → play() 호출
+```
+
+파라미터 조작은 시스템 내에서 `world.get_mut::<AnimationStateMachine>(entity)` 로 접근한다:
+
+```rust
+sm.set_bool("is_running", true);   // BoolEq 조건용
+sm.set_float("speed", 3.5);        // FloatGt / FloatLt 조건용
+sm.fire_trigger("jump");           // Trigger 조건용 (매 프레임 자동 소비)
+```
+
+`TransitionCond::AnimationEnd`는 non-looping 클립의 마지막 프레임 도달 시 참이 된다.
 
 ### PhysicsWorld 캡슐화
 

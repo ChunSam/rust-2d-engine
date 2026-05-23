@@ -21,7 +21,10 @@ pub mod ui;
 
 // ── 편의 재수출 ────────────────────────────────────────────────────────────────
 
-pub use animation::{AnimationClip, AnimationPlayer, AnimationSystem, UvRect};
+pub use animation::{
+    AnimParam, AnimState, AnimTransition, AnimationClip, AnimationPlayer, AnimationStateMachine,
+    AnimationSystem, StateMachineSystem, TransitionCond, UvRect,
+};
 pub use app::App;
 pub use audio::AudioManager;
 pub use camera::Camera;
