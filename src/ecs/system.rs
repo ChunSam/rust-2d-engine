@@ -1,0 +1,9 @@
+use super::world::World;
+
+/// 매 프레임 실행되는 로직 단위
+///
+/// `dt` 는 직전 프레임과의 시간 차이(초).
+/// 구조체를 impl System 하고 App에 등록하면 자동으로 호출된다.
+pub trait System {
+    fn run(&mut self, world: &mut World, dt: f32);
+}

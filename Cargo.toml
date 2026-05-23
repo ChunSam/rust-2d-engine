@@ -1,0 +1,23 @@
+[package]
+name        = "engine"
+version     = "0.1.0"
+edition     = "2021"
+description = "Lightweight 2D game engine — wgpu rendering, custom ECS, rapier2d physics"
+repository  = "https://github.com/ChunSam/rust-2d-engine"
+license     = "MIT"
+
+[dependencies]
+winit    = "0.30"
+wgpu     = "22"
+glam     = "0.28"
+bytemuck = { version = "1", features = ["derive"] }
+image    = { version = "0.25", default-features = false, features = ["png"] }
+log      = "0.4"
+pollster = "0.3"
+rapier2d = { version = "0.22", features = ["default"] }
+rodio    = { version = "0.19", default-features = false, features = ["wav", "vorbis"] }
+rand     = "0.8"
+serde    = { version = "1", features = ["derive"] }
+ron      = "0.8"
+dirs     = "5"
+glyphon  = "0.6"
