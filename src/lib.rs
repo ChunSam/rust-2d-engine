@@ -37,4 +37,7 @@ pub use scene::{Scene, SceneChange, SceneCmd};
 pub use tilemap::{Tilemap, TilemapAtlas, TilemapSystem};
 pub use timer::Timer;
 pub use tween::{Easing, Tween};
-pub use ui::{Anchor, Button, ButtonState, Label, UiEvent, UiNode, UiSystem};
+pub use ui::{
+    Anchor, Button, ButtonState, Label, LayoutDir, LayoutSystem, Panel, ScrollView, TextInput,
+    UiEvent, UiNode, UiSystem,
+};

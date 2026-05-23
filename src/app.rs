@@ -391,6 +391,7 @@ impl ApplicationHandler for App {
                 event:
                     KeyEvent {
                         physical_key: PhysicalKey::Code(key),
+                        logical_key,
                         state,
                         ..
                     },
@@ -398,7 +399,20 @@ impl ApplicationHandler for App {
             } => {
                 if let Some(input) = self.world.resource_mut::<InputState>() {
                     match state {
-                        ElementState::Pressed => input.press(key),
+                        ElementState::Pressed => {
+                            input.press(key);
+                            use winit::keyboard::{Key, NamedKey};
+                            match &logical_key {
+                                Key::Character(s) => {
+                                    for c in s.chars() {
+                                        input.push_char(c);
+                                    }
+                                }
+                                Key::Named(NamedKey::Backspace) => input.push_backspace(),
+                                Key::Named(NamedKey::Enter) => input.push_enter(),
+                                _ => {}
+                            }
+                        }
                         ElementState::Released => input.release(key),
                     }
                 }

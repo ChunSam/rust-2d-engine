@@ -18,6 +18,7 @@ pub struct InputState {
     mouse_just_pressed: [bool; 3],
     mouse_just_released: [bool; 3],
     scroll: f32,
+    text_input_chars: Vec<char>,
 }
 
 impl Default for InputState {
@@ -31,6 +32,7 @@ impl Default for InputState {
             mouse_just_pressed: [false; 3],
             mouse_just_released: [false; 3],
             scroll: 0.0,
+            text_input_chars: Vec::new(),
         }
     }
 }
@@ -72,6 +74,13 @@ impl InputState {
         self.scroll
     }
 
+    /// 이번 프레임에 입력된 문자 슬라이스를 반환한다.
+    ///
+    /// `'\x08'` = Backspace, `'\n'` = Enter, 나머지 = 일반 문자.
+    pub fn text_chars(&self) -> &[char] {
+        &self.text_input_chars
+    }
+
     // ── 내부 업데이트 (App에서만 호출) ───────────────────────────────────────
 
     pub(crate) fn press(&mut self, key: KeyCode) {
@@ -109,12 +118,25 @@ impl InputState {
         self.scroll += delta;
     }
 
+    pub(crate) fn push_char(&mut self, c: char) {
+        self.text_input_chars.push(c);
+    }
+
+    pub(crate) fn push_backspace(&mut self) {
+        self.text_input_chars.push('\x08');
+    }
+
+    pub(crate) fn push_enter(&mut self) {
+        self.text_input_chars.push('\n');
+    }
+
     pub(crate) fn flush(&mut self) {
         self.just_pressed.clear();
         self.just_released.clear();
         self.mouse_just_pressed = [false; 3];
         self.mouse_just_released = [false; 3];
         self.scroll = 0.0;
+        self.text_input_chars.clear();
     }
 }
 
