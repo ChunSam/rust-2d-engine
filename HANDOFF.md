@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 17 갱신: 2026-05-24)  
-엔진 버전: v0.17.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 19 갱신: 2026-05-24)  
+엔진 버전: v0.19.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -38,7 +38,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 16 | 씬 직렬화 + 프리팹 시스템 — Tag, EntityDef, SceneDef, Prefab, spawn_entity_def | `2bfbffa` |
 | Phase 17 | 에셋 파이프라인 + 핫 리로딩 — Handle<T>, ImageAsset, AssetServer, App::load_image | `f985118` |
 | Phase 18 | egui 인게임 디버그 에디터 — DebugUi, F1 토글, Engine Stats 내장 패널 | `83838a7` |
-| Phase 19 | Rhai 스크립팅 — ScriptAsset, ScriptRunner, ScriptingSystem, App::load_script | (현재 커밋) |
+| Phase 19 | Rhai 스크립팅 — ScriptAsset, ScriptRunner, ScriptingSystem, App::load_script | `861e832` |
 
 ---
 
