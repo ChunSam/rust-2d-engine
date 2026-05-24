@@ -1,6 +1,8 @@
 use glam::{Mat4, Quat, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
+use crate::asset::{Handle, ImageAsset};
+
 // ─── 렌더 컴포넌트 ────────────────────────────────────────────────────────────
 
 /// 위치·크기·회전을 담는 컴포넌트
@@ -48,10 +50,14 @@ impl Default for Transform {
 /// 스프라이트 외형을 담는 컴포넌트
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sprite {
-    /// 텍스처 파일 경로 (None이면 단색 사각형)
+    /// 텍스처 파일 경로 (None이면 단색 사각형). RON 직렬화 지원.
     pub texture: Option<String>,
     /// RGBA 색상 배율 (흰색 = 텍스처 원본)
     pub color: [f32; 4],
+    /// AssetServer를 통해 로드한 이미지 핸들. 직렬화 제외 — 런타임 전용.
+    /// `texture`보다 우선 적용된다.
+    #[serde(skip)]
+    pub image_handle: Option<Handle<ImageAsset>>,
 }
 
 impl Sprite {
@@ -59,6 +65,7 @@ impl Sprite {
         Self {
             texture: None,
             color: [r, g, b, 1.0],
+            image_handle: None,
         }
     }
 
@@ -66,6 +73,16 @@ impl Sprite {
         Self {
             texture: Some(path.into()),
             color: [1.0; 4],
+            image_handle: None,
+        }
+    }
+
+    /// AssetServer 핸들로 텍스처를 지정한다. `texture` 경로보다 우선 적용된다.
+    pub fn with_handle(handle: Handle<ImageAsset>) -> Self {
+        Self {
+            texture: None,
+            color: [1.0; 4],
+            image_handle: Some(handle),
         }
     }
 }

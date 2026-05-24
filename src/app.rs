@@ -11,6 +11,7 @@ use winit::{
 };
 
 use crate::{
+    asset::{AssetServer, Handle, ImageAsset},
     camera::Camera,
     ecs::{Events, System, World},
     hierarchy::HierarchySystem,
@@ -71,6 +72,7 @@ impl App {
         world.insert_resource(UiQueue::default());
         world.insert_resource(DebugDrawQueue::default());
         world.insert_resource(SceneChange::default());
+        world.insert_resource(AssetServer::new());
         Self {
             world,
             systems: Vec::new(),
@@ -118,6 +120,20 @@ impl App {
         self.pending_textures.push(path.into());
     }
 
+    /// AssetServer를 통해 이미지를 로드하고 `Handle<ImageAsset>`을 반환한다.
+    ///
+    /// - CPU-side 이미지 데이터와 파일 감시를 등록한다.
+    /// - GPU 텍스처 업로드는 `resumed()` 이후 또는 즉시(GPU 준비된 경우) 처리된다.
+    /// - 같은 경로를 다시 호출하면 캐시된 핸들이 반환된다.
+    pub fn load_image(&mut self, path: impl Into<String>) -> Handle<ImageAsset> {
+        let path = path.into();
+        self.pending_textures.push(path.clone());
+        self.world
+            .resource_mut::<AssetServer>()
+            .expect("AssetServer 리소스 누락")
+            .load_image(&path)
+    }
+
     /// ECS 월드를 초기화하고 기본 리소스를 재삽입한다.
     ///
     /// 씬 전환 시 엔티티·컴포넌트를 전부 지우고 싶을 때 사용한다.
@@ -136,6 +152,7 @@ impl App {
         self.world.insert_resource(UiQueue::default());
         self.world.insert_resource(DebugDrawQueue::default());
         self.world.insert_resource(SceneChange::default());
+        self.world.insert_resource(AssetServer::new());
         // 등록된 이벤트 리소스 재삽입
         let inits = std::mem::take(&mut self.event_initializers);
         for init in &inits {
@@ -221,6 +238,20 @@ impl App {
             .and_then(|sc| sc.0.take());
         if let Some(cmd) = cmd {
             self.apply_scene_cmd(cmd);
+        }
+
+        // 핫 리로딩: 변경된 파일 목록을 받아 GPU 텍스처를 재업로드한다.
+        let reloaded: Vec<String> = self
+            .world
+            .resource_mut::<AssetServer>()
+            .map(|as_| as_.poll_reloads())
+            .unwrap_or_default();
+        if !reloaded.is_empty() {
+            if let (Some(sr), Some(gpu)) = (&mut self.sprite_renderer, &self.gpu) {
+                for path in &reloaded {
+                    sr.reload_texture(&gpu.device, &gpu.queue, path);
+                }
+            }
         }
     }
 

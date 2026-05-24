@@ -183,6 +183,7 @@ impl System for ParticleSystem {
                 None => Sprite {
                     texture: None,
                     color: color_start,
+                    image_handle: None,
                 },
             };
             world.add_component(pe, sprite);

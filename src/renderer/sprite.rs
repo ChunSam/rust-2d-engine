@@ -304,6 +304,14 @@ impl SpriteRenderer {
         }
     }
 
+    /// 캐시를 무효화하고 파일에서 GPU 텍스처를 강제 재로드한다 (핫 리로딩용).
+    pub fn reload_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, path: &str) {
+        self.texture_cache.remove(path);
+        let tex = Texture::from_path(device, queue, &self.texture_layout, path);
+        self.texture_cache.insert(path.to_string(), Arc::new(tex));
+        log::info!("텍스처 핫 리로드: {path}");
+    }
+
     /// 매 프레임: ECS World에서 스프라이트를 수집해 렌더링한다.
     ///
     /// # z-order
@@ -333,10 +341,16 @@ impl SpriteRenderer {
         let mut sprites: Vec<(f32, Option<String>, InstanceRaw)> = Vec::new();
         for (entity, sprite) in world.query::<Sprite>() {
             let uv = world.get::<UvRect>(entity).copied().unwrap_or(UvRect::FULL);
+            // image_handle이 있으면 그 경로를 우선 사용, 없으면 texture 경로 사용
+            let tex_key = sprite
+                .image_handle
+                .as_ref()
+                .map(|h| h.path().to_string())
+                .or_else(|| sprite.texture.clone());
             if let Some(gt) = world.get::<GlobalTransform>(entity) {
-                sprites.push((gt.z, sprite.texture.clone(), InstanceRaw::from_global(gt, sprite, uv)));
+                sprites.push((gt.z, tex_key, InstanceRaw::from_global(gt, sprite, uv)));
             } else if let Some(transform) = world.get::<Transform>(entity) {
-                sprites.push((transform.z, sprite.texture.clone(), InstanceRaw::from(transform, sprite, uv)));
+                sprites.push((transform.z, tex_key, InstanceRaw::from(transform, sprite, uv)));
             }
         }
         if sprites.is_empty() {
