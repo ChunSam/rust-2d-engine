@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 15 갱신: 2026-05-24)  
-엔진 버전: v0.15.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 16 갱신: 2026-05-24)  
+엔진 버전: v0.16.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -49,7 +49,8 @@ src/
 │   └── system.rs     System 트레잇
 ├── hierarchy.rs      Parent, Children, GlobalTransform, HierarchySystem, attach/detach  ← Phase 12
 ├── scene.rs          Scene 트레잇, SceneCmd, SceneChange
-├── components.rs     Transform, Sprite
+├── prefab.rs         Tag, EntityDef, SceneDef, Prefab, spawn_entity_def, spawn_scene_def  ← Phase 16
+├── components.rs     Transform, Sprite (Serialize/Deserialize 추가 ← Phase 16)
 ├── resources.rs      WindowConfig, ViewportSize, GameState, ShouldQuit, ...
 ├── camera.rs         Camera (position, zoom, screen_to_world)
 ├── input/
@@ -100,7 +101,71 @@ src/
 
 ---
 
-## 이번 세션에서 한 일 (Phase 15)
+## 이번 세션에서 한 일 (Phase 16)
+
+### Phase 16 — 씬 직렬화 + 프리팹 시스템
+
+**배경**: RON 파일 한 장으로 레벨 전체를 저장·로드하고, 단일 엔티티 템플릿(프리팹)을 재사용할 수 있는 기반을 마련한다.
+
+**추가된 파일**: `src/prefab.rs`  
+**변경된 파일**: `Cargo.toml`, `src/components.rs`, `src/lib.rs`
+
+#### 주요 타입
+
+| 타입 | 역할 |
+|------|------|
+| `Tag` | 엔티티 식별용 문자열 컴포넌트 (Serialize/Deserialize 지원) |
+| `EntityDef` | 엔티티 1개를 기술하는 직렬화 가능 구조체 (tag, transform, sprite 선택 필드) |
+| `SceneDef` | `Vec<EntityDef>` 래퍼 — RON 파일 한 장 = 레벨 하나 |
+| `Prefab` | `EntityDef`를 파일로 저장·로드·스폰하는 단일 템플릿 |
+
+#### 공개 함수
+
+```rust
+spawn_entity_def(world, &EntityDef) -> Entity
+spawn_scene_def(world, &SceneDef)   -> Vec<Entity>
+SceneDef::save(&self, path)         -> Result<(), SaveError>
+SceneDef::load(path)                -> Result<SceneDef, SaveError>
+Prefab::save(&self, path)           -> Result<(), SaveError>
+Prefab::load(path)                  -> Result<Prefab, SaveError>
+Prefab::spawn(&self, world)         -> Entity
+```
+
+#### 씬 파일 형식 (RON 예시)
+
+```ron
+SceneDef(
+    entities: [
+        EntityDef(
+            tag: Some("ground"),
+            transform: Some(Transform(
+                position: (0.0, -200.0),
+                scale: (800.0, 32.0),
+                rotation: 0.0,
+                z: 0.0,
+            )),
+            sprite: Some(Sprite(
+                texture: None,
+                color: (0.3, 0.6, 0.3, 1.0),
+            )),
+        ),
+    ],
+)
+```
+
+#### Cargo.toml 변경
+
+- `glam = { version = "0.28", features = ["serde"] }` — Vec2 serde 지원 추가
+
+#### 설계 결정
+
+- **정적 타입 EntityDef**: Transform + Sprite만 지원. 동적 컴포넌트 레지스트리는 Phase 17 이후 고려.  
+- **save.rs 재사용**: 씬/프리팹 직렬화는 기존 `save()` / `load()` 인프라 위에 구현.  
+- **Tag 컴포넌트 분리**: 씬 로드 후 "player", "enemy" 등 역할을 쿼리로 구분하기 위한 전용 컴포넌트.
+
+---
+
+## 이전 세션 (Phase 15)
 
 ### Phase 15 — 게임패드 + UI Slider/CheckBox
 
@@ -554,7 +619,7 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 13~~ | ~~물리 레이캐스트 + 캐릭터 컨트롤러~~ | — | 완료 |
 | ~~Phase 14~~ | ~~애니메이션 상태 머신~~ | — | 완료 |
 | ~~Phase 15~~ | ~~게임패드(gilrs) + UI Slider/CheckBox~~ | — | 완료 |
-| Phase 16 | 씬 직렬화 + 프리팹 시스템 | L | RON 기반 레벨 저장/로드 |
+| ~~Phase 16~~ | ~~씬 직렬화 + 프리팹 시스템~~ | — | 완료 |
 | Phase 17 | 에셋 파이프라인 + 핫 리로딩 | XL | Handle 기반, Breaking Change 포함 |
 
 ---

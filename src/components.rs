@@ -1,9 +1,10 @@
 use glam::{Mat4, Quat, Vec2, Vec3};
+use serde::{Deserialize, Serialize};
 
 // ─── 렌더 컴포넌트 ────────────────────────────────────────────────────────────
 
 /// 위치·크기·회전을 담는 컴포넌트
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transform {
     pub position: Vec2,
     pub scale: Vec2,
@@ -45,7 +46,7 @@ impl Default for Transform {
 }
 
 /// 스프라이트 외형을 담는 컴포넌트
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sprite {
     /// 텍스처 파일 경로 (None이면 단색 사각형)
     pub texture: Option<String>,

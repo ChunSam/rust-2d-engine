@@ -9,6 +9,7 @@ pub mod hierarchy;
 pub mod input;
 pub mod particle;
 pub mod physics;
+pub mod prefab;
 pub mod renderer;
 pub mod resources;
 pub mod save;
@@ -36,6 +37,7 @@ pub use hierarchy::{attach, detach, Children, GlobalTransform, HierarchySystem, 
 pub use ecs::{Entity, Events, System, World};
 pub use input::{GamepadAxis, GamepadButton, GamepadState, InputMap, InputState};
 pub use particle::{Particle, ParticleEmitter, ParticleSystem};
+pub use prefab::{spawn_entity_def, spawn_scene_def, EntityDef, Prefab, SceneDef, Tag};
 pub use physics::{
     CharacterController, CollisionEvent, PhysicsBody, PhysicsSystem, PhysicsWorld, RaycastHit,
 };
