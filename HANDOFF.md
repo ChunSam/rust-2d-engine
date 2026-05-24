@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 24 갱신: 2026-05-25)  
-엔진 버전: v0.24.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 25 갱신: 2026-05-25)  
+엔진 버전: v0.25.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -44,6 +44,11 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 22 | Reflect 시스템 — Reflect 트레잇, ReflectValue, World::register_reflect/get_reflect, egui Inspector | `90f65e3` |
 | Phase 23 | WASM 빌드 지원 — 플랫폼별 deps 분리, cfg-gate, EventLoopExtWebSys, getrandom wasm_js | `b9f4bdb` |
 | Phase 24 | WASM 브라우저 실행 — WebGL2 강제, 비동기 GPU init, web-time, 캔버스 크기 수정 | `24e2108` |
+| Phase 25-A | WebSocket 네트워킹 — NetworkClient(native tungstenite / WASM web-sys), NetworkEvent, NetworkSystem | `88311e9` |
+| Phase 25-B | ECS 병렬 쿼리 — rayon par_query_for_each/map, par_query2_for_each/map, Send+Sync 컴포넌트 스토리지 | `4637ace` |
+| Phase 25-C | 커스텀 셰이더 머티리얼 — ShaderMaterial, params uniform, 파이프라인 캐시, 스프라이트 배칭 정리 | `9a7b375` |
+| Phase 25-D | 에디터 기즈모 — SelectedEntity 리소스, Inspector 엔티티 생성/삭제, 드래그 이동, DebugRect 강조 | `c19d0b6` |
+| Phase 25-E | rust-survivors 연동 — Sprite 필드 대응, EnemyAiSystem par_query2_map 병렬화 (game repo) | — |
 
 ---
 
@@ -1110,8 +1115,13 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 19~~ | ~~Rhai 스크립팅 — ScriptAsset/ScriptRunner/ScriptingSystem~~ | — | 완료 |
 | ~~Phase 20~~ | ~~애니메이션 블렌딩 — BlendWeight/play_with_crossfade/BlendTree1D~~ | — | 완료 |
 | ~~Phase 21~~ | ~~Texture Atlas — TextureAtlas/AtlasSprite/load_atlas~~ | — | 완료 |
-| Phase 22 | Reflect 시스템 — Reflect 트레잇, ReflectValue, World::register_reflect/get_reflect | ★★☆ | egui 인스펙터 연동 |
-| Phase 23 | WASM 빌드 지원 — cfg-gate 4개 의존성, fs 추상화, 진입점 분기 | ★★★ | rapier/rodio/gilrs/notify 제외 |
+| ~~Phase 22~~ | ~~Reflect 시스템 — Reflect 트레잇, ReflectValue, World::register_reflect/get_reflect~~ | — | 완료 |
+| ~~Phase 23~~ | ~~WASM 빌드 지원 — cfg-gate 4개 의존성, fs 추상화, 진입점 분기~~ | — | 완료 |
+| ~~Phase 24~~ | ~~WASM 브라우저 실행 — WebGL2 강제, 비동기 GPU init, web-time~~ | — | 완료 |
+| ~~Phase 25~~ | ~~네트워킹 / ECS 병렬 / 셰이더 머티리얼 / 에디터 기즈모 / 연동~~ | — | 완료 |
+| Phase 26 | LOD / 컬링 — 카메라 뷰 frustum 컬링, 거리 기반 스프라이트 LOD | ★★☆ | 씬 규모 확장 대비 |
+| Phase 27 | 멀티플레이어 데모 — NetworkClient 기반 서버-클라 롤플레잉 예제 | ★★★ | Phase 25-A 완료 위에 구현 |
+| Phase 28 | 에디터 씬 저장 — 기즈모로 배치한 엔티티를 SceneDef RON으로 직렬화 | ★★☆ | Phase 25-D 위에 구현 |
 
 ---
 
