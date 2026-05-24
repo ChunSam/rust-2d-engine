@@ -1,6 +1,7 @@
 pub mod animation;
 pub mod app;
 pub mod asset;
+pub mod atlas;
 pub mod debug_ui;
 pub mod audio;
 pub mod camera;
@@ -26,6 +27,7 @@ pub mod ui;
 // ── 편의 재수출 ────────────────────────────────────────────────────────────────
 
 pub use asset::{AssetServer, Handle, ImageAsset, ScriptAsset};
+pub use atlas::{AtlasSprite, TextureAtlas};
 pub use debug_ui::DebugUi;
 pub use animation::{
     AnimParam, AnimState, AnimTransition, AnimationClip, AnimationPlayer, AnimationStateMachine,

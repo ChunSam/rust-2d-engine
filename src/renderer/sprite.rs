@@ -6,6 +6,8 @@ use glam::{Mat4, Quat, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::animation::player::UvRect;
+use crate::asset::AssetServer;
+use crate::atlas::AtlasSprite;
 use crate::camera::Camera;
 use crate::components::{Sprite, Transform};
 use crate::ecs::World;
@@ -353,6 +355,52 @@ impl SpriteRenderer {
                 sprites.push((transform.z, tex_key, InstanceRaw::from(transform, sprite, uv)));
             }
         }
+        // ── AtlasSprite 수집: (index, color, atlas handle) 을 먼저 collect ──
+        // query 이터레이터 borrow를 끊은 뒤 AssetServer 와 GlobalTransform 을 읽는다.
+        let atlas_entries: Vec<(
+            crate::ecs::Entity,
+            u32,
+            [f32; 4],
+            crate::asset::Handle<crate::atlas::TextureAtlas>,
+        )> = world
+            .query::<AtlasSprite>()
+            .map(|(e, s)| (e, s.index, s.color, s.atlas.clone()))
+            .collect();
+
+        if !atlas_entries.is_empty() {
+            if let Some(server) = world.resource::<AssetServer>() {
+                for (entity, index, color, atlas_handle) in &atlas_entries {
+                    if let Some(atlas) = server.get_atlas(atlas_handle) {
+                        let uv = atlas.uv_rect(*index);
+                        let tex_key = Some(atlas.texture_path().to_string());
+                        if let Some(gt) = world.get::<GlobalTransform>(*entity) {
+                            sprites.push((
+                                gt.z,
+                                tex_key,
+                                InstanceRaw {
+                                    model: gt.to_matrix().to_cols_array_2d(),
+                                    color: *color,
+                                    uv_offset: [uv.u_offset, uv.v_offset],
+                                    uv_size: [uv.u_size, uv.v_size],
+                                },
+                            ));
+                        } else if let Some(tr) = world.get::<Transform>(*entity) {
+                            sprites.push((
+                                tr.z,
+                                tex_key,
+                                InstanceRaw {
+                                    model: tr.to_matrix().to_cols_array_2d(),
+                                    color: *color,
+                                    uv_offset: [uv.u_offset, uv.v_offset],
+                                    uv_size: [uv.u_size, uv.v_size],
+                                },
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
         if sprites.is_empty() {
             return;
         }

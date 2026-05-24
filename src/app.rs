@@ -144,6 +144,25 @@ impl App {
             .load_image(&path)
     }
 
+    /// 텍스처 아틀라스를 로드하고 `Handle<TextureAtlas>`를 반환한다.
+    ///
+    /// - `cols × rows` 균일 그리드로 분할된 단일 이미지 파일을 아틀라스로 등록한다.
+    /// - 내부적으로 이미지를 CPU(AssetServer)와 GPU(SpriteRenderer) 양쪽에 로드한다.
+    /// - 같은 경로를 다시 호출하면 캐시된 핸들을 반환한다.
+    pub fn load_atlas(
+        &mut self,
+        path: impl Into<String>,
+        cols: u32,
+        rows: u32,
+    ) -> Handle<crate::atlas::TextureAtlas> {
+        let path = path.into();
+        self.pending_textures.push(path.clone());
+        self.world
+            .resource_mut::<AssetServer>()
+            .expect("AssetServer 없음")
+            .load_atlas(&path, cols, rows)
+    }
+
     /// 스크립트 파일을 로드하고 핸들을 반환한다.
     pub fn load_script(&mut self, path: impl AsRef<std::path::Path>) -> Handle<crate::asset::ScriptAsset> {
         self.world

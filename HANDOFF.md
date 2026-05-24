@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 20 갱신: 2026-05-24)  
-엔진 버전: v0.20.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 21 갱신: 2026-05-24)  
+엔진 버전: v0.21.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -40,6 +40,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 18 | egui 인게임 디버그 에디터 — DebugUi, F1 토글, Engine Stats 내장 패널 | `83838a7` |
 | Phase 19 | Rhai 스크립팅 — ScriptAsset, ScriptRunner, ScriptingSystem, App::load_script | `861e832` |
 | Phase 20 | 애니메이션 블렌딩 — BlendWeight, play_with_crossfade, BlendTree1D, BlendTreeSystem | `d6ff7f9` |
+| Phase 21 | Texture Atlas — TextureAtlas, AtlasSprite, AssetServer::load_atlas, App::load_atlas | (이번 커밋) |
 
 ---
 
@@ -107,7 +108,54 @@ src/
 
 ---
 
-## 이번 세션에서 한 일 (Phase 20)
+## 이번 세션에서 한 일 (Phase 21)
+
+### Phase 21 — Texture Atlas 시스템
+
+**배경**: 렌더러는 이미 GPU 인스턴싱을 사용하지만, 텍스처별 드로우콜이 발생한다. 여러 스프라이트를 하나의 아틀라스 텍스처로 묶으면 드로우콜을 최소화할 수 있다.
+
+**추가된 파일**: `src/atlas.rs`
+
+**수정된 파일**: `src/asset.rs`, `src/renderer/sprite.rs`, `src/app.rs`, `src/lib.rs`
+
+**새 타입**
+- `TextureAtlas` (`src/atlas.rs`) — 이미지 핸들 + cols/rows 그리드 정보. `uv_rect(index)` → `UvRect` 계산
+- `AtlasSprite` (`src/atlas.rs`) — `Handle<TextureAtlas>` + index + color. Transform과 함께 사용
+
+**AssetServer 확장** (`src/asset.rs`)
+- `atlases: HashMap<AssetId, TextureAtlas>` + `atlas_path_to_id` 추가
+- `load_atlas(path, cols, rows) → Handle<TextureAtlas>` — 같은 경로 재호출 시 캐시 반환
+- `get_atlas(handle) → Option<&TextureAtlas>` — 렌더러 내부에서 UV 계산에 사용
+
+**App 확장** (`src/app.rs`)
+- `load_atlas(path, cols, rows) → Handle<TextureAtlas>` — `pending_textures`에 추가해 GPU 텍스처도 로드
+
+**렌더러 확장** (`src/renderer/sprite.rs`)
+- `AtlasSprite` 쿼리 → `AssetServer::get_atlas()` → `uv_rect()` → 기존 `sprites` Vec에 추가
+- 기존 Sprite와 동일한 z-sort + texture-group 드로우콜 흐름 그대로 사용 (하위 호환 유지)
+
+**사용 패턴**
+```rust
+// 4×4 그리드 아틀라스 로드
+let atlas = app.load_atlas("assets/characters.png", 4, 4);
+
+// 엔티티 생성
+let e = world.spawn();
+world.add_component(e, Transform::default());
+world.add_component(e, AtlasSprite::new(atlas.clone(), 5)); // index 5번 타일
+
+// index 변경 (애니메이션)
+world.get_mut::<AtlasSprite>(e).unwrap().index = 6;
+```
+
+**핵심 설계 결정**
+- 같은 아틀라스 텍스처를 사용하는 `AtlasSprite` 엔티티들은 z-sort 후 연속 배치 시 **1개 드로우콜**
+- 아틀라스 이미지 경로가 텍스처 캐시 키이므로 기존 `Sprite(texture: path)` 경로와 공유 가능
+- `atlases` map은 `path → AtlasId` 단방향 캐시 — 같은 경로로 다른 cols/rows 호출 시 첫 번째 설정 사용
+
+---
+
+## 이전 세션에서 한 일 (Phase 20)
 
 ### Phase 20 — 애니메이션 블렌딩
 
@@ -891,6 +939,9 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 18~~ | ~~egui 인게임 디버그 에디터~~ | — | 완료 |
 | ~~Phase 19~~ | ~~Rhai 스크립팅 — ScriptAsset/ScriptRunner/ScriptingSystem~~ | — | 완료 |
 | ~~Phase 20~~ | ~~애니메이션 블렌딩 — BlendWeight/play_with_crossfade/BlendTree1D~~ | — | 완료 |
+| ~~Phase 21~~ | ~~Texture Atlas — TextureAtlas/AtlasSprite/load_atlas~~ | — | 완료 |
+| Phase 22 | Reflect 시스템 — Reflect 트레잇, ReflectValue, World::register_reflect/get_reflect | ★★☆ | egui 인스펙터 연동 |
+| Phase 23 | WASM 빌드 지원 — cfg-gate 4개 의존성, fs 추상화, 진입점 분기 | ★★★ | rapier/rodio/gilrs/notify 제외 |
 
 ---
 
