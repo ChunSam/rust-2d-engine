@@ -99,38 +99,64 @@ impl Default for Sprite {
 impl Reflect for Transform {
     fn fields(&self) -> Vec<(&'static str, ReflectValue)> {
         vec![
-            ("x",        ReflectValue::F32(self.position.x)),
-            ("y",        ReflectValue::F32(self.position.y)),
+            ("x", ReflectValue::F32(self.position.x)),
+            ("y", ReflectValue::F32(self.position.y)),
             ("rotation", ReflectValue::F32(self.rotation)),
-            ("scale_x",  ReflectValue::F32(self.scale.x)),
-            ("scale_y",  ReflectValue::F32(self.scale.y)),
-            ("z",        ReflectValue::F32(self.z)),
+            ("scale_x", ReflectValue::F32(self.scale.x)),
+            ("scale_y", ReflectValue::F32(self.scale.y)),
+            ("z", ReflectValue::F32(self.z)),
         ]
     }
     fn set_field(&mut self, name: &str, val: ReflectValue) -> bool {
         match (name, val) {
-            ("x",        ReflectValue::F32(v)) => { self.position.x = v; true }
-            ("y",        ReflectValue::F32(v)) => { self.position.y = v; true }
-            ("rotation", ReflectValue::F32(v)) => { self.rotation = v; true }
-            ("scale_x",  ReflectValue::F32(v)) => { self.scale.x = v; true }
-            ("scale_y",  ReflectValue::F32(v)) => { self.scale.y = v; true }
-            ("z",        ReflectValue::F32(v)) => { self.z = v; true }
+            ("x", ReflectValue::F32(v)) => {
+                self.position.x = v;
+                true
+            }
+            ("y", ReflectValue::F32(v)) => {
+                self.position.y = v;
+                true
+            }
+            ("rotation", ReflectValue::F32(v)) => {
+                self.rotation = v;
+                true
+            }
+            ("scale_x", ReflectValue::F32(v)) => {
+                self.scale.x = v;
+                true
+            }
+            ("scale_y", ReflectValue::F32(v)) => {
+                self.scale.y = v;
+                true
+            }
+            ("z", ReflectValue::F32(v)) => {
+                self.z = v;
+                true
+            }
             _ => false,
         }
     }
-    fn type_name(&self) -> &'static str { "Transform" }
+    fn type_name(&self) -> &'static str {
+        "Transform"
+    }
 }
 
 impl Reflect for Sprite {
     fn fields(&self) -> Vec<(&'static str, ReflectValue)> {
         vec![
-            ("color",   ReflectValue::Color(self.color)),
-            ("texture", ReflectValue::String(self.texture.clone().unwrap_or_default())),
+            ("color", ReflectValue::Color(self.color)),
+            (
+                "texture",
+                ReflectValue::String(self.texture.clone().unwrap_or_default()),
+            ),
         ]
     }
     fn set_field(&mut self, name: &str, val: ReflectValue) -> bool {
         match (name, val) {
-            ("color",   ReflectValue::Color(c)) => { self.color = c; true }
+            ("color", ReflectValue::Color(c)) => {
+                self.color = c;
+                true
+            }
             ("texture", ReflectValue::String(s)) => {
                 self.texture = if s.is_empty() { None } else { Some(s) };
                 true
@@ -138,13 +164,17 @@ impl Reflect for Sprite {
             _ => false,
         }
     }
-    fn type_name(&self) -> &'static str { "Sprite" }
+    fn type_name(&self) -> &'static str {
+        "Sprite"
+    }
 }
 
 // ─── 하위 호환 재수출 ─────────────────────────────────────────────────────────
 // resources.rs로 이동한 타입들을 engine::components::* 경로로도 접근할 수 있도록 유지.
-pub use crate::resources::{FontData, GameState, PendingResize, ShouldQuit, ViewportSize, WindowConfig};
 pub use crate::animation::player::{AnimationClip, AnimationPlayer, UvRect};
+pub use crate::resources::{
+    FontData, GameState, PendingResize, ShouldQuit, ViewportSize, WindowConfig,
+};
 
 // ─── 단위 테스트 ───────────────────────────────────────────────────────────────
 #[cfg(test)]

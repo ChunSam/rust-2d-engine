@@ -56,7 +56,10 @@ pub struct LayoutSystem;
 impl System for LayoutSystem {
     fn run(&mut self, world: &mut World, _dt: f32) {
         let viewport = match world.resource::<ViewportSize>() {
-            Some(v) => ViewportSize { width: v.width, height: v.height },
+            Some(v) => ViewportSize {
+                width: v.width,
+                height: v.height,
+            },
             None => return,
         };
 
@@ -65,7 +68,13 @@ impl System for LayoutSystem {
             .query2::<UiNode, Panel>()
             .map(|(_, node, panel)| {
                 let pos = node.screen_pos(&viewport);
-                (panel.children.clone(), panel.gap, panel.direction, panel.padding, pos)
+                (
+                    panel.children.clone(),
+                    panel.gap,
+                    panel.direction,
+                    panel.padding,
+                    pos,
+                )
             })
             .collect();
 
@@ -98,10 +107,8 @@ impl System for LayoutSystem {
         }
 
         // Step 3: 패널 배경 렌더링 (자식보다 낮은 z로)
-        let panel_entities: Vec<Entity> = world
-            .query2::<UiNode, Panel>()
-            .map(|(e, _, _)| e)
-            .collect();
+        let panel_entities: Vec<Entity> =
+            world.query2::<UiNode, Panel>().map(|(e, _, _)| e).collect();
 
         let mut rects: Vec<DrawRect> = Vec::new();
         for entity in panel_entities {

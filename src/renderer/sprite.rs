@@ -150,9 +150,7 @@ impl SpriteRenderer {
         // ── 셰이더 로드 (컴파일 타임 임베딩) ───────────────────────────────────
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sprite shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("shaders/sprite.wgsl").into(),
-            ),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/sprite.wgsl").into()),
         });
 
         // ── 카메라 유니폼 버퍼 ──────────────────────────────────────────────
@@ -352,7 +350,11 @@ impl SpriteRenderer {
             if let Some(gt) = world.get::<GlobalTransform>(entity) {
                 sprites.push((gt.z, tex_key, InstanceRaw::from_global(gt, sprite, uv)));
             } else if let Some(transform) = world.get::<Transform>(entity) {
-                sprites.push((transform.z, tex_key, InstanceRaw::from(transform, sprite, uv)));
+                sprites.push((
+                    transform.z,
+                    tex_key,
+                    InstanceRaw::from(transform, sprite, uv),
+                ));
             }
         }
         // ── AtlasSprite 수집: (index, color, atlas handle) 을 먼저 collect ──

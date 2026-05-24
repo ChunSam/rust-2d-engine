@@ -104,8 +104,7 @@ impl PhysicsWorld {
         radius: f32,
         lock_rotation: bool,
     ) -> (RigidBodyHandle, ColliderHandle) {
-        let mut builder =
-            RigidBodyBuilder::dynamic().translation(vector![position.x, position.y]);
+        let mut builder = RigidBodyBuilder::dynamic().translation(vector![position.x, position.y]);
         if lock_rotation {
             builder = builder.lock_rotations();
         }
@@ -261,10 +260,7 @@ impl PhysicsWorld {
                 RaycastHit {
                     collider_handle: handle,
                     point: Vec2::new(hit_point.x, hit_point.y),
-                    normal: Vec2::new(
-                        intersection.normal.x,
-                        intersection.normal.y,
-                    ),
+                    normal: Vec2::new(intersection.normal.x, intersection.normal.y),
                     toi: intersection.time_of_impact,
                 }
             })
@@ -290,10 +286,7 @@ impl PhysicsWorld {
         pixels_per_unit: f32,
     ) {
         let ppu = pixels_per_unit;
-        let desired = vector![
-            desired_translation.x / ppu,
-            desired_translation.y / ppu
-        ];
+        let desired = vector![desired_translation.x / ppu, desired_translation.y / ppu];
 
         // 콜라이더 위치와 shape를 먼저 복사해 borrow 분리
         let (col_pos, shape_type) = match self.collider_set.get(col_handle) {
@@ -387,12 +380,7 @@ mod tests {
         pw.add_static_box(Vec2::new(0.0, 0.0), 5.0, 0.5);
         pw.step(1.0 / 60.0);
 
-        let hit = pw.cast_ray_with_normal(
-            Vec2::new(0.0, -5.0),
-            Vec2::new(0.0, 1.0),
-            20.0,
-            true,
-        );
+        let hit = pw.cast_ray_with_normal(Vec2::new(0.0, -5.0), Vec2::new(0.0, 1.0), 20.0, true);
         assert!(hit.is_some());
         let h = hit.unwrap();
         // 위에서 아래로 쐈으므로 법선은 위쪽 (Y < 0 in physics coords)

@@ -28,10 +28,10 @@ impl CheckBox {
         Self {
             checked: false,
             label: label.into(),
-            checked_color:   [0.28, 0.56, 0.90, 1.0],
+            checked_color: [0.28, 0.56, 0.90, 1.0],
             unchecked_color: [0.18, 0.18, 0.22, 1.0],
-            border_color:    [0.50, 0.52, 0.62, 1.0],
-            text_color:      [210, 210, 220, 255],
+            border_color: [0.50, 0.52, 0.62, 1.0],
+            text_color: [210, 210, 220, 255],
             font_size: 16.0,
             box_size: 20.0,
         }

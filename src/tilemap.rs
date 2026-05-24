@@ -90,8 +90,7 @@ impl Default for TilemapSystem {
 impl System for TilemapSystem {
     fn run(&mut self, world: &mut World, _dt: f32) {
         // 현재 살아있는 타일맵 엔티티 수집
-        let tilemap_entities: Vec<Entity> =
-            world.query::<Tilemap>().map(|(e, _)| e).collect();
+        let tilemap_entities: Vec<Entity> = world.query::<Tilemap>().map(|(e, _)| e).collect();
 
         // 사라진 타일맵 엔티티의 타일들 디스폰
         let removed: Vec<Entity> = self
@@ -116,12 +115,7 @@ impl System for TilemapSystem {
 
             let (atlas, tiles, tile_size, origin) = {
                 let tm = world.get::<Tilemap>(map_entity).unwrap();
-                (
-                    tm.atlas.clone(),
-                    tm.tiles.clone(),
-                    tm.tile_size,
-                    tm.origin,
-                )
+                (tm.atlas.clone(), tm.tiles.clone(), tm.tile_size, tm.origin)
             };
 
             let mut spawned = Vec::new();

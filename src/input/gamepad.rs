@@ -107,17 +107,20 @@ impl GamepadState {
 
     /// `pad` 슬롯에서 `button`이 눌려 있으면 true.
     pub fn is_pressed(&self, pad: usize, button: GamepadButton) -> bool {
-        self.slot(pad).map_or(false, |s| s.pressed.contains(&button))
+        self.slot(pad)
+            .map_or(false, |s| s.pressed.contains(&button))
     }
 
     /// `pad` 슬롯에서 `button`이 이번 프레임에 눌렸으면 true.
     pub fn just_pressed(&self, pad: usize, button: GamepadButton) -> bool {
-        self.slot(pad).map_or(false, |s| s.just_pressed.contains(&button))
+        self.slot(pad)
+            .map_or(false, |s| s.just_pressed.contains(&button))
     }
 
     /// `pad` 슬롯에서 `button`이 이번 프레임에 떼어졌으면 true.
     pub fn just_released(&self, pad: usize, button: GamepadButton) -> bool {
-        self.slot(pad).map_or(false, |s| s.just_released.contains(&button))
+        self.slot(pad)
+            .map_or(false, |s| s.just_released.contains(&button))
     }
 
     /// `pad` 슬롯의 `axis` 값 (−1.0 ~ 1.0, 데드존 미적용).
@@ -197,22 +200,22 @@ impl GamepadState {
 fn map_button(btn: gilrs::Button) -> Option<GamepadButton> {
     use gilrs::Button;
     Some(match btn {
-        Button::South        => GamepadButton::South,
-        Button::East         => GamepadButton::East,
-        Button::North        => GamepadButton::North,
-        Button::West         => GamepadButton::West,
-        Button::LeftTrigger  => GamepadButton::LeftBumper,
+        Button::South => GamepadButton::South,
+        Button::East => GamepadButton::East,
+        Button::North => GamepadButton::North,
+        Button::West => GamepadButton::West,
+        Button::LeftTrigger => GamepadButton::LeftBumper,
         Button::RightTrigger => GamepadButton::RightBumper,
-        Button::LeftTrigger2  => GamepadButton::LeftTrigger,
+        Button::LeftTrigger2 => GamepadButton::LeftTrigger,
         Button::RightTrigger2 => GamepadButton::RightTrigger,
-        Button::Select       => GamepadButton::Select,
-        Button::Start        => GamepadButton::Start,
-        Button::LeftThumb    => GamepadButton::LeftThumb,
-        Button::RightThumb   => GamepadButton::RightThumb,
-        Button::DPadUp       => GamepadButton::DPadUp,
-        Button::DPadDown     => GamepadButton::DPadDown,
-        Button::DPadLeft     => GamepadButton::DPadLeft,
-        Button::DPadRight    => GamepadButton::DPadRight,
+        Button::Select => GamepadButton::Select,
+        Button::Start => GamepadButton::Start,
+        Button::LeftThumb => GamepadButton::LeftThumb,
+        Button::RightThumb => GamepadButton::RightThumb,
+        Button::DPadUp => GamepadButton::DPadUp,
+        Button::DPadDown => GamepadButton::DPadDown,
+        Button::DPadLeft => GamepadButton::DPadLeft,
+        Button::DPadRight => GamepadButton::DPadRight,
         _ => return None,
     })
 }
@@ -221,14 +224,14 @@ fn map_button(btn: gilrs::Button) -> Option<GamepadButton> {
 fn map_axis(axis: gilrs::Axis) -> Option<GamepadAxis> {
     use gilrs::Axis;
     Some(match axis {
-        Axis::LeftStickX  => GamepadAxis::LeftStickX,
-        Axis::LeftStickY  => GamepadAxis::LeftStickY,
+        Axis::LeftStickX => GamepadAxis::LeftStickX,
+        Axis::LeftStickY => GamepadAxis::LeftStickY,
         Axis::RightStickX => GamepadAxis::RightStickX,
         Axis::RightStickY => GamepadAxis::RightStickY,
-        Axis::LeftZ       => GamepadAxis::LeftTrigger,
-        Axis::RightZ      => GamepadAxis::RightTrigger,
-        Axis::DPadX       => GamepadAxis::DPadX,
-        Axis::DPadY       => GamepadAxis::DPadY,
+        Axis::LeftZ => GamepadAxis::LeftTrigger,
+        Axis::RightZ => GamepadAxis::RightTrigger,
+        Axis::DPadX => GamepadAxis::DPadX,
+        Axis::DPadY => GamepadAxis::DPadY,
         _ => return None,
     })
 }

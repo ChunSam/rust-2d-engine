@@ -29,7 +29,11 @@ impl ScriptRunner {
         scope.push("rot", 0.0_f64);
         scope.push("sx", 1.0_f64);
         scope.push("sy", 1.0_f64);
-        Self { script, scope, started: false }
+        Self {
+            script,
+            scope,
+            started: false,
+        }
     }
 
     /// 다음 프레임에 on_start()가 다시 호출되도록 리셋한다 (핫 리로드 후 유용).
@@ -80,13 +84,15 @@ impl System for ScriptingSystem {
             // Transform 스냅샷 읽기
             let (tx, ty, tr, tsx, tsy) = world
                 .get::<Transform>(entity)
-                .map(|t| (
-                    t.position.x as f64,
-                    t.position.y as f64,
-                    t.rotation as f64,
-                    t.scale.x as f64,
-                    t.scale.y as f64,
-                ))
+                .map(|t| {
+                    (
+                        t.position.x as f64,
+                        t.position.y as f64,
+                        t.rotation as f64,
+                        t.scale.x as f64,
+                        t.scale.y as f64,
+                    )
+                })
                 .unwrap_or((0.0, 0.0, 0.0, 1.0, 1.0));
 
             // AssetServer에서 AST 읽기
@@ -112,7 +118,13 @@ impl System for ScriptingSystem {
                     call_fn_optional(&self.engine, &mut runner.scope, &ast, "on_start", ());
                     runner.started = true;
                 }
-                call_fn_optional(&self.engine, &mut runner.scope, &ast, "on_update", (dt as f64,));
+                call_fn_optional(
+                    &self.engine,
+                    &mut runner.scope,
+                    &ast,
+                    "on_update",
+                    (dt as f64,),
+                );
 
                 let nx = runner.scope.get_value::<f64>("x").unwrap_or(tx);
                 let ny = runner.scope.get_value::<f64>("y").unwrap_or(ty);

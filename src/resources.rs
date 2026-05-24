@@ -33,7 +33,10 @@ pub struct ShouldQuit(pub bool);
 
 // ─── 뷰포트 / 창 설정 ────────────────────────────────────────────────────────
 
-/// 현재 GPU 서피스(= 창 클라이언트 영역) 픽셀 크기.
+/// 현재 게임 좌표계 기준 뷰포트 크기.
+///
+/// 네이티브 Retina/HiDPI 환경에서는 GPU 서피스가 물리 픽셀이고 게임 좌표는
+/// 논리 픽셀이다. 이 값을 논리 픽셀로 유지해야 스프라이트와 UI가 의도한 크기로 보인다.
 #[derive(Debug, Clone, Copy)]
 pub struct ViewportSize {
     pub width: f32,
@@ -55,6 +58,16 @@ impl ViewportSize {
             width: w as f32,
             height: h as f32,
         }
+    }
+}
+
+/// 논리 픽셀 1개가 몇 물리 픽셀인지 나타내는 배율.
+#[derive(Debug, Clone, Copy)]
+pub struct DisplayScaleFactor(pub f32);
+
+impl Default for DisplayScaleFactor {
+    fn default() -> Self {
+        Self(1.0)
     }
 }
 

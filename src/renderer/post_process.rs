@@ -46,22 +46,22 @@ impl Default for PostProcessConfig {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct PostProcessUniforms {
     vignette_strength: f32,
-    vignette_radius:   f32,
-    chroma_offset:     f32,
-    bloom_threshold:   f32,
-    bloom_intensity:   f32,
-    _pad:              [f32; 3],
+    vignette_radius: f32,
+    chroma_offset: f32,
+    bloom_threshold: f32,
+    bloom_intensity: f32,
+    _pad: [f32; 3],
 }
 
 impl From<&PostProcessConfig> for PostProcessUniforms {
     fn from(c: &PostProcessConfig) -> Self {
         Self {
             vignette_strength: c.vignette_strength,
-            vignette_radius:   c.vignette_radius,
-            chroma_offset:     c.chroma_offset,
-            bloom_threshold:   c.bloom_threshold,
-            bloom_intensity:   c.bloom_intensity,
-            _pad:              [0.0; 3],
+            vignette_radius: c.vignette_radius,
+            chroma_offset: c.chroma_offset,
+            bloom_threshold: c.bloom_threshold,
+            bloom_intensity: c.bloom_intensity,
+            _pad: [0.0; 3],
         }
     }
 }
@@ -70,16 +70,16 @@ impl From<&PostProcessConfig> for PostProcessUniforms {
 pub struct PostProcessRenderer {
     /// 씬을 먼저 그리는 중간 렌더 타겟 텍스처 뷰
     pub target_view: wgpu::TextureView,
-    target_texture:  wgpu::Texture,
+    target_texture: wgpu::Texture,
     /// 현재 중간 텍스처 해상도
-    pub width:  u32,
+    pub width: u32,
     pub height: u32,
-    format:          wgpu::TextureFormat,
-    pipeline:        wgpu::RenderPipeline,
-    sampler:         wgpu::Sampler,
+    format: wgpu::TextureFormat,
+    pipeline: wgpu::RenderPipeline,
+    sampler: wgpu::Sampler,
     bind_group_layout: wgpu::BindGroupLayout,
-    bind_group:      wgpu::BindGroup,
-    uniform_buffer:  wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    uniform_buffer: wgpu::Buffer,
 }
 
 impl PostProcessRenderer {
@@ -91,92 +91,89 @@ impl PostProcessRenderer {
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("post_process shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("shaders/post_process.wgsl").into(),
-            ),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/post_process.wgsl").into()),
         });
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label:        Some("post_process sampler"),
+            label: Some("post_process sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
-            mag_filter:   wgpu::FilterMode::Linear,
-            min_filter:   wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
 
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label:    Some("post_process uniforms"),
+            label: Some("post_process uniforms"),
             contents: bytemuck::bytes_of(&PostProcessUniforms::zeroed()),
-            usage:    wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("post_process bgl"),
-                entries: &[
-                    // binding 0: 씬 텍스처
-                    wgpu::BindGroupLayoutEntry {
-                        binding:    0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type:    wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled:   false,
-                        },
-                        count: None,
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("post_process bgl"),
+            entries: &[
+                // binding 0: 씬 텍스처
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    // binding 1: 샘플러
-                    wgpu::BindGroupLayoutEntry {
-                        binding:    1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
+                    count: None,
+                },
+                // binding 1: 샘플러
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // binding 2: 유니폼
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                    // binding 2: 유니폼
-                    wgpu::BindGroupLayoutEntry {
-                        binding:    2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty:                 wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size:   None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
+                    count: None,
+                },
+            ],
+        });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label:                Some("post_process pipeline layout"),
-            bind_group_layouts:   &[&bind_group_layout],
+            label: Some("post_process pipeline layout"),
+            bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label:  Some("post_process pipeline"),
+            label: Some("post_process pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
-                module:      &shader,
+                module: &shader,
                 entry_point: "vs_main",
-                buffers:     &[],
+                buffers: &[],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module:      &shader,
+                module: &shader,
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
-                    format:     surface_format,
-                    blend:      Some(wgpu::BlendState::REPLACE),
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
-            primitive:    wgpu::PrimitiveState::default(),
+            primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
-            multisample:  wgpu::MultisampleState::default(),
-            multiview:    None,
-            cache:        None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
         });
 
         let (target_texture, target_view) =
@@ -227,24 +224,20 @@ impl PostProcessRenderer {
     }
 
     /// 중간 텍스처 → 최종 스왑체인 뷰로 포스트프로세스 패스를 실행한다.
-    pub fn run_pass(
-        &self,
-        enc: &mut wgpu::CommandEncoder,
-        final_view: &wgpu::TextureView,
-    ) {
+    pub fn run_pass(&self, enc: &mut wgpu::CommandEncoder, final_view: &wgpu::TextureView) {
         let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("post_process pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view:           final_view,
+                view: final_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load:  wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                     store: wgpu::StoreOp::Store,
                 },
             })],
             depth_stencil_attachment: None,
-            occlusion_query_set:      None,
-            timestamp_writes:         None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
         });
 
         pass.set_pipeline(&self.pipeline);
@@ -262,14 +255,17 @@ impl PostProcessRenderer {
         format: wgpu::TextureFormat,
     ) -> (wgpu::Texture, wgpu::TextureView) {
         let tex = device.create_texture(&wgpu::TextureDescriptor {
-            label:  Some("post_process target"),
-            size:   wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            label: Some("post_process target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
-            sample_count:    1,
-            dimension:       wgpu::TextureDimension::D2,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
             format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                 | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
@@ -284,13 +280,19 @@ impl PostProcessRenderer {
         uniform_buffer: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label:   Some("post_process bind group"),
+            label: Some("post_process bind group"),
             layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
                 wgpu::BindGroupEntry {
-                    binding:  2,
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
                     resource: uniform_buffer.as_entire_binding(),
                 },
             ],

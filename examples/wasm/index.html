@@ -3,19 +3,35 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>rust-2d-engine — WASM 데모</title>
+  <title>rust-2d-engine — WASM demo</title>
   <style>
-    body { margin: 0; background: #111; display: flex; justify-content: center; align-items: center; height: 100vh; }
-    canvas { display: block; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d0d0d;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: system-ui, sans-serif;
+    }
+    #game-canvas { display: block; max-width: 100%; border: 1px solid #333; }
+    #status { margin-top: 10px; font-size: 13px; color: #555; }
   </style>
 </head>
 <body>
   <canvas id="game-canvas" width="1280" height="720"></canvas>
+  <p id="status">Loading WASM…</p>
   <script type="module">
-    // wasm-pack 빌드 후 생성된 모듈을 로드한다.
-    // 빌드: wasm-pack build --target web --out-dir examples/wasm/pkg
-    import init from "./pkg/engine.js";
-    init();
+    import init, { run_demo } from "./pkg/engine.js";
+    try {
+      await init();
+      document.getElementById("status").textContent = "";
+      run_demo();
+    } catch (e) {
+      document.getElementById("status").textContent = "Error: " + e;
+      console.error(e);
+    }
   </script>
 </body>
 </html>

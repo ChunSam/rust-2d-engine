@@ -9,6 +9,7 @@ use wgpu::{
 };
 
 use crate::ecs::World;
+use crate::resources::DisplayScaleFactor;
 
 /// 한 줄 텍스트 그리기 명령. `position`은 좌상단 픽셀 좌표.
 #[derive(Debug, Clone)]
@@ -133,6 +134,11 @@ impl TextRenderer {
             }
             _ => return,
         };
+        let scale_factor = world
+            .resource::<DisplayScaleFactor>()
+            .map(|s| s.0)
+            .unwrap_or(1.0)
+            .max(1.0);
 
         // Viewport 갱신 (매 프레임 해상도를 GPU 유니폼에 씀)
         self.viewport.update(
@@ -149,12 +155,14 @@ impl TextRenderer {
         let buffers: Vec<(Buffer, DrawText)> = items
             .into_iter()
             .map(|d| {
-                let metrics = Metrics::new(d.size, d.size * 1.2); // line_height = 1.2× size
+                let size = d.size * scale_factor;
+                let position = d.position * scale_factor;
+                let metrics = Metrics::new(size, size * 1.2); // line_height = 1.2× size
                 let mut buf = Buffer::new(&mut self.font_system, metrics);
                 buf.set_size(
                     &mut self.font_system,
-                    Some(w as f32 - d.position.x),
-                    Some(h as f32 - d.position.y),
+                    Some(w as f32 - position.x),
+                    Some(h as f32 - position.y),
                 );
                 buf.set_text(
                     &mut self.font_system,
@@ -163,7 +171,10 @@ impl TextRenderer {
                     Shaping::Advanced,
                 );
                 buf.shape_until_scroll(&mut self.font_system, false);
-                (buf, d)
+                let mut scaled = d;
+                scaled.position = position;
+                scaled.size = size;
+                (buf, scaled)
             })
             .collect();
 

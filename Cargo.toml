@@ -6,6 +6,9 @@ description = "Lightweight 2D game engine — wgpu rendering, custom ECS, rapier
 repository  = "https://github.com/ChunSam/rust-2d-engine"
 license     = "MIT"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 winit    = "0.30"
 wgpu     = { version = "22", features = ["webgl"] }
@@ -38,5 +41,14 @@ wasm-bindgen-futures  = "0.4"
 web-sys               = { version = "0.3", features = ["Window", "Performance", "HtmlCanvasElement", "Document", "Element"] }
 console_error_panic_hook = "0.1"
 getrandom             = { version = "0.2", features = ["js"] }
+web-time              = "1"
 # getrandom 0.3 (wgpu 등 전이 의존성) — wasm_js 백엔드 명시
 getrandom3            = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+
+# ── wasm-pack 설정 ────────────────────────────────────────────────────────────
+# macOS ._<file> 메타데이터 파일 오인식 문제로 wasm-opt 비활성화.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = false

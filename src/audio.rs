@@ -60,10 +60,18 @@ impl<S: Source<Item = f32>> Iterator for PannedSource<S> {
 }
 
 impl<S: Source<Item = f32>> Source for PannedSource<S> {
-    fn current_frame_len(&self) -> Option<usize> { self.inner.current_frame_len() }
-    fn channels(&self) -> u16 { self.inner.channels() }
-    fn sample_rate(&self) -> u32 { self.inner.sample_rate() }
-    fn total_duration(&self) -> Option<Duration> { self.inner.total_duration() }
+    fn current_frame_len(&self) -> Option<usize> {
+        self.inner.current_frame_len()
+    }
+    fn channels(&self) -> u16 {
+        self.inner.channels()
+    }
+    fn sample_rate(&self) -> u32 {
+        self.inner.sample_rate()
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
 }
 
 // ─── 페이드 상태 ──────────────────────────────────────────────────────────────
@@ -263,7 +271,8 @@ impl AudioManager {
     ///
     /// 예: `assign_bus("bgm", "music")` → `set_bus_volume("music", v)` 로 일괄 제어.
     pub fn assign_bus(&mut self, channel: &str, bus: &str) {
-        self.channel_buses.insert(channel.to_string(), bus.to_string());
+        self.channel_buses
+            .insert(channel.to_string(), bus.to_string());
         // 즉시 버스 볼륨 반영
         let eff = self.effective_volume(channel);
         if let Some(sink) = self.sinks.get(channel) {
@@ -273,7 +282,8 @@ impl AudioManager {
 
     /// 버스 전체 볼륨을 설정한다. 버스에 속한 모든 채널에 즉시 적용된다.
     pub fn set_bus_volume(&mut self, bus: &str, volume: f32) {
-        self.bus_volumes.insert(bus.to_string(), volume.clamp(0.0, 1.0));
+        self.bus_volumes
+            .insert(bus.to_string(), volume.clamp(0.0, 1.0));
         // 버스에 속한 모든 채널 싱크 업데이트
         let channels: Vec<String> = self
             .channel_buses
@@ -324,7 +334,9 @@ impl AudioManager {
                 let t = (fade.elapsed / fade.duration).clamp(0.0, 1.0);
                 let vol = fade.start_vol + (fade.target_vol - fade.start_vol) * t;
                 if let Some(sink) = self.sinks.get(&ch) {
-                    let bus_vol = self.channel_buses.get(&ch)
+                    let bus_vol = self
+                        .channel_buses
+                        .get(&ch)
                         .and_then(|b| self.bus_volumes.get(b))
                         .copied()
                         .unwrap_or(1.0);
@@ -341,7 +353,12 @@ impl AudioManager {
             if done {
                 self.fades.remove(&ch);
                 self.stop(&ch);
-            } else if self.fades.get(&ch).map(|f| f.elapsed >= f.duration).unwrap_or(false) {
+            } else if self
+                .fades
+                .get(&ch)
+                .map(|f| f.elapsed >= f.duration)
+                .unwrap_or(false)
+            {
                 self.fades.remove(&ch);
             }
         }
@@ -349,7 +366,13 @@ impl AudioManager {
 
     // ── 내부 헬퍼 ─────────────────────────────────────────────────────────────
 
-    fn play_internal(&mut self, channel: &str, path: &str, repeat: bool, fade_in_secs: Option<f32>) {
+    fn play_internal(
+        &mut self,
+        channel: &str,
+        path: &str,
+        repeat: bool,
+        fade_in_secs: Option<f32>,
+    ) {
         if let Some(old) = self.sinks.remove(channel) {
             old.stop();
         }
@@ -389,8 +412,11 @@ impl AudioManager {
             let panned = PannedSource::new(source.convert_samples::<f32>(), pan);
             if let Some(fade_dur) = fade_in_secs {
                 let faded = panned.fade_in(Duration::from_secs_f32(fade_dur));
-                if repeat { sink.append(faded.repeat_infinite()); }
-                else { sink.append(faded); }
+                if repeat {
+                    sink.append(faded.repeat_infinite());
+                } else {
+                    sink.append(faded);
+                }
             } else if repeat {
                 sink.append(panned.repeat_infinite());
             } else {
@@ -398,8 +424,11 @@ impl AudioManager {
             }
         } else if let Some(fade_dur) = fade_in_secs {
             let faded = source.fade_in(Duration::from_secs_f32(fade_dur));
-            if repeat { sink.append(faded.repeat_infinite()); }
-            else { sink.append(faded); }
+            if repeat {
+                sink.append(faded.repeat_infinite());
+            } else {
+                sink.append(faded);
+            }
         } else if repeat {
             sink.append(source.repeat_infinite());
         } else {
@@ -416,7 +445,9 @@ impl AudioManager {
     }
 
     fn effective_volume_params(&self, base: f32, channel: &str) -> f32 {
-        let bus_vol = self.channel_buses.get(channel)
+        let bus_vol = self
+            .channel_buses
+            .get(channel)
             .and_then(|b| self.bus_volumes.get(b))
             .copied()
             .unwrap_or(1.0);
@@ -447,14 +478,23 @@ impl AudioManager {
         sink.set_volume(self.effective_volume(channel));
         let file = match File::open(path) {
             Ok(f) => f,
-            Err(e) => { log::warn!("오디오 파일을 열 수 없습니다 '{path}': {e}"); return; }
+            Err(e) => {
+                log::warn!("오디오 파일을 열 수 없습니다 '{path}': {e}");
+                return;
+            }
         };
         let source = match Decoder::new(BufReader::new(file)) {
             Ok(s) => s,
-            Err(e) => { log::warn!("오디오 디코딩 실패 '{path}': {e}"); return; }
+            Err(e) => {
+                log::warn!("오디오 디코딩 실패 '{path}': {e}");
+                return;
+            }
         };
-        if repeat { sink.append(source.repeat_infinite()); }
-        else { sink.append(source); }
+        if repeat {
+            sink.append(source.repeat_infinite());
+        } else {
+            sink.append(source);
+        }
         self.sinks.insert(channel.to_string(), sink);
     }
 }
@@ -472,22 +512,19 @@ mod tests {
 
     #[test]
     fn spatial_params_max_dist_is_silent() {
-        let (vol, _) =
-            AudioManager::spatial_params(Vec2::new(500.0, 0.0), Vec2::ZERO, 500.0);
+        let (vol, _) = AudioManager::spatial_params(Vec2::new(500.0, 0.0), Vec2::ZERO, 500.0);
         assert!(vol < 0.001);
     }
 
     #[test]
     fn spatial_params_right_side_pans_right() {
-        let (_, pan) =
-            AudioManager::spatial_params(Vec2::new(250.0, 0.0), Vec2::ZERO, 500.0);
+        let (_, pan) = AudioManager::spatial_params(Vec2::new(250.0, 0.0), Vec2::ZERO, 500.0);
         assert!(pan > 0.0);
     }
 
     #[test]
     fn spatial_params_left_side_pans_left() {
-        let (_, pan) =
-            AudioManager::spatial_params(Vec2::new(-250.0, 0.0), Vec2::ZERO, 500.0);
+        let (_, pan) = AudioManager::spatial_params(Vec2::new(-250.0, 0.0), Vec2::ZERO, 500.0);
         assert!(pan < 0.0);
     }
 }

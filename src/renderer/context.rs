@@ -14,10 +14,28 @@ impl GpuContext {
     /// 창을 받아 wgpu Surface/Device/Queue를 초기화한다.
     /// wgpu 초기화는 async이므로 pollster::block_on으로 감싸서 호출한다.
     pub async fn new(window: Arc<Window>) -> Self {
+        // WASM: winit이 canvas를 attach한 직후 inner_size()가 1x1을 반환하는 경우가 있다.
+        // canvas의 width/height 속성을 DOM에서 직접 읽어 실제 해상도를 사용한다.
+        #[cfg(not(target_arch = "wasm32"))]
         let size = window.inner_size();
+        #[cfg(target_arch = "wasm32")]
+        let size = {
+            use wasm_bindgen::JsCast;
+            web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.get_element_by_id("game-canvas"))
+                .and_then(|el| el.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+                .map(|c| winit::dpi::PhysicalSize::new(c.width().max(1), c.height().max(1)))
+                .unwrap_or_else(|| window.inner_size())
+        };
 
-        // 1. 인스턴스: 플랫폼별 백엔드 자동 선택 (Metal/Vulkan/DX12/WebGPU)
+        // 1. 인스턴스: 플랫폼별 백엔드 선택
+        // WASM: WebGPU 어댑터가 maxInterStageShaderComponents 등 미지원 limit을 거부하므로
+        //       WebGL2 백엔드(GL)를 강제한다. Cargo.toml의 "webgl" feature로 활성화됨.
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            #[cfg(target_arch = "wasm32")]
+            backends: wgpu::Backends::GL,
+            #[cfg(not(target_arch = "wasm32"))]
             backends: wgpu::Backends::all(),
             ..Default::default()
         });
@@ -42,7 +60,16 @@ impl GpuContext {
                 &wgpu::DeviceDescriptor {
                     label: Some("main device"),
                     required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
+                    required_limits: {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            wgpu::Limits::default()
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            wgpu::Limits::downlevel_webgl2_defaults()
+                        }
+                    },
                     memory_hints: wgpu::MemoryHints::default(),
                 },
                 None,

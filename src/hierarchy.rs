@@ -107,10 +107,8 @@ impl System for HierarchySystem {
 
         // 2단계: 자식 엔티티 → 부모 GlobalTransform과 합성 (2회 반복으로 깊이 3 지원)
         for _ in 0..2 {
-            let children: Vec<(Entity, Entity)> = world
-                .query::<Parent>()
-                .map(|(e, p)| (e, p.0))
-                .collect();
+            let children: Vec<(Entity, Entity)> =
+                world.query::<Parent>().map(|(e, p)| (e, p.0)).collect();
 
             let updates: Vec<(Entity, GlobalTransform)> = children
                 .into_iter()

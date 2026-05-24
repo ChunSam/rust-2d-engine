@@ -30,9 +30,9 @@ impl Button {
         Self {
             label: label.into(),
             state: ButtonState::Normal,
-            color_normal:   [0.20, 0.20, 0.25, 1.0],
-            color_hovered:  [0.30, 0.30, 0.40, 1.0],
-            color_pressed:  [0.12, 0.12, 0.18, 1.0],
+            color_normal: [0.20, 0.20, 0.25, 1.0],
+            color_hovered: [0.30, 0.30, 0.40, 1.0],
+            color_pressed: [0.12, 0.12, 0.18, 1.0],
             color_disabled: [0.15, 0.15, 0.15, 0.6],
             text_color: [220, 220, 220, 255],
             font_size: 18.0,
@@ -42,9 +42,9 @@ impl Button {
     /// 현재 상태에 대응하는 배경 색상을 반환한다.
     pub fn current_color(&self) -> [f32; 4] {
         match self.state {
-            ButtonState::Normal   => self.color_normal,
-            ButtonState::Hovered  => self.color_hovered,
-            ButtonState::Pressed  => self.color_pressed,
+            ButtonState::Normal => self.color_normal,
+            ButtonState::Hovered => self.color_hovered,
+            ButtonState::Pressed => self.color_pressed,
             ButtonState::Disabled => self.color_disabled,
         }
     }

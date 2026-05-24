@@ -75,7 +75,10 @@ mod tests {
 
     #[test]
     fn center_anchor_positions_correctly() {
-        let vp = ViewportSize { width: 800.0, height: 600.0 };
+        let vp = ViewportSize {
+            width: 800.0,
+            height: 600.0,
+        };
         let node = UiNode::new(0.0, 0.0, 200.0, 50.0).with_anchor(Anchor::Center);
         let pos = node.screen_pos(&vp);
         assert_eq!(pos, Vec2::new(300.0, 275.0));
@@ -83,7 +86,10 @@ mod tests {
 
     #[test]
     fn bottom_right_anchor() {
-        let vp = ViewportSize { width: 800.0, height: 600.0 };
+        let vp = ViewportSize {
+            width: 800.0,
+            height: 600.0,
+        };
         let node = UiNode::new(-10.0, -10.0, 100.0, 40.0).with_anchor(Anchor::BottomRight);
         let pos = node.screen_pos(&vp);
         assert_eq!(pos, Vec2::new(690.0, 550.0));

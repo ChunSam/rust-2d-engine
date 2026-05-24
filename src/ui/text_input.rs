@@ -13,9 +13,9 @@ pub struct TextInput {
     pub cursor_blink: f32,
     pub cursor_visible: bool,
 
-    pub color_normal:  [f32; 4],
+    pub color_normal: [f32; 4],
     pub color_focused: [f32; 4],
-    pub text_color:    [u8; 4],
+    pub text_color: [u8; 4],
     pub font_size: f32,
 }
 
@@ -29,9 +29,9 @@ impl TextInput {
             max_len: 256,
             cursor_blink: 0.0,
             cursor_visible: true,
-            color_normal:  [0.15, 0.15, 0.20, 1.0],
+            color_normal: [0.15, 0.15, 0.20, 1.0],
             color_focused: [0.20, 0.25, 0.35, 1.0],
-            text_color:    [220, 220, 220, 255],
+            text_color: [220, 220, 220, 255],
             font_size: 16.0,
         }
     }
@@ -47,7 +47,11 @@ impl TextInput {
     }
 
     pub fn current_color(&self) -> [f32; 4] {
-        if self.focused { self.color_focused } else { self.color_normal }
+        if self.focused {
+            self.color_focused
+        } else {
+            self.color_normal
+        }
     }
 
     /// 커서 바로 앞 문자를 삭제한다 (UTF-8 안전).

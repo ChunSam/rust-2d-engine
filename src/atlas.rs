@@ -69,7 +69,11 @@ pub struct AtlasSprite {
 
 impl AtlasSprite {
     pub fn new(atlas: Handle<TextureAtlas>, index: u32) -> Self {
-        Self { atlas, index, color: [1.0; 4] }
+        Self {
+            atlas,
+            index,
+            color: [1.0; 4],
+        }
     }
 
     pub fn with_color(mut self, color: [f32; 4]) -> Self {

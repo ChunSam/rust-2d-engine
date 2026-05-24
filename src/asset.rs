@@ -136,16 +136,18 @@ impl AssetServer {
                     }
                 });
             match watcher_result {
-                Ok(w) => return Self {
-                    images: HashMap::new(),
-                    path_to_id: HashMap::new(),
-                    scripts: HashMap::new(),
-                    script_path_to_id: HashMap::new(),
-                    atlases: HashMap::new(),
-                    atlas_path_to_id: HashMap::new(),
-                    reload_rx: Some(rx),
-                    _watcher: Some(w),
-                },
+                Ok(w) => {
+                    return Self {
+                        images: HashMap::new(),
+                        path_to_id: HashMap::new(),
+                        scripts: HashMap::new(),
+                        script_path_to_id: HashMap::new(),
+                        atlases: HashMap::new(),
+                        atlas_path_to_id: HashMap::new(),
+                        reload_rx: Some(rx),
+                        _watcher: Some(w),
+                    }
+                }
                 Err(e) => {
                     log::warn!("파일 감시 초기화 실패 (핫 리로딩 비활성): {e}");
                 }
@@ -203,7 +205,11 @@ impl AssetServer {
     pub fn load_script(&mut self, path: impl AsRef<Path>) -> Handle<ScriptAsset> {
         let key: Arc<str> = path.as_ref().to_string_lossy().as_ref().into();
         if let Some(&id) = self.script_path_to_id.get(&key) {
-            return Handle { id, path: key, _marker: PhantomData };
+            return Handle {
+                id,
+                path: key,
+                _marker: PhantomData,
+            };
         }
         let id = alloc_id();
         let asset = compile_script_file(&key);
@@ -213,7 +219,11 @@ impl AssetServer {
         if let Some(ref mut w) = self._watcher {
             let _ = w.watch(path.as_ref(), RecursiveMode::NonRecursive);
         }
-        Handle { id, path: key, _marker: PhantomData }
+        Handle {
+            id,
+            path: key,
+            _marker: PhantomData,
+        }
     }
 
     /// 스크립트 에셋을 id로 조회한다 (ScriptingSystem 내부용).
@@ -232,14 +242,26 @@ impl AssetServer {
     ) -> Handle<crate::atlas::TextureAtlas> {
         let key: Arc<str> = path.as_ref().to_string_lossy().as_ref().into();
         if let Some(&id) = self.atlas_path_to_id.get(&key) {
-            return Handle { id, path: key, _marker: PhantomData };
+            return Handle {
+                id,
+                path: key,
+                _marker: PhantomData,
+            };
         }
         let img_handle = self.load_image(path.as_ref());
         let id = alloc_id();
-        let atlas = crate::atlas::TextureAtlas { handle: img_handle, cols, rows };
+        let atlas = crate::atlas::TextureAtlas {
+            handle: img_handle,
+            cols,
+            rows,
+        };
         self.atlases.insert(id, atlas);
         self.atlas_path_to_id.insert(Arc::clone(&key), id);
-        Handle { id, path: key, _marker: PhantomData }
+        Handle {
+            id,
+            path: key,
+            _marker: PhantomData,
+        }
     }
 
     /// 아틀라스 핸들로 `TextureAtlas` 데이터를 조회한다.
@@ -263,8 +285,8 @@ impl AssetServer {
             if let Some(s) = path.to_str() {
                 let key: Arc<str> = s.into();
                 let s_str = s.to_string();
-                let is_known = self.path_to_id.contains_key(&key)
-                    || self.script_path_to_id.contains_key(&key);
+                let is_known =
+                    self.path_to_id.contains_key(&key) || self.script_path_to_id.contains_key(&key);
                 if is_known && !seen.contains(&s_str) {
                     seen.push(s_str);
                 }

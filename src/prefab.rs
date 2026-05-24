@@ -70,11 +70,16 @@ impl Reflect for Tag {
     }
     fn set_field(&mut self, name: &str, val: ReflectValue) -> bool {
         match (name, val) {
-            ("tag", ReflectValue::String(s)) => { self.0 = s; true }
+            ("tag", ReflectValue::String(s)) => {
+                self.0 = s;
+                true
+            }
             _ => false,
         }
     }
-    fn type_name(&self) -> &'static str { "Tag" }
+    fn type_name(&self) -> &'static str {
+        "Tag"
+    }
 }
 
 // ─── EntityDef ────────────────────────────────────────────────────────────────
@@ -230,7 +235,11 @@ mod tests {
 
         let def = EntityDef {
             tag: Some("hero".into()),
-            transform: Some(Transform::new(Vec2::new(10.0, 20.0), Vec2::splat(64.0), 0.5)),
+            transform: Some(Transform::new(
+                Vec2::new(10.0, 20.0),
+                Vec2::splat(64.0),
+                0.5,
+            )),
             sprite: Some(Sprite::colored(1.0, 0.0, 0.0)),
         };
 
@@ -267,7 +276,11 @@ mod tests {
             entities: vec![
                 EntityDef {
                     tag: Some("ground".into()),
-                    transform: Some(Transform::new(Vec2::new(0.0, -200.0), Vec2::new(800.0, 32.0), 0.0)),
+                    transform: Some(Transform::new(
+                        Vec2::new(0.0, -200.0),
+                        Vec2::new(800.0, 32.0),
+                        0.0,
+                    )),
                     sprite: Some(Sprite::colored(0.3, 0.6, 0.3)),
                 },
                 EntityDef {
@@ -300,7 +313,11 @@ mod tests {
         let prefab = Prefab {
             def: EntityDef {
                 tag: Some("coin".into()),
-                transform: Some(Transform::new(Vec2::new(100.0, 50.0), Vec2::splat(32.0), 0.0)),
+                transform: Some(Transform::new(
+                    Vec2::new(100.0, 50.0),
+                    Vec2::splat(32.0),
+                    0.0,
+                )),
                 sprite: Some(Sprite::textured("assets/coin.png")),
             },
         };
@@ -325,7 +342,11 @@ mod tests {
     fn spawn_scene_def_returns_correct_count() {
         let mut world = World::new();
         let scene = SceneDef {
-            entities: vec![EntityDef::default(), EntityDef::default(), EntityDef::default()],
+            entities: vec![
+                EntityDef::default(),
+                EntityDef::default(),
+                EntityDef::default(),
+            ],
         };
         let entities = spawn_scene_def(&mut world, &scene);
         assert_eq!(entities.len(), 3);

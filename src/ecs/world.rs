@@ -9,13 +9,15 @@ pub struct Entity(pub u32);
 fn get_reflect_impl<T: crate::reflect::Reflect + 'static>(
     b: &Box<dyn Any>,
 ) -> Option<&dyn crate::reflect::Reflect> {
-    b.downcast_ref::<T>().map(|t| t as &dyn crate::reflect::Reflect)
+    b.downcast_ref::<T>()
+        .map(|t| t as &dyn crate::reflect::Reflect)
 }
 
 fn get_reflect_mut_impl<T: crate::reflect::Reflect + 'static>(
     b: &mut Box<dyn Any>,
 ) -> Option<&mut dyn crate::reflect::Reflect> {
-    b.downcast_mut::<T>().map(|t| t as &mut dyn crate::reflect::Reflect)
+    b.downcast_mut::<T>()
+        .map(|t| t as &mut dyn crate::reflect::Reflect)
 }
 
 #[derive(Copy, Clone)]
@@ -36,8 +38,15 @@ struct Archetype {
 
 impl Archetype {
     fn new(type_set: Vec<TypeId>) -> Self {
-        let columns = type_set.iter().map(|&t| (t, Vec::<Box<dyn Any>>::new())).collect();
-        Self { type_set, entities: Vec::new(), columns }
+        let columns = type_set
+            .iter()
+            .map(|&t| (t, Vec::<Box<dyn Any>>::new()))
+            .collect();
+        Self {
+            type_set,
+            entities: Vec::new(),
+            columns,
+        }
     }
 
     fn contains(&self, tid: TypeId) -> bool {
@@ -111,7 +120,11 @@ impl World {
         let type_set: Vec<TypeId> = self.archetypes[arch_id].type_set.clone();
 
         for &tid in &type_set {
-            self.archetypes[arch_id].columns.get_mut(&tid).unwrap().swap_remove(row);
+            self.archetypes[arch_id]
+                .columns
+                .get_mut(&tid)
+                .unwrap()
+                .swap_remove(row);
         }
         self.archetypes[arch_id].entities.swap_remove(row);
 
@@ -177,7 +190,11 @@ impl World {
         self.move_entity(entity, new_arch_id);
 
         let (na, _) = self.entity_location[&entity];
-        self.archetypes[na].columns.get_mut(&tid).unwrap().push(Box::new(component));
+        self.archetypes[na]
+            .columns
+            .get_mut(&tid)
+            .unwrap()
+            .push(Box::new(component));
     }
 
     /// 엔티티의 컴포넌트를 불변 참조로 가져온다.
@@ -208,9 +225,10 @@ impl World {
             .filter(move |arch| arch.contains(tid))
             .flat_map(move |arch| {
                 let col = arch.columns.get(&tid).unwrap();
-                arch.entities.iter().zip(col.iter()).map(|(&e, c)| {
-                    (e, c.downcast_ref::<T>().unwrap())
-                })
+                arch.entities
+                    .iter()
+                    .zip(col.iter())
+                    .map(|(&e, c)| (e, c.downcast_ref::<T>().unwrap()))
             })
     }
 
@@ -449,7 +467,8 @@ impl World {
             }
         }
 
-        self.entity_location.insert(entity, (target_arch_id, dst_row));
+        self.entity_location
+            .insert(entity, (target_arch_id, dst_row));
     }
 }
 
@@ -465,11 +484,17 @@ mod tests {
     use super::*;
 
     #[allow(dead_code)]
-    struct Position { x: f32, y: f32 }
+    struct Position {
+        x: f32,
+        y: f32,
+    }
     #[allow(dead_code)]
     struct Health(u32);
     #[allow(dead_code)]
-    struct Velocity { vx: f32, vy: f32 }
+    struct Velocity {
+        vx: f32,
+        vy: f32,
+    }
 
     #[test]
     fn spawn_and_query() {

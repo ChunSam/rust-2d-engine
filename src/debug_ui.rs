@@ -24,7 +24,10 @@ pub struct DebugUi {
 
 impl DebugUi {
     pub(crate) fn new_with_ctx(ctx: egui::Context) -> Self {
-        Self { ctx, enabled: false }
+        Self {
+            ctx,
+            enabled: false,
+        }
     }
 
     /// egui 드로 컨텍스트를 반환한다. `begin_frame`/`end_frame` 사이에만 사용해야 한다.

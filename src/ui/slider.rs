@@ -30,9 +30,9 @@ impl Slider {
             min,
             max,
             dragging: false,
-            track_color:         [0.20, 0.20, 0.25, 1.0],
-            fill_color:          [0.28, 0.52, 0.82, 1.0],
-            thumb_color:         [0.70, 0.70, 0.82, 1.0],
+            track_color: [0.20, 0.20, 0.25, 1.0],
+            fill_color: [0.28, 0.52, 0.82, 1.0],
+            thumb_color: [0.70, 0.70, 0.82, 1.0],
             thumb_hovered_color: [0.90, 0.90, 1.00, 1.0],
             thumb_width: 14.0,
         }

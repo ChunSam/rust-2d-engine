@@ -162,7 +162,9 @@ impl AnimationStateMachine {
 
     /// 트리거 파라미터를 등록한다 (초기값 false).
     pub fn add_trigger(&mut self, name: impl Into<String>) {
-        self.params.entry(name.into()).or_insert(AnimParam::Trigger(false));
+        self.params
+            .entry(name.into())
+            .or_insert(AnimParam::Trigger(false));
     }
 
     /// 트리거를 활성화한다. 같은 프레임 안에서 `StateMachineSystem`이 소비한다.
@@ -191,7 +193,10 @@ impl AnimationStateMachine {
                 matches!(self.params.get(name.as_str()), Some(AnimParam::Float(v)) if v < threshold)
             }
             TransitionCond::Trigger(name) => {
-                matches!(self.params.get(name.as_str()), Some(AnimParam::Trigger(true)))
+                matches!(
+                    self.params.get(name.as_str()),
+                    Some(AnimParam::Trigger(true))
+                )
             }
             TransitionCond::AnimationEnd => anim_finished,
         }

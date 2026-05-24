@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 23 갱신: 2026-05-24)  
-엔진 버전: v0.23.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 24 갱신: 2026-05-25)  
+엔진 버전: v0.24.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -43,6 +43,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 21 | Texture Atlas — TextureAtlas, AtlasSprite, AssetServer::load_atlas, App::load_atlas | `b63e9c9` |
 | Phase 22 | Reflect 시스템 — Reflect 트레잇, ReflectValue, World::register_reflect/get_reflect, egui Inspector | `90f65e3` |
 | Phase 23 | WASM 빌드 지원 — 플랫폼별 deps 분리, cfg-gate, EventLoopExtWebSys, getrandom wasm_js | `b9f4bdb` |
+| Phase 24 | WASM 브라우저 실행 — WebGL2 강제, 비동기 GPU init, web-time, 캔버스 크기 수정 | (이번 커밋) |
 
 ---
 
@@ -110,7 +111,44 @@ src/
 
 ---
 
-## 이번 세션에서 한 일 (Phase 23)
+## 이번 세션에서 한 일 (Phase 24)
+
+### Phase 24 — WASM 브라우저 실행
+
+**배경**: Phase 23에서 `cargo build --target wasm32-unknown-unknown`은 통과했지만 실제 브라우저 실행이 되지 않았다. `wasm-pack build` → HTTP 서버 → Chrome에서 컬러 박스들이 튀어다니는 데모를 동작시키는 것이 목표.
+
+**검증**: `wasm-pack build --target web` 성공, Chrome에서 10개 컬러 박스 ECS + 바운스 물리 동작 확인
+
+**수정된 파일**: `Cargo.toml`, `src/app.rs`, `src/renderer/context.rs`, `src/lib.rs`
+
+**해결된 문제 목록 (순서대로 발생)**
+
+| 문제 | 원인 | 수정 |
+|------|------|------|
+| `requestDevice` 실패 — `maxInterStageShaderComponents` 미인식 | wgpu 22 `Limits::default()`가 Chrome WebGPU가 인식 못하는 limit 포함 | `context.rs`: WASM에서 `Backends::GL` 강제(WebGL2) + `downlevel_webgl2_defaults()` |
+| `std::time::Instant` 패닉 | WASM에서 `std::time::Instant` 미지원 | `Cargo.toml`에 `web-time = "1"` 추가; `app.rs`에 `#[cfg] use web_time::Instant` |
+| GPU `async` init 불가 (`unreachable` 패닉) | WebGPU Promise 기반 → 단순 poll 불가 | `thread_local! PENDING_GPU` + `spawn_local` + `about_to_wait`/`RedrawRequested`에서 pick-up |
+| `surface: 1x1` | `window.inner_size()`가 canvas attach 직후 1×1 반환 | `context.rs`: WASM에서 `#[game-canvas]` DOM 요소에서 직접 width/height 읽기 |
+| `no default font found` 패닉 | WASM에 시스템 폰트 없음 — `cosmic-text` shape 시 패닉 | `finish_init()`: WASM에서 `font_bytes` 비면 `TextRenderer` 생성 생략 |
+| `Surface size (2560×1440) > WebGL2 max (2048)` | Retina DPR=2 → winit `Resized` 이벤트가 물리 픽셀 보고 | `app.rs` `Resized` 핸들러: WASM에서 DOM canvas 크기로 대체 |
+
+**핵심 설계 결정**
+- WebGPU 대신 WebGL2(`Backends::GL`)를 강제: Chrome 버전별 WebGPU limit 명세 불일치 문제를 회피. `wgpu = { features = ["webgl"] }` 이미 선언되어 있어 추가 의존성 없음
+- `PENDING_GPU thread_local`: `spawn_local` future에서 GPU 컨텍스트를 완성 후 저장 → 메인 이벤트 루프(`about_to_wait` + `RedrawRequested`)에서 polling. 두 곳에서 체크해 타이밍 경쟁 방지
+- WASM 텍스트: `FontData` 리소스에 TTF 바이트를 직접 주입해야 텍스트 렌더링 가능. 미주입 시 텍스트 렌더러 생략(무패닉)
+
+**WASM 런타임 동작 (업데이트)**
+
+| 기능 | WASM |
+|------|------|
+| wgpu 렌더링 (WebGL2) | ✅ 동작 |
+| ECS, Sprite, 애니메이션 | ✅ 동작 |
+| 텍스트 렌더링 | ✅ FontData 리소스 주입 시 동작 (미주입 시 생략) |
+| Physics, Audio, Gamepad | 비활성 — `#[cfg(not(wasm))]` |
+
+---
+
+## 이전 세션에서 한 일 (Phase 23)
 
 ### Phase 23 — WASM 빌드 지원
 

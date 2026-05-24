@@ -1,6 +1,18 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
+
+// WASM: GPU 초기화는 async(WebGPU Promise 기반)이므로 thread_local로 결과를 전달한다.
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static PENDING_GPU: std::cell::RefCell<Option<(
+        crate::renderer::GpuContext,
+        Arc<winit::window::Window>,
+    )>> = std::cell::RefCell::new(None);
+}
 
 use glam::Vec2;
 use winit::{
@@ -20,8 +32,14 @@ use crate::{
     input::{GamepadState, InputState},
     prefab::Tag,
     reflect::ReflectValue,
-    renderer::{DrawRect, GpuContext, PostProcessConfig, PostProcessRenderer, SpriteRenderer, TextQueue, TextRenderer, UiQueue},
-    resources::{DebugDrawQueue, FontData, GameState, PendingResize, ShouldQuit, ViewportSize, WindowConfig},
+    renderer::{
+        DrawRect, GpuContext, PostProcessConfig, PostProcessRenderer, SpriteRenderer, TextQueue,
+        TextRenderer, UiQueue,
+    },
+    resources::{
+        DebugDrawQueue, DisplayScaleFactor, FontData, GameState, PendingResize, ShouldQuit,
+        ViewportSize, WindowConfig,
+    },
     scene::{Scene, SceneChange, SceneCmd},
 };
 
@@ -178,7 +196,10 @@ impl App {
     }
 
     /// 스크립트 파일을 로드하고 핸들을 반환한다.
-    pub fn load_script(&mut self, path: impl AsRef<std::path::Path>) -> Handle<crate::asset::ScriptAsset> {
+    pub fn load_script(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Handle<crate::asset::ScriptAsset> {
         self.world
             .resource_mut::<AssetServer>()
             .expect("AssetServer 없음")
@@ -211,7 +232,8 @@ impl App {
         }
         self.event_initializers = inits;
         // Reflect 레지스트리 재등록 (World 재생성으로 초기화되었으므로)
-        self.world.register_reflect::<crate::components::Transform>();
+        self.world
+            .register_reflect::<crate::components::Transform>();
         self.world.register_reflect::<crate::components::Sprite>();
         self.world.register_reflect::<crate::prefab::Tag>();
         self.inspector_selected = None;
@@ -271,10 +293,20 @@ impl App {
     // ── 내부 메서드 ─────────────────────────────────────────────────────────
 
     fn update(&mut self, dt: f32) {
-        // GPU 실제 크기를 ViewportSize 리소스에 동기화 (매 프레임)
+        // GPU 실제 크기는 물리 픽셀이고, 게임 좌표계는 논리 픽셀이다.
+        // Retina/HiDPI에서 이 둘을 분리해야 스프라이트와 UI가 절반 크기로 보이지 않는다.
         if let Some(gpu) = &self.gpu {
-            self.world
-                .insert_resource(ViewportSize::new(gpu.config.width, gpu.config.height));
+            let scale_factor = self
+                .window
+                .as_ref()
+                .map(|w| w.scale_factor() as f32)
+                .unwrap_or(1.0)
+                .max(1.0);
+            self.world.insert_resource(ViewportSize {
+                width: gpu.config.width as f32 / scale_factor,
+                height: gpu.config.height as f32 / scale_factor,
+            });
+            self.world.insert_resource(DisplayScaleFactor(scale_factor));
         }
 
         // egui 프레임 시작
@@ -308,7 +340,9 @@ impl App {
             }
         }
         let entity_list: Vec<Entity> = self.world.entities().to_vec();
-        let tag_map: HashMap<Entity, String> = self.world.query::<Tag>()
+        let tag_map: HashMap<Entity, String> = self
+            .world
+            .query::<Tag>()
             .map(|(e, t)| (e, t.0.clone()))
             .collect();
         let mut comp_fields: Vec<(&'static str, Vec<(&'static str, ReflectValue)>)> = Vec::new();
@@ -322,7 +356,12 @@ impl App {
 
         // 내장 EngineStats 패널 + Inspector
         if let Some(ctx) = &egui_ctx {
-            if self.world.resource::<DebugUi>().map(|d| d.is_enabled()).unwrap_or(false) {
+            if self
+                .world
+                .resource::<DebugUi>()
+                .map(|d| d.is_enabled())
+                .unwrap_or(false)
+            {
                 let entity_count = self.world.entity_count();
                 let asset_count = self
                     .world
@@ -354,13 +393,17 @@ impl App {
                                     .max_height(250.0)
                                     .show(ui, |ui| {
                                         for &e in &entity_list {
-                                            let label = tag_map.get(&e)
+                                            let label = tag_map
+                                                .get(&e)
                                                 .cloned()
                                                 .unwrap_or_else(|| format!("E{}", e.0));
-                                            if ui.selectable_label(
-                                                self.inspector_selected == Some(e),
-                                                &label,
-                                            ).clicked() {
+                                            if ui
+                                                .selectable_label(
+                                                    self.inspector_selected == Some(e),
+                                                    &label,
+                                                )
+                                                .clicked()
+                                            {
                                                 self.inspector_selected = Some(e);
                                             }
                                         }
@@ -384,22 +427,65 @@ impl App {
                                                             ui.label(*fname);
                                                             match fval {
                                                                 ReflectValue::F32(v) => {
-                                                                    ui.add(egui::DragValue::new(v).speed(0.5));
+                                                                    ui.add(
+                                                                        egui::DragValue::new(v)
+                                                                            .speed(0.5),
+                                                                    );
                                                                 }
                                                                 ReflectValue::Vec2(v) => {
                                                                     ui.horizontal(|ui| {
-                                                                        ui.add(egui::DragValue::new(&mut v.x).speed(0.5).prefix("x:"));
-                                                                        ui.add(egui::DragValue::new(&mut v.y).speed(0.5).prefix("y:"));
+                                                                        ui.add(
+                                                                            egui::DragValue::new(
+                                                                                &mut v.x,
+                                                                            )
+                                                                            .speed(0.5)
+                                                                            .prefix("x:"),
+                                                                        );
+                                                                        ui.add(
+                                                                            egui::DragValue::new(
+                                                                                &mut v.y,
+                                                                            )
+                                                                            .speed(0.5)
+                                                                            .prefix("y:"),
+                                                                        );
                                                                     });
                                                                 }
-                                                                ReflectValue::Bool(v) => { ui.checkbox(v, ""); }
-                                                                ReflectValue::String(s) => { ui.text_edit_singleline(s); }
+                                                                ReflectValue::Bool(v) => {
+                                                                    ui.checkbox(v, "");
+                                                                }
+                                                                ReflectValue::String(s) => {
+                                                                    ui.text_edit_singleline(s);
+                                                                }
                                                                 ReflectValue::Color(c) => {
                                                                     ui.horizontal(|ui| {
-                                                                        ui.add(egui::DragValue::new(&mut c[0]).speed(0.01).prefix("r:"));
-                                                                        ui.add(egui::DragValue::new(&mut c[1]).speed(0.01).prefix("g:"));
-                                                                        ui.add(egui::DragValue::new(&mut c[2]).speed(0.01).prefix("b:"));
-                                                                        ui.add(egui::DragValue::new(&mut c[3]).speed(0.01).prefix("a:"));
+                                                                        ui.add(
+                                                                            egui::DragValue::new(
+                                                                                &mut c[0],
+                                                                            )
+                                                                            .speed(0.01)
+                                                                            .prefix("r:"),
+                                                                        );
+                                                                        ui.add(
+                                                                            egui::DragValue::new(
+                                                                                &mut c[1],
+                                                                            )
+                                                                            .speed(0.01)
+                                                                            .prefix("g:"),
+                                                                        );
+                                                                        ui.add(
+                                                                            egui::DragValue::new(
+                                                                                &mut c[2],
+                                                                            )
+                                                                            .speed(0.01)
+                                                                            .prefix("b:"),
+                                                                        );
+                                                                        ui.add(
+                                                                            egui::DragValue::new(
+                                                                                &mut c[3],
+                                                                            )
+                                                                            .speed(0.01)
+                                                                            .prefix("a:"),
+                                                                        );
                                                                     });
                                                                 }
                                                             }
@@ -431,7 +517,11 @@ impl App {
 
         // egui 프레임 종료 + tessellate → render() 로 전달
         if let Some(ctx) = egui_ctx {
-            let ppp = self.window.as_ref().map(|w| w.scale_factor() as f32).unwrap_or(1.0);
+            let ppp = self
+                .window
+                .as_ref()
+                .map(|w| w.scale_factor() as f32)
+                .unwrap_or(1.0);
             let full_output = ctx.end_pass();
             let paint_jobs = ctx.tessellate(full_output.shapes, ppp);
             self.egui_output = Some((paint_jobs, full_output.textures_delta, ppp));
@@ -530,7 +620,10 @@ impl App {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: cr, g: cg, b: cb, a: ca,
+                            r: cr,
+                            g: cg,
+                            b: cb,
+                            a: ca,
                         }),
                         store: wgpu::StoreOp::Store,
                     },
@@ -541,6 +634,14 @@ impl App {
             });
         }
 
+        let viewport = self
+            .world
+            .resource::<ViewportSize>()
+            .copied()
+            .unwrap_or_else(|| ViewportSize::new(gpu.config.width, gpu.config.height));
+        let logical_w = viewport.width.round().max(1.0) as u32;
+        let logical_h = viewport.height.round().max(1.0) as u32;
+
         // 2단계: 스프라이트 그리기
         if let Some(sr) = &mut self.sprite_renderer {
             sr.render(
@@ -549,8 +650,8 @@ impl App {
                 render_view,
                 &mut enc,
                 &self.world,
-                gpu.config.width,
-                gpu.config.height,
+                logical_w,
+                logical_h,
             );
         }
 
@@ -563,8 +664,10 @@ impl App {
                     .into_iter()
                     .map(|r| {
                         DrawRect::new(
-                            r.min.x, r.min.y,
-                            r.max.x - r.min.x, r.max.y - r.min.y,
+                            r.min.x,
+                            r.min.y,
+                            r.max.x - r.min.x,
+                            r.max.y - r.min.y,
                             r.color,
                         )
                         .with_z(r.z)
@@ -589,8 +692,8 @@ impl App {
                     render_view,
                     &mut enc,
                     &ui_rects,
-                    gpu.config.width,
-                    gpu.config.height,
+                    logical_w,
+                    logical_h,
                 );
             }
         }
@@ -598,7 +701,15 @@ impl App {
         // 3단계: 텍스트 그리기
         let (w, h) = (gpu.config.width, gpu.config.height);
         if let Some(tr) = &mut self.text_renderer {
-            tr.render(&gpu.device, &gpu.queue, &mut enc, render_view, &mut self.world, w, h);
+            tr.render(
+                &gpu.device,
+                &gpu.queue,
+                &mut enc,
+                render_view,
+                &mut self.world,
+                w,
+                h,
+            );
         }
 
         // 4단계: 포스트프로세스 패스 (중간 텍스처 → 스왑체인)
@@ -623,8 +734,9 @@ impl App {
             for (id, delta) in &textures_delta.set {
                 er.update_texture(&gpu.device, &gpu.queue, *id, delta);
             }
-            let mut egui_enc =
-                gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            let mut egui_enc = gpu
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("egui encoder"),
                 });
             er.update_buffers(
@@ -668,70 +780,43 @@ impl ApplicationHandler for App {
         let attrs = Window::default_attributes()
             .with_title(&title)
             .with_inner_size(winit::dpi::LogicalSize::new(init_w, init_h));
+
+        // WASM: HTML 내 <canvas id="game-canvas"> 를 winit 창에 연결한다.
+        #[cfg(target_arch = "wasm32")]
+        let attrs = {
+            use wasm_bindgen::JsCast;
+            use winit::platform::web::WindowAttributesExtWebSys;
+            if let Some(canvas) = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.get_element_by_id("game-canvas"))
+                .and_then(|el| el.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+            {
+                attrs.with_canvas(Some(canvas))
+            } else {
+                attrs
+            }
+        };
+
         let window = Arc::new(event_loop.create_window(attrs).expect("창 생성 실패"));
 
         #[cfg(not(target_arch = "wasm32"))]
-        let gpu = pollster::block_on(GpuContext::new(window.clone()));
-        #[cfg(target_arch = "wasm32")]
-        let gpu = {
-            // WASM: wgpu webgl 백엔드는 adapter 요청이 동기적으로 완료된다.
-            // pollster::block_on 대신 futures-lite 없이 단일 poll로 처리한다.
-            use std::future::Future;
-            use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
-            fn noop_clone(_: *const ()) -> RawWaker { noop_raw_waker() }
-            fn noop(_: *const ()) {}
-            fn noop_raw_waker() -> RawWaker {
-                RawWaker::new(std::ptr::null(), &RawWakerVTable::new(noop_clone, noop, noop, noop))
-            }
-            let waker = unsafe { Waker::from_raw(noop_raw_waker()) };
-            let mut cx = Context::from_waker(&waker);
-            let mut fut = std::pin::pin!(GpuContext::new(window.clone()));
-            match fut.as_mut().poll(&mut cx) {
-                Poll::Ready(gpu) => gpu,
-                Poll::Pending => panic!("WASM GPU 초기화 실패: webgl 백엔드가 동기 완료를 보장하지 않습니다"),
-            }
-        };
-        let mut sprite_renderer = SpriteRenderer::new(&gpu.device, &gpu.queue, gpu.config.format);
-
-        // 대기열에 있던 텍스처를 GPU에 일괄 로드한다.
-        for path in self.pending_textures.drain(..) {
-            sprite_renderer.load_texture(&gpu.device, &gpu.queue, &path);
+        {
+            let gpu = pollster::block_on(GpuContext::new(window.clone()));
+            self.finish_init(gpu, window);
         }
 
-        // 폰트 데이터 — FontData 리소스에서 읽음 (없으면 빈 슬라이스 → 시스템 폰트 폴백)
-        let font_bytes = self
-            .world
-            .resource::<FontData>()
-            .map(|f| f.0.clone())
-            .unwrap_or_default();
-
-        // 텍스트 렌더러: 스프라이트와 동일한 surface format 을 사용한다.
-        let text_renderer =
-            TextRenderer::new(&gpu.device, &gpu.queue, gpu.config.format, &font_bytes);
-
-        // egui 초기화 (gpu 이동 전에 device/format 접근)
-        let egui_ctx = egui::Context::default();
-        let egui_state = egui_winit::State::new(
-            egui_ctx.clone(),
-            egui::ViewportId::ROOT,
-            &*window,
-            Some(window.scale_factor() as f32),
-            None,
-            None,
-        );
-        let egui_renderer =
-            egui_wgpu::Renderer::new(&gpu.device, gpu.config.format, None, 1, false);
-        self.world.insert_resource(DebugUi::new_with_ctx(egui_ctx));
-        self.egui_renderer = Some(egui_renderer);
-        self.egui_state = Some(egui_state);
-
-        self.sprite_renderer = Some(sprite_renderer);
-        self.text_renderer = Some(text_renderer);
-        self.gpu = Some(gpu);
-        self.window = Some(window);
-        self.last_frame = Some(Instant::now());
-
-        log::info!("엔진 초기화 완료");
+        // WASM: WebGPU/WebGL2 adapter 요청이 Promise 기반이므로 spawn_local로 비동기 처리한다.
+        // GPU 준비 완료 시 PENDING_GPU thread_local에 저장 → about_to_wait()에서 finish_init 호출.
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.window = Some(window.clone());
+            wasm_bindgen_futures::spawn_local(async move {
+                let gpu = GpuContext::new(window.clone()).await;
+                PENDING_GPU.with(|p| {
+                    *p.borrow_mut() = Some((gpu, window));
+                });
+            });
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -747,6 +832,18 @@ impl ApplicationHandler for App {
             // ── 창 크기 변경 ─────────────────────────────────────────────────
             WindowEvent::Resized(size) => {
                 if let Some(gpu) = &mut self.gpu {
+                    // WASM: Retina DPR 때문에 winit이 CSS 픽셀 × DPR(= 2560×1440)을 보고한다.
+                    // WebGL2의 최대 텍스처 크기(2048)를 초과하므로, DOM에서 canvas 크기를 직접 읽는다.
+                    #[cfg(target_arch = "wasm32")]
+                    let size = {
+                        use wasm_bindgen::JsCast;
+                        web_sys::window()
+                            .and_then(|w| w.document())
+                            .and_then(|d| d.get_element_by_id("game-canvas"))
+                            .and_then(|el| el.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+                            .map(|c| winit::dpi::PhysicalSize::new(c.width().max(1), c.height().max(1)))
+                            .unwrap_or(size)
+                    };
                     gpu.resize(size);
                 }
             }
@@ -819,6 +916,14 @@ impl ApplicationHandler for App {
 
             // ── 프레임 렌더 ──────────────────────────────────────────────────
             WindowEvent::RedrawRequested => {
+                // WASM: about_to_wait 타이밍에 GPU가 준비되지 않은 경우를 대비해 여기서도 체크
+                #[cfg(target_arch = "wasm32")]
+                if self.gpu.is_none() {
+                    if let Some((gpu, window)) = PENDING_GPU.with(|p| p.borrow_mut().take()) {
+                        self.finish_init(gpu, window);
+                    }
+                }
+
                 let now = Instant::now();
                 let dt = self
                     .last_frame
@@ -869,6 +974,15 @@ impl ApplicationHandler for App {
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         #[cfg(not(target_arch = "wasm32"))]
         self.poll_gilrs();
+
+        // WASM: spawn_local로 시작한 GPU 비동기 초기화 완료를 여기서 감지한다.
+        #[cfg(target_arch = "wasm32")]
+        if self.gpu.is_none() {
+            if let Some((gpu, window)) = PENDING_GPU.with(|p| p.borrow_mut().take()) {
+                self.finish_init(gpu, window);
+            }
+        }
+
         if let Some(window) = &self.window {
             window.request_redraw();
         }
@@ -876,6 +990,50 @@ impl ApplicationHandler for App {
 }
 
 impl App {
+    /// GPU 컨텍스트와 창이 준비된 후 렌더러·egui를 초기화한다.
+    /// 네이티브: resumed()에서 직접 호출. WASM: about_to_wait()에서 PENDING_GPU 확인 후 호출.
+    fn finish_init(&mut self, gpu: GpuContext, window: Arc<Window>) {
+        let mut sprite_renderer = SpriteRenderer::new(&gpu.device, &gpu.queue, gpu.config.format);
+        for path in self.pending_textures.drain(..) {
+            sprite_renderer.load_texture(&gpu.device, &gpu.queue, &path);
+        }
+        let font_bytes = self
+            .world
+            .resource::<FontData>()
+            .map(|f| f.0.clone())
+            .unwrap_or_default();
+        // WASM: 시스템 폰트가 없으므로 font_bytes가 비어있으면 텍스트 렌더러를 생성하지 않는다.
+        // cosmic-text는 폰트 없이 shape를 시도할 때 패닉한다.
+        #[cfg(not(target_arch = "wasm32"))]
+        let text_renderer = Some(TextRenderer::new(&gpu.device, &gpu.queue, gpu.config.format, &font_bytes));
+        #[cfg(target_arch = "wasm32")]
+        let text_renderer = if !font_bytes.is_empty() {
+            Some(TextRenderer::new(&gpu.device, &gpu.queue, gpu.config.format, &font_bytes))
+        } else {
+            None
+        };
+        let egui_ctx = egui::Context::default();
+        let egui_state = egui_winit::State::new(
+            egui_ctx.clone(),
+            egui::ViewportId::ROOT,
+            &*window,
+            Some(window.scale_factor() as f32),
+            None,
+            None,
+        );
+        let egui_renderer =
+            egui_wgpu::Renderer::new(&gpu.device, gpu.config.format, None, 1, false);
+        self.world.insert_resource(DebugUi::new_with_ctx(egui_ctx));
+        self.egui_renderer = Some(egui_renderer);
+        self.egui_state = Some(egui_state);
+        self.sprite_renderer = Some(sprite_renderer);
+        self.text_renderer = text_renderer;
+        self.gpu = Some(gpu);
+        self.window = Some(window);
+        self.last_frame = Some(Instant::now());
+        log::info!("엔진 초기화 완료");
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn poll_gilrs(&mut self) {
         let mut events = Vec::new();

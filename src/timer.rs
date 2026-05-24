@@ -21,12 +21,22 @@ pub struct Timer {
 impl Timer {
     /// 지정한 시간(초) 후 한 번만 완료되는 타이머.
     pub fn once(duration: f32) -> Self {
-        Self { duration, elapsed: 0.0, repeating: false, just_finished: false }
+        Self {
+            duration,
+            elapsed: 0.0,
+            repeating: false,
+            just_finished: false,
+        }
     }
 
     /// 지정한 시간(초)마다 반복 완료되는 타이머.
     pub fn repeating(duration: f32) -> Self {
-        Self { duration, elapsed: 0.0, repeating: true, just_finished: false }
+        Self {
+            duration,
+            elapsed: 0.0,
+            repeating: true,
+            just_finished: false,
+        }
     }
 
     /// dt만큼 진행한다. 매 프레임 시스템에서 호출한다.

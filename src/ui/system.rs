@@ -43,7 +43,10 @@ impl System for UiSystem {
             };
 
         let viewport = match world.resource::<ViewportSize>() {
-            Some(v) => ViewportSize { width: v.width, height: v.height },
+            Some(v) => ViewportSize {
+                width: v.width,
+                height: v.height,
+            },
             None => return,
         };
 
@@ -75,7 +78,11 @@ impl System for UiSystem {
             if btn.state != ButtonState::Disabled {
                 let prev = btn.state;
                 btn.state = if in_rect {
-                    if is_held { ButtonState::Pressed } else { ButtonState::Hovered }
+                    if is_held {
+                        ButtonState::Pressed
+                    } else {
+                        ButtonState::Hovered
+                    }
                 } else {
                     ButtonState::Normal
                 };
@@ -89,7 +96,12 @@ impl System for UiSystem {
 
             let (color, label_text, text_color, font_size) = {
                 let btn = world.get::<Button>(entity).unwrap();
-                (btn.current_color(), btn.label.clone(), btn.text_color, btn.font_size)
+                (
+                    btn.current_color(),
+                    btn.label.clone(),
+                    btn.text_color,
+                    btn.font_size,
+                )
             };
 
             rects.push(DrawRect::new(pos.x, pos.y, size.x, size.y, color).with_z(z));
@@ -249,7 +261,14 @@ impl System for UiSystem {
                     Some(s) => s,
                     None => continue,
                 };
-                (sv.scroll_offset, sv.item_height, sv.font_size, sv.color, sv.background_color, sv.items.len())
+                (
+                    sv.scroll_offset,
+                    sv.item_height,
+                    sv.font_size,
+                    sv.color,
+                    sv.background_color,
+                    sv.items.len(),
+                )
             };
 
             rects.push(DrawRect::new(pos.x, pos.y, size.x, size.y, bg_color).with_z(z));
@@ -276,10 +295,8 @@ impl System for UiSystem {
         }
 
         // ── 5. Label 패스 ────────────────────────────────────────────────────
-        let label_entities: Vec<Entity> = world
-            .query2::<UiNode, Label>()
-            .map(|(e, _, _)| e)
-            .collect();
+        let label_entities: Vec<Entity> =
+            world.query2::<UiNode, Label>().map(|(e, _, _)| e).collect();
 
         for entity in label_entities {
             let (pos, visible) = match world.get::<UiNode>(entity) {
@@ -356,15 +373,38 @@ impl System for UiSystem {
                     Some(s) => s,
                     None => continue,
                 };
-                (s.normalized(), s.track_color, s.fill_color, s.thumb_color, s.thumb_hovered_color)
+                (
+                    s.normalized(),
+                    s.track_color,
+                    s.fill_color,
+                    s.thumb_color,
+                    s.thumb_hovered_color,
+                )
             };
 
             let thumb_x = pos.x + norm * track_len;
-            let thumb_hovered = in_bounds(cursor, Vec2::new(thumb_x, pos.y), Vec2::new(thumb_w, size.y));
+            let thumb_hovered = in_bounds(
+                cursor,
+                Vec2::new(thumb_x, pos.y),
+                Vec2::new(thumb_w, size.y),
+            );
 
             rects.push(DrawRect::new(pos.x, pos.y, size.x, size.y, track_col).with_z(z));
-            rects.push(DrawRect::new(pos.x, pos.y, thumb_x - pos.x + thumb_w / 2.0, size.y, fill_col).with_z(z + 0.001));
-            let tc = if thumb_hovered { thumb_hover_col } else { thumb_col };
+            rects.push(
+                DrawRect::new(
+                    pos.x,
+                    pos.y,
+                    thumb_x - pos.x + thumb_w / 2.0,
+                    size.y,
+                    fill_col,
+                )
+                .with_z(z + 0.001),
+            );
+            let tc = if thumb_hovered {
+                thumb_hover_col
+            } else {
+                thumb_col
+            };
             rects.push(DrawRect::new(thumb_x, pos.y, thumb_w, size.y, tc).with_z(z + 0.002));
         }
 
@@ -392,7 +432,16 @@ impl System for UiSystem {
                 }
             }
 
-            let (checked, box_size, border_col, checked_col, unchecked_col, label, text_color, font_size) = {
+            let (
+                checked,
+                box_size,
+                border_col,
+                checked_col,
+                unchecked_col,
+                label,
+                text_color,
+                font_size,
+            ) = {
                 let cb = match world.get::<CheckBox>(entity) {
                     Some(c) => c,
                     None => continue,
@@ -416,8 +465,14 @@ impl System for UiSystem {
             // 내부 채움
             let inner_col = if checked { checked_col } else { unchecked_col };
             rects.push(
-                DrawRect::new(pos.x + pad, box_y + pad, box_size - pad * 2.0, box_size - pad * 2.0, inner_col)
-                    .with_z(z + 0.001),
+                DrawRect::new(
+                    pos.x + pad,
+                    box_y + pad,
+                    box_size - pad * 2.0,
+                    box_size - pad * 2.0,
+                    inner_col,
+                )
+                .with_z(z + 0.001),
             );
             // 레이블 텍스트
             if !label.is_empty() {
