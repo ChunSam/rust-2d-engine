@@ -57,6 +57,7 @@ pub struct App {
     /// reload_scene 시 이벤트 리소스를 재삽입하는 클로저 목록.
     event_initializers: Vec<Box<dyn Fn(&mut World)>>,
     /// gilrs 게임패드 컨텍스트. 초기화 실패 시 None (게임패드 없이 동작).
+    #[cfg(not(target_arch = "wasm32"))]
     gilrs: Option<gilrs::Gilrs>,
     /// egui 렌더러 (wgpu 백엔드).
     egui_renderer: Option<egui_wgpu::Renderer>,
@@ -70,6 +71,7 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
         let gilrs = gilrs::Gilrs::new().ok();
         let mut world = World::new();
         world.insert_resource(InputState::default());
@@ -103,6 +105,7 @@ impl App {
             pending_textures: Vec::new(),
             event_flushers: Vec::new(),
             event_initializers: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             gilrs,
             egui_renderer: None,
             egui_state: None,
@@ -253,9 +256,16 @@ impl App {
     }
 
     /// 이벤트 루프를 시작한다. 창이 닫힐 때까지 블로킹된다.
+    #[allow(unused_mut)]
     pub fn run(mut self) {
         let event_loop = EventLoop::new().expect("이벤트 루프 생성 실패");
+        #[cfg(not(target_arch = "wasm32"))]
         event_loop.run_app(&mut self).expect("이벤트 루프 오류");
+        #[cfg(target_arch = "wasm32")]
+        {
+            use winit::platform::web::EventLoopExtWebSys;
+            event_loop.spawn_app(self);
+        }
     }
 
     // ── 내부 메서드 ─────────────────────────────────────────────────────────
@@ -660,7 +670,27 @@ impl ApplicationHandler for App {
             .with_inner_size(winit::dpi::LogicalSize::new(init_w, init_h));
         let window = Arc::new(event_loop.create_window(attrs).expect("창 생성 실패"));
 
+        #[cfg(not(target_arch = "wasm32"))]
         let gpu = pollster::block_on(GpuContext::new(window.clone()));
+        #[cfg(target_arch = "wasm32")]
+        let gpu = {
+            // WASM: wgpu webgl 백엔드는 adapter 요청이 동기적으로 완료된다.
+            // pollster::block_on 대신 futures-lite 없이 단일 poll로 처리한다.
+            use std::future::Future;
+            use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+            fn noop_clone(_: *const ()) -> RawWaker { noop_raw_waker() }
+            fn noop(_: *const ()) {}
+            fn noop_raw_waker() -> RawWaker {
+                RawWaker::new(std::ptr::null(), &RawWakerVTable::new(noop_clone, noop, noop, noop))
+            }
+            let waker = unsafe { Waker::from_raw(noop_raw_waker()) };
+            let mut cx = Context::from_waker(&waker);
+            let mut fut = std::pin::pin!(GpuContext::new(window.clone()));
+            match fut.as_mut().poll(&mut cx) {
+                Poll::Ready(gpu) => gpu,
+                Poll::Pending => panic!("WASM GPU 초기화 실패: webgl 백엔드가 동기 완료를 보장하지 않습니다"),
+            }
+        };
         let mut sprite_renderer = SpriteRenderer::new(&gpu.device, &gpu.queue, gpu.config.format);
 
         // 대기열에 있던 텍스처를 GPU에 일괄 로드한다.
@@ -837,6 +867,7 @@ impl ApplicationHandler for App {
 
     /// 이벤트 큐가 비었을 때 → 게임패드 폴링 후 매 프레임 redraw 요청
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        #[cfg(not(target_arch = "wasm32"))]
         self.poll_gilrs();
         if let Some(window) = &self.window {
             window.request_redraw();
@@ -845,6 +876,7 @@ impl ApplicationHandler for App {
 }
 
 impl App {
+    #[cfg(not(target_arch = "wasm32"))]
     fn poll_gilrs(&mut self) {
         let mut events = Vec::new();
         if let Some(gilrs) = &mut self.gilrs {

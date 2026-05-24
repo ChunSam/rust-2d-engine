@@ -29,11 +29,16 @@ impl From<io::Error> for SaveError {
 }
 
 /// OS 표준 데이터 디렉토리 하위의 저장 파일 경로를 반환한다.
+///
+/// WASM에서는 `{app_name}/{file}` 상대 경로를 반환한다 (파일시스템 미지원).
 pub fn save_path(app_name: &str, file: &str) -> PathBuf {
-    dirs::data_dir()
+    #[cfg(not(target_arch = "wasm32"))]
+    return dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(app_name)
-        .join(file)
+        .join(file);
+    #[cfg(target_arch = "wasm32")]
+    PathBuf::from(format!("{}/{}", app_name, file))
 }
 
 /// 디렉토리를 만들고 데이터를 RON 파일로 직렬화해 저장한다.

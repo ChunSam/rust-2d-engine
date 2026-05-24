@@ -3,6 +3,7 @@ pub mod app;
 pub mod asset;
 pub mod atlas;
 pub mod debug_ui;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod audio;
 pub mod camera;
 pub mod collision;
@@ -11,6 +12,7 @@ pub mod ecs;
 pub mod hierarchy;
 pub mod input;
 pub mod particle;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod physics;
 pub mod prefab;
 pub mod reflect;
@@ -37,6 +39,7 @@ pub use animation::{
     StateMachineSystem, TransitionCond, UvRect,
 };
 pub use app::App;
+#[cfg(not(target_arch = "wasm32"))]
 pub use audio::AudioManager;
 pub use camera::Camera;
 pub use collision::{
@@ -48,6 +51,7 @@ pub use ecs::{Entity, Events, System, World};
 pub use input::{GamepadAxis, GamepadButton, GamepadState, InputMap, InputState};
 pub use particle::{Particle, ParticleEmitter, ParticleSystem};
 pub use prefab::{spawn_entity_def, spawn_scene_def, EntityDef, Prefab, SceneDef, Tag};
+#[cfg(not(target_arch = "wasm32"))]
 pub use physics::{
     CharacterController, CollisionEvent, PhysicsBody, PhysicsSystem, PhysicsWorld, RaycastHit,
 };
@@ -62,3 +66,13 @@ pub use ui::{
     Anchor, Button, ButtonState, CheckBox, Label, LayoutDir, LayoutSystem, Panel, ScrollView,
     Slider, TextInput, UiEvent, UiNode, UiSystem,
 };
+
+// ── WASM 패닉 훅 ─────────────────────────────────────────────────────────────
+#[cfg(target_arch = "wasm32")]
+pub use wasm_bindgen;
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(start)]
+pub fn wasm_init() {
+    console_error_panic_hook::set_once();
+}

@@ -2,9 +2,12 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Receiver};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::mpsc::channel;
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 pub type AssetId = u64;
@@ -110,49 +113,54 @@ pub struct AssetServer {
     atlases: HashMap<AssetId, crate::atlas::TextureAtlas>,
     atlas_path_to_id: HashMap<Arc<str>, AssetId>,
     reload_rx: Option<Receiver<PathBuf>>,
+    #[cfg(not(target_arch = "wasm32"))]
     _watcher: Option<RecommendedWatcher>,
 }
 
 impl AssetServer {
     pub fn new() -> Self {
-        let (tx, rx) = channel::<PathBuf>();
-        let watcher_result =
-            notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-                if let Ok(event) = res {
-                    match event.kind {
-                        EventKind::Modify(_) | EventKind::Create(_) => {
-                            for path in event.paths {
-                                let _ = tx.send(path);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (tx, rx) = channel::<PathBuf>();
+            let watcher_result =
+                notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                    if let Ok(event) = res {
+                        match event.kind {
+                            EventKind::Modify(_) | EventKind::Create(_) => {
+                                for path in event.paths {
+                                    let _ = tx.send(path);
+                                }
                             }
+                            _ => {}
                         }
-                        _ => {}
                     }
-                }
-            });
-        match watcher_result {
-            Ok(w) => Self {
-                images: HashMap::new(),
-                path_to_id: HashMap::new(),
-                scripts: HashMap::new(),
-                script_path_to_id: HashMap::new(),
-                atlases: HashMap::new(),
-                atlas_path_to_id: HashMap::new(),
-                reload_rx: Some(rx),
-                _watcher: Some(w),
-            },
-            Err(e) => {
-                log::warn!("파일 감시 초기화 실패 (핫 리로딩 비활성): {e}");
-                Self {
+                });
+            match watcher_result {
+                Ok(w) => return Self {
                     images: HashMap::new(),
                     path_to_id: HashMap::new(),
                     scripts: HashMap::new(),
                     script_path_to_id: HashMap::new(),
                     atlases: HashMap::new(),
                     atlas_path_to_id: HashMap::new(),
-                    reload_rx: None,
-                    _watcher: None,
+                    reload_rx: Some(rx),
+                    _watcher: Some(w),
+                },
+                Err(e) => {
+                    log::warn!("파일 감시 초기화 실패 (핫 리로딩 비활성): {e}");
                 }
             }
+        }
+        Self {
+            images: HashMap::new(),
+            path_to_id: HashMap::new(),
+            scripts: HashMap::new(),
+            script_path_to_id: HashMap::new(),
+            atlases: HashMap::new(),
+            atlas_path_to_id: HashMap::new(),
+            reload_rx: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            _watcher: None,
         }
     }
 
@@ -170,6 +178,7 @@ impl AssetServer {
         let asset = decode_image(&key);
         self.images.insert(id, asset);
         self.path_to_id.insert(Arc::clone(&key), id);
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(ref mut w) = self._watcher {
             let _ = w.watch(path.as_ref(), RecursiveMode::NonRecursive);
         }
@@ -200,6 +209,7 @@ impl AssetServer {
         let asset = compile_script_file(&key);
         self.scripts.insert(id, asset);
         self.script_path_to_id.insert(Arc::clone(&key), id);
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(ref mut w) = self._watcher {
             let _ = w.watch(path.as_ref(), RecursiveMode::NonRecursive);
         }

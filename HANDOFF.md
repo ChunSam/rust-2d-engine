@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 22 갱신: 2026-05-24)  
-엔진 버전: v0.22.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 23 갱신: 2026-05-24)  
+엔진 버전: v0.23.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -42,6 +42,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 20 | 애니메이션 블렌딩 — BlendWeight, play_with_crossfade, BlendTree1D, BlendTreeSystem | `d6ff7f9` |
 | Phase 21 | Texture Atlas — TextureAtlas, AtlasSprite, AssetServer::load_atlas, App::load_atlas | `b63e9c9` |
 | Phase 22 | Reflect 시스템 — Reflect 트레잇, ReflectValue, World::register_reflect/get_reflect, egui Inspector | `90f65e3` |
+| Phase 23 | WASM 빌드 지원 — 플랫폼별 deps 분리, cfg-gate, EventLoopExtWebSys, getrandom wasm_js | (이번 커밋) |
 
 ---
 
@@ -109,7 +110,73 @@ src/
 
 ---
 
-## 이번 세션에서 한 일 (Phase 22)
+## 이번 세션에서 한 일 (Phase 23)
+
+### Phase 23 — WASM 빌드 지원
+
+**배경**: `rapier2d`, `rodio`, `gilrs`, `notify`는 OS 스레드/파일/HID API를 사용해 `wasm32-unknown-unknown` 타겟에서 컴파일되지 않는다. 이들을 플랫폼별 의존성으로 분리하고, 관련 코드를 `cfg`로 게이팅해 WASM 빌드를 통과시킨다.
+
+**검증**: `cargo build --target wasm32-unknown-unknown` — 경고 없음, 오류 없음
+
+**수정된 파일**: `Cargo.toml`, `.cargo/config.toml` (신규), `src/lib.rs`, `src/app.rs`, `src/asset.rs`, `src/save.rs`, `src/input/gamepad.rs`
+
+**추가된 파일**: `examples/wasm/index.html`, `examples/wasm/build.sh`, `.cargo/config.toml`
+
+**Cargo.toml 변경**
+
+| 분류 | 이전 | 이후 |
+|------|------|------|
+| `wgpu` | `"22"` | `{ version = "22", features = ["webgl"] }` |
+| `rapier2d`, `rodio`, `gilrs`, `notify`, `dirs` | `[dependencies]` | `[target.'cfg(not(wasm))'.dependencies]` |
+| `wasm-bindgen`, `wasm-bindgen-futures`, `web-sys`, `console_error_panic_hook` | 없음 | `[target.'cfg(wasm)'.dependencies]` |
+
+**getrandom 충돌 해결** (`getrandom 0.2` + `0.3` 동시 사용)
+- `getrandom 0.2` — `rand 0.8`용, `js` feature
+- `getrandom 0.3` — wgpu 등 전이 의존성, `wasm_js` feature (알리아스 `getrandom3`)
+- `.cargo/config.toml` — `--cfg getrandom_backend="wasm_js"` RUSTFLAGS 설정
+
+**cfg-gate 목록**
+
+| 파일 | 변경 내용 |
+|------|-----------|
+| `src/lib.rs` | `pub mod physics`, `pub mod audio` + 관련 re-export 조건부 컴파일 |
+| `src/lib.rs` | `#[wasm_bindgen(start)]` — `console_error_panic_hook` 초기화 |
+| `src/app.rs` | `gilrs: Option<gilrs::Gilrs>` 필드 + `poll_gilrs()` + `gilrs::Gilrs::new()` |
+| `src/app.rs` | `run()` — WASM: `EventLoopExtWebSys::spawn_app(self)` |
+| `src/app.rs` | `resumed()` — WASM: 수동 단일-poll executor (webgl 동기 완료 활용) |
+| `src/asset.rs` | `use notify::...` + `_watcher: Option<RecommendedWatcher>` + 감시 설정 |
+| `src/save.rs` | `save_path()` — WASM: `dirs` 없이 상대 경로 반환 |
+| `src/input/gamepad.rs` | `id_map`, `Slot::new`, `process_event`, `slot_mut`, `map_button`, `map_axis` |
+
+**WASM 런타임 동작**
+
+| 기능 | WASM |
+|------|------|
+| wgpu 렌더링 (WebGL2) | 동작 |
+| ECS, UI, 애니메이션, 타일맵 | 동작 |
+| Physics (rapier2d) | 비활성 — `#[cfg(not(wasm))]` |
+| Audio (rodio) | 비활성 — `#[cfg(not(wasm))]` |
+| Gamepad (gilrs) | 비활성 — `#[cfg(not(wasm))]` |
+| 파일시스템 에셋 로드 | 런타임 오류 (std::fs 미지원) |
+| 핫 리로딩 | 비활성 — notify 없음 |
+
+**브라우저 실행 방법**
+```bash
+# 의존성: cargo install wasm-pack
+cd /path/to/rust-2d-engine
+bash examples/wasm/build.sh
+python3 -m http.server 8080 --directory examples/wasm
+# 브라우저에서 http://localhost:8080 열기
+```
+
+**핵심 설계 결정**
+- `physics`와 `audio` 모듈 전체를 lib.rs에서 `#[cfg(not(wasm))]`으로 게이팅 → 해당 파일들 자체는 수정 불필요
+- WASM용 GPU 초기화: wgpu webgl 백엔드는 adapter 요청이 첫 poll에서 즉시 완료(동기) → `pollster::block_on` 없이 단순 수동 poll로 동작
+- `GamepadState` 구조체는 WASM에서도 존재하지만 gilrs 타입(`GamepadId`) 의존 필드/메서드 제거 → 빈 상태로 컴파일 가능
+
+---
+
+## 이전 세션에서 한 일 (Phase 22)
 
 ### Phase 22 — Reflect 시스템
 

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>rust-2d-engine — WASM 데모</title>
+  <style>
+    body { margin: 0; background: #111; display: flex; justify-content: center; align-items: center; height: 100vh; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <canvas id="game-canvas" width="1280" height="720"></canvas>
+  <script type="module">
+    // wasm-pack 빌드 후 생성된 모듈을 로드한다.
+    // 빌드: wasm-pack build --target web --out-dir examples/wasm/pkg
+    import init from "./pkg/engine.js";
+    init();
+  </script>
+</body>
+</html>

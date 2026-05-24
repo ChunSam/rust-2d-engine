@@ -1,6 +1,7 @@
 # CLAUDE.md — rust-2d-engine 에이전트 참조 문서
 
-> 버전 v0.22.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
+> 버전 v0.23.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
+> WASM 지원: `cargo build --target wasm32-unknown-unknown` 통과 (Phase 23)  
 > 상세 API: `REFERENCE.md` | 개발 이력/아키텍처 결정: `HANDOFF.md`
 
 ---

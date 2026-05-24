@@ -42,6 +42,7 @@ struct Slot {
 }
 
 impl Slot {
+    #[cfg(not(target_arch = "wasm32"))]
     fn new() -> Self {
         Self {
             pressed: HashSet::new(),
@@ -72,6 +73,7 @@ impl Slot {
 /// ```
 pub struct GamepadState {
     slots: [Option<Slot>; 4],
+    #[cfg(not(target_arch = "wasm32"))]
     id_map: HashMap<gilrs::GamepadId, usize>,
 }
 
@@ -79,6 +81,7 @@ impl Default for GamepadState {
     fn default() -> Self {
         Self {
             slots: [None, None, None, None],
+            #[cfg(not(target_arch = "wasm32"))]
             id_map: HashMap::new(),
         }
     }
@@ -130,6 +133,7 @@ impl GamepadState {
 
     // ── 내부 이벤트 처리 (App에서만 호출) ────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn process_event(&mut self, event: gilrs::Event) {
         use gilrs::EventType;
 
@@ -182,12 +186,14 @@ impl GamepadState {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn slot_mut(&mut self, gid: gilrs::GamepadId) -> Option<&mut Slot> {
         let idx = *self.id_map.get(&gid)?;
         self.slots[idx].as_mut()
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn map_button(btn: gilrs::Button) -> Option<GamepadButton> {
     use gilrs::Button;
     Some(match btn {
@@ -211,6 +217,7 @@ fn map_button(btn: gilrs::Button) -> Option<GamepadButton> {
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn map_axis(axis: gilrs::Axis) -> Option<GamepadAxis> {
     use gilrs::Axis;
     Some(match axis {
