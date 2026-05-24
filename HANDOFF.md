@@ -39,7 +39,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 17 | 에셋 파이프라인 + 핫 리로딩 — Handle<T>, ImageAsset, AssetServer, App::load_image | `f985118` |
 | Phase 18 | egui 인게임 디버그 에디터 — DebugUi, F1 토글, Engine Stats 내장 패널 | `83838a7` |
 | Phase 19 | Rhai 스크립팅 — ScriptAsset, ScriptRunner, ScriptingSystem, App::load_script | `861e832` |
-| Phase 20 | 애니메이션 블렌딩 — BlendWeight, play_with_crossfade, BlendTree1D, BlendTreeSystem | TBD |
+| Phase 20 | 애니메이션 블렌딩 — BlendWeight, play_with_crossfade, BlendTree1D, BlendTreeSystem | `d6ff7f9` |
 
 ---
 
