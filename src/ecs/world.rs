@@ -4,17 +4,20 @@ use std::collections::{HashMap, VecDeque};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Entity(pub u32);
 
+/// 컴포넌트 저장 단위. `Send + Sync`를 요구해 병렬 쿼리를 가능하게 한다.
+type ComponentBox = Box<dyn Any + Send + Sync>;
+
 // ─── Reflect 레지스트리 헬퍼 ─────────────────────────────────────────────────
 
 fn get_reflect_impl<T: crate::reflect::Reflect + 'static>(
-    b: &Box<dyn Any>,
+    b: &ComponentBox,
 ) -> Option<&dyn crate::reflect::Reflect> {
     b.downcast_ref::<T>()
         .map(|t| t as &dyn crate::reflect::Reflect)
 }
 
 fn get_reflect_mut_impl<T: crate::reflect::Reflect + 'static>(
-    b: &mut Box<dyn Any>,
+    b: &mut ComponentBox,
 ) -> Option<&mut dyn crate::reflect::Reflect> {
     b.downcast_mut::<T>()
         .map(|t| t as &mut dyn crate::reflect::Reflect)
@@ -22,8 +25,8 @@ fn get_reflect_mut_impl<T: crate::reflect::Reflect + 'static>(
 
 #[derive(Copy, Clone)]
 struct ReflectEntry {
-    get: fn(&Box<dyn Any>) -> Option<&dyn crate::reflect::Reflect>,
-    get_mut: fn(&mut Box<dyn Any>) -> Option<&mut dyn crate::reflect::Reflect>,
+    get: fn(&ComponentBox) -> Option<&dyn crate::reflect::Reflect>,
+    get_mut: fn(&mut ComponentBox) -> Option<&mut dyn crate::reflect::Reflect>,
 }
 
 type ArchetypeId = usize;
@@ -33,14 +36,14 @@ type ArchetypeId = usize;
 struct Archetype {
     type_set: Vec<TypeId>, // 정렬된 TypeId 목록
     entities: Vec<Entity>,
-    columns: HashMap<TypeId, Vec<Box<dyn Any>>>,
+    columns: HashMap<TypeId, Vec<ComponentBox>>,
 }
 
 impl Archetype {
     fn new(type_set: Vec<TypeId>) -> Self {
         let columns = type_set
             .iter()
-            .map(|&t| (t, Vec::<Box<dyn Any>>::new()))
+            .map(|&t| (t, Vec::<ComponentBox>::new()))
             .collect();
         Self {
             type_set,
@@ -165,7 +168,9 @@ impl World {
     }
 
     /// 엔티티에 컴포넌트를 붙인다. 이미 있으면 교체한다.
-    pub fn add_component<T: 'static>(&mut self, entity: Entity, component: T) {
+    ///
+    /// `T: Send + Sync`가 요구된다 — 병렬 쿼리(`par_query*`)에서 스레드 간 공유를 허용하기 위해서다.
+    pub fn add_component<T: Send + Sync + 'static>(&mut self, entity: Entity, component: T) {
         let tid = TypeId::of::<T>();
         let (arch_id, _) = match self.entity_location.get(&entity) {
             Some(&loc) => loc,
@@ -436,7 +441,7 @@ impl World {
         let src_len = self.archetypes[src_arch_id].entities.len();
         let src_type_set: Vec<TypeId> = self.archetypes[src_arch_id].type_set.clone();
 
-        let mut extracted: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
+        let mut extracted: HashMap<TypeId, ComponentBox> = HashMap::new();
         for &tid in &src_type_set {
             let comp = self.archetypes[src_arch_id]
                 .columns
@@ -469,6 +474,121 @@ impl World {
 
         self.entity_location
             .insert(entity, (target_arch_id, dst_row));
+    }
+}
+
+// ─── 병렬 쿼리 (native only — WASM은 단일 스레드) ──────────────────────────────
+
+#[cfg(not(target_arch = "wasm32"))]
+impl World {
+    /// T를 가진 모든 엔티티에 클로저를 **병렬**로 적용한다 (읽기 전용).
+    ///
+    /// 결과를 수집할 때는 클로저 내에서 `Mutex` 또는 채널을 사용하거나,
+    /// 반환값이 필요하면 [`par_query_map`]을 사용한다.
+    ///
+    /// ```text
+    /// world.par_query_for_each::<Transform, _>(|e, t| {
+    ///     println!("{e:?} pos={}", t.position);
+    /// });
+    /// ```
+    pub fn par_query_for_each<T, F>(&self, f: F)
+    where
+        T: Send + Sync + 'static,
+        F: Fn(Entity, &T) + Send + Sync,
+    {
+        use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+        let tid = TypeId::of::<T>();
+        self.archetypes
+            .par_iter()
+            .filter(|arch| arch.contains(tid))
+            .for_each(|arch| {
+                let col = arch.columns.get(&tid).unwrap();
+                arch.entities
+                    .par_iter()
+                    .zip(col.par_iter())
+                    .for_each(|(&e, c)| f(e, c.downcast_ref::<T>().unwrap()));
+            });
+    }
+
+    /// T를 가진 모든 엔티티에 매핑 클로저를 **병렬**로 적용하고 결과를 `Vec<R>`로 반환한다.
+    ///
+    /// ```text
+    /// let positions: Vec<(Entity, Vec2)> =
+    ///     world.par_query_map::<Transform, _, _>(|e, t| (e, t.position));
+    /// ```
+    pub fn par_query_map<T, R, F>(&self, f: F) -> Vec<R>
+    where
+        T: Send + Sync + 'static,
+        R: Send,
+        F: Fn(Entity, &T) -> R + Send + Sync,
+    {
+        use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+        let tid = TypeId::of::<T>();
+        self.archetypes
+            .par_iter()
+            .filter(|arch| arch.contains(tid))
+            .flat_map(|arch| {
+                let col = arch.columns.get(&tid).unwrap();
+                arch.entities
+                    .par_iter()
+                    .zip(col.par_iter())
+                    .map(|(&e, c)| f(e, c.downcast_ref::<T>().unwrap()))
+            })
+            .collect()
+    }
+
+    /// A, B를 모두 가진 엔티티에 클로저를 **병렬**로 적용한다 (읽기 전용).
+    pub fn par_query2_for_each<A, B, F>(&self, f: F)
+    where
+        A: Send + Sync + 'static,
+        B: Send + Sync + 'static,
+        F: Fn(Entity, &A, &B) + Send + Sync,
+    {
+        use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+        let ta = TypeId::of::<A>();
+        let tb = TypeId::of::<B>();
+        self.archetypes
+            .par_iter()
+            .filter(move |arch| arch.contains(ta) && arch.contains(tb))
+            .for_each(|arch| {
+                let ca = arch.columns.get(&ta).unwrap();
+                let cb = arch.columns.get(&tb).unwrap();
+                arch.entities
+                    .par_iter()
+                    .zip(ca.par_iter())
+                    .zip(cb.par_iter())
+                    .for_each(|((&e, a), b)| {
+                        f(e, a.downcast_ref::<A>().unwrap(), b.downcast_ref::<B>().unwrap());
+                    });
+            });
+    }
+
+    /// A, B를 모두 가진 엔티티에 매핑 클로저를 **병렬**로 적용하고 결과를 `Vec<R>`로 반환한다.
+    pub fn par_query2_map<A, B, R, F>(&self, f: F) -> Vec<R>
+    where
+        A: Send + Sync + 'static,
+        B: Send + Sync + 'static,
+        R: Send,
+        F: Fn(Entity, &A, &B) -> R + Send + Sync,
+    {
+        use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+        let ta = TypeId::of::<A>();
+        let tb = TypeId::of::<B>();
+        self.archetypes
+            .par_iter()
+            .filter(move |arch| arch.contains(ta) && arch.contains(tb))
+            .flat_map(|arch| {
+                let ca = arch.columns.get(&ta).unwrap();
+                let cb = arch.columns.get(&tb).unwrap();
+                arch.entities
+                    .par_iter()
+                    .zip(ca.par_iter())
+                    .zip(cb.par_iter())
+                    .map(|((&e, a), b)| {
+                        f(e, a.downcast_ref::<A>().unwrap(), b.downcast_ref::<B>().unwrap())
+                    })
+            })
+            .collect()
     }
 }
 

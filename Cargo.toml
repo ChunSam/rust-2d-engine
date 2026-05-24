@@ -34,6 +34,7 @@ dirs        = "5"
 gilrs       = "0.10"
 notify      = "6"
 tungstenite = { version = "0.21", features = [] }
+rayon       = "1"
 
 # ── WASM 전용 ────────────────────────────────────────────────────────────────
 [target.'cfg(target_arch = "wasm32")'.dependencies]

@@ -56,6 +56,8 @@ pub use physics::{
 };
 pub use prefab::{spawn_entity_def, spawn_scene_def, EntityDef, Prefab, SceneDef, Tag};
 pub use network::{NetworkClient, NetworkEvent, NetworkSystem};
+// par_query_for_each / par_query_map / par_query2_for_each / par_query2_map 은
+// World 메서드이므로 World re-export를 통해 자동 접근 가능 (별도 re-export 불필요)
 pub use reflect::{Reflect, ReflectValue};
 pub use renderer::{DrawRect, DrawText, PostProcessConfig, TextQueue, TextRenderer, UiQueue};
 pub use resources::{
