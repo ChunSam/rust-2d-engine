@@ -4,6 +4,26 @@ use std::collections::{HashMap, VecDeque};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Entity(pub u32);
 
+// ─── Reflect 레지스트리 헬퍼 ─────────────────────────────────────────────────
+
+fn get_reflect_impl<T: crate::reflect::Reflect + 'static>(
+    b: &Box<dyn Any>,
+) -> Option<&dyn crate::reflect::Reflect> {
+    b.downcast_ref::<T>().map(|t| t as &dyn crate::reflect::Reflect)
+}
+
+fn get_reflect_mut_impl<T: crate::reflect::Reflect + 'static>(
+    b: &mut Box<dyn Any>,
+) -> Option<&mut dyn crate::reflect::Reflect> {
+    b.downcast_mut::<T>().map(|t| t as &mut dyn crate::reflect::Reflect)
+}
+
+#[derive(Copy, Clone)]
+struct ReflectEntry {
+    get: fn(&Box<dyn Any>) -> Option<&dyn crate::reflect::Reflect>,
+    get_mut: fn(&mut Box<dyn Any>) -> Option<&mut dyn crate::reflect::Reflect>,
+}
+
 type ArchetypeId = usize;
 
 /// 동일한 컴포넌트 집합을 가진 엔티티 묶음.
@@ -38,6 +58,7 @@ pub struct World {
     archetype_index: HashMap<Vec<TypeId>, ArchetypeId>,
     entity_location: HashMap<Entity, (ArchetypeId, usize)>,
     resources: HashMap<TypeId, Box<dyn Any>>,
+    reflect_registry: HashMap<TypeId, ReflectEntry>,
 }
 
 impl World {
@@ -53,6 +74,7 @@ impl World {
             archetype_index,
             entity_location: HashMap::new(),
             resources: HashMap::new(),
+            reflect_registry: HashMap::new(),
         }
     }
 
@@ -305,6 +327,72 @@ impl World {
         self.resources
             .get_mut(&TypeId::of::<T>())?
             .downcast_mut::<T>()
+    }
+
+    // ── Reflect 레지스트리 ────────────────────────────────────────────────────
+
+    /// 타입 T를 Reflect 레지스트리에 등록한다.
+    ///
+    /// 등록된 타입은 `get_reflect`, `get_reflect_mut`, `reflected_components`로 접근할 수 있으며
+    /// egui Inspector 패널에 자동으로 표시된다.
+    pub fn register_reflect<T: crate::reflect::Reflect + 'static>(&mut self) {
+        self.reflect_registry.insert(
+            TypeId::of::<T>(),
+            ReflectEntry {
+                get: get_reflect_impl::<T>,
+                get_mut: get_reflect_mut_impl::<T>,
+            },
+        );
+    }
+
+    /// 엔티티의 특정 컴포넌트를 `&dyn Reflect`로 가져온다.
+    ///
+    /// `type_id`에 해당하는 컴포넌트가 없거나 등록되지 않은 타입이면 `None`.
+    pub fn get_reflect(
+        &self,
+        entity: Entity,
+        type_id: TypeId,
+    ) -> Option<&dyn crate::reflect::Reflect> {
+        let entry = self.reflect_registry.get(&type_id)?;
+        let &(arch_id, row) = self.entity_location.get(&entity)?;
+        let boxed = self.archetypes[arch_id].columns.get(&type_id)?.get(row)?;
+        (entry.get)(boxed)
+    }
+
+    /// 엔티티의 특정 컴포넌트를 `&mut dyn Reflect`로 가져온다.
+    ///
+    /// `ReflectEntry`를 Copy로 꺼낸 뒤 Archetype을 가변 접근하므로 borrow 충돌 없음.
+    pub fn get_reflect_mut(
+        &mut self,
+        entity: Entity,
+        type_id: TypeId,
+    ) -> Option<&mut dyn crate::reflect::Reflect> {
+        let entry = *self.reflect_registry.get(&type_id)?; // Copy → borrow 해제
+        let &(arch_id, row) = self.entity_location.get(&entity)?;
+        let boxed = self.archetypes[arch_id]
+            .columns
+            .get_mut(&type_id)?
+            .get_mut(row)?;
+        (entry.get_mut)(boxed)
+    }
+
+    /// 엔티티가 가진 컴포넌트 중 Reflect 레지스트리에 등록된 타입의 `TypeId` 목록.
+    pub fn reflected_components(&self, entity: Entity) -> Vec<TypeId> {
+        let &(arch_id, _) = match self.entity_location.get(&entity) {
+            Some(loc) => loc,
+            None => return vec![],
+        };
+        self.archetypes[arch_id]
+            .type_set
+            .iter()
+            .copied()
+            .filter(|tid| self.reflect_registry.contains_key(tid))
+            .collect()
+    }
+
+    /// 엔티티가 살아있는지 확인한다 (despawn 또는 미존재이면 false).
+    pub fn is_alive(&self, entity: Entity) -> bool {
+        self.entity_location.contains_key(&entity)
     }
 
     // ── 내부 헬퍼 ─────────────────────────────────────────────────────────────

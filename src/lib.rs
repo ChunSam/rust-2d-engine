@@ -13,6 +13,7 @@ pub mod input;
 pub mod particle;
 pub mod physics;
 pub mod prefab;
+pub mod reflect;
 pub mod renderer;
 pub mod resources;
 pub mod save;
@@ -28,6 +29,7 @@ pub mod ui;
 
 pub use asset::{AssetServer, Handle, ImageAsset, ScriptAsset};
 pub use atlas::{AtlasSprite, TextureAtlas};
+pub use reflect::{Reflect, ReflectValue};
 pub use debug_ui::DebugUi;
 pub use animation::{
     AnimParam, AnimState, AnimTransition, AnimationClip, AnimationPlayer, AnimationStateMachine,

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -14,9 +15,11 @@ use crate::{
     asset::{AssetServer, Handle, ImageAsset},
     camera::Camera,
     debug_ui::DebugUi,
-    ecs::{Events, System, World},
+    ecs::{Entity, Events, System, World},
     hierarchy::HierarchySystem,
     input::{GamepadState, InputState},
+    prefab::Tag,
+    reflect::ReflectValue,
     renderer::{DrawRect, GpuContext, PostProcessConfig, PostProcessRenderer, SpriteRenderer, TextQueue, TextRenderer, UiQueue},
     resources::{DebugDrawQueue, FontData, GameState, PendingResize, ShouldQuit, ViewportSize, WindowConfig},
     scene::{Scene, SceneChange, SceneCmd},
@@ -61,6 +64,8 @@ pub struct App {
     egui_state: Option<egui_winit::State>,
     /// update() 에서 tessellate 한 결과를 render() 까지 전달하는 임시 버퍼.
     egui_output: Option<(Vec<egui::ClippedPrimitive>, egui::TexturesDelta, f32)>,
+    /// Inspector 패널에서 현재 선택된 엔티티.
+    inspector_selected: Option<Entity>,
 }
 
 impl App {
@@ -80,6 +85,11 @@ impl App {
         world.insert_resource(DebugDrawQueue::default());
         world.insert_resource(SceneChange::default());
         world.insert_resource(AssetServer::new());
+        // 엔진 내장 컴포넌트를 Reflect 레지스트리에 자동 등록
+        world.register_reflect::<crate::components::Transform>();
+        world.register_reflect::<crate::components::Sprite>();
+        world.register_reflect::<crate::prefab::Tag>();
+
         Self {
             world,
             systems: Vec::new(),
@@ -97,6 +107,7 @@ impl App {
             egui_renderer: None,
             egui_state: None,
             egui_output: None,
+            inspector_selected: None,
         }
     }
 
@@ -196,6 +207,11 @@ impl App {
             init(&mut self.world);
         }
         self.event_initializers = inits;
+        // Reflect 레지스트리 재등록 (World 재생성으로 초기화되었으므로)
+        self.world.register_reflect::<crate::components::Transform>();
+        self.world.register_reflect::<crate::components::Sprite>();
+        self.world.register_reflect::<crate::prefab::Tag>();
+        self.inspector_selected = None;
     }
 
     /// 씬을 즉시 전환한다. `run()` 호출 전·후 모두 사용 가능하다.
@@ -275,7 +291,26 @@ impl App {
         // 계층 변환 전파 — 유저 시스템(물리 포함) 이후, 렌더 직전에 실행
         HierarchySystem.run(&mut self.world, dt);
 
-        // 내장 EngineStats 패널
+        // Inspector: 선택된 엔티티 유효성 확인 + 필드 스테이징
+        if let Some(sel) = self.inspector_selected {
+            if !self.world.is_alive(sel) {
+                self.inspector_selected = None;
+            }
+        }
+        let entity_list: Vec<Entity> = self.world.entities().to_vec();
+        let tag_map: HashMap<Entity, String> = self.world.query::<Tag>()
+            .map(|(e, t)| (e, t.0.clone()))
+            .collect();
+        let mut comp_fields: Vec<(&'static str, Vec<(&'static str, ReflectValue)>)> = Vec::new();
+        if let Some(sel) = self.inspector_selected {
+            for tid in self.world.reflected_components(sel) {
+                if let Some(refl) = self.world.get_reflect(sel, tid) {
+                    comp_fields.push((refl.type_name(), refl.fields()));
+                }
+            }
+        }
+
+        // 내장 EngineStats 패널 + Inspector
         if let Some(ctx) = &egui_ctx {
             if self.world.resource::<DebugUi>().map(|d| d.is_enabled()).unwrap_or(false) {
                 let entity_count = self.world.entity_count();
@@ -293,6 +328,94 @@ impl App {
                         ui.label(format!("Ent   {entity_count}"));
                         ui.label(format!("Asset {asset_count}"));
                     });
+
+                // Inspector 패널: 엔티티 목록 + 컴포넌트 필드 편집기
+                egui::Window::new("Inspector")
+                    .default_pos([10.0, 130.0])
+                    .default_size([440.0, 300.0])
+                    .show(ctx, |ui| {
+                        ui.horizontal_top(|ui| {
+                            // 왼쪽: 엔티티 목록
+                            ui.vertical(|ui| {
+                                ui.set_min_width(130.0);
+                                ui.strong("Entities");
+                                egui::ScrollArea::vertical()
+                                    .id_salt("inspector_ent")
+                                    .max_height(250.0)
+                                    .show(ui, |ui| {
+                                        for &e in &entity_list {
+                                            let label = tag_map.get(&e)
+                                                .cloned()
+                                                .unwrap_or_else(|| format!("E{}", e.0));
+                                            if ui.selectable_label(
+                                                self.inspector_selected == Some(e),
+                                                &label,
+                                            ).clicked() {
+                                                self.inspector_selected = Some(e);
+                                            }
+                                        }
+                                    });
+                            });
+                            ui.separator();
+                            // 오른쪽: 컴포넌트 필드 편집기
+                            ui.vertical(|ui| {
+                                ui.strong("Components");
+                                egui::ScrollArea::vertical()
+                                    .id_salt("inspector_comp")
+                                    .max_height(250.0)
+                                    .show(ui, |ui| {
+                                        for (comp_name, fields) in comp_fields.iter_mut() {
+                                            ui.collapsing(*comp_name, |ui| {
+                                                egui::Grid::new(*comp_name)
+                                                    .num_columns(2)
+                                                    .spacing([4.0, 2.0])
+                                                    .show(ui, |ui| {
+                                                        for (fname, fval) in fields.iter_mut() {
+                                                            ui.label(*fname);
+                                                            match fval {
+                                                                ReflectValue::F32(v) => {
+                                                                    ui.add(egui::DragValue::new(v).speed(0.5));
+                                                                }
+                                                                ReflectValue::Vec2(v) => {
+                                                                    ui.horizontal(|ui| {
+                                                                        ui.add(egui::DragValue::new(&mut v.x).speed(0.5).prefix("x:"));
+                                                                        ui.add(egui::DragValue::new(&mut v.y).speed(0.5).prefix("y:"));
+                                                                    });
+                                                                }
+                                                                ReflectValue::Bool(v) => { ui.checkbox(v, ""); }
+                                                                ReflectValue::String(s) => { ui.text_edit_singleline(s); }
+                                                                ReflectValue::Color(c) => {
+                                                                    ui.horizontal(|ui| {
+                                                                        ui.add(egui::DragValue::new(&mut c[0]).speed(0.01).prefix("r:"));
+                                                                        ui.add(egui::DragValue::new(&mut c[1]).speed(0.01).prefix("g:"));
+                                                                        ui.add(egui::DragValue::new(&mut c[2]).speed(0.01).prefix("b:"));
+                                                                        ui.add(egui::DragValue::new(&mut c[3]).speed(0.01).prefix("a:"));
+                                                                    });
+                                                                }
+                                                            }
+                                                            ui.end_row();
+                                                        }
+                                                    });
+                                            });
+                                        }
+                                    });
+                            });
+                        });
+                    });
+            }
+        }
+
+        // Inspector: 스테이징 값을 World에 적용 (egui 프레임 종료 전)
+        if let Some(sel) = self.inspector_selected {
+            let type_ids = self.world.reflected_components(sel);
+            for (i, tid) in type_ids.iter().enumerate() {
+                if i < comp_fields.len() {
+                    if let Some(refl) = self.world.get_reflect_mut(sel, *tid) {
+                        for (fname, fval) in &comp_fields[i].1 {
+                            refl.set_field(fname, fval.clone());
+                        }
+                    }
+                }
             }
         }
 

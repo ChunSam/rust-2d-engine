@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 21 갱신: 2026-05-24)  
-엔진 버전: v0.21.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 22 갱신: 2026-05-24)  
+엔진 버전: v0.22.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -40,7 +40,8 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 18 | egui 인게임 디버그 에디터 — DebugUi, F1 토글, Engine Stats 내장 패널 | `83838a7` |
 | Phase 19 | Rhai 스크립팅 — ScriptAsset, ScriptRunner, ScriptingSystem, App::load_script | `861e832` |
 | Phase 20 | 애니메이션 블렌딩 — BlendWeight, play_with_crossfade, BlendTree1D, BlendTreeSystem | `d6ff7f9` |
-| Phase 21 | Texture Atlas — TextureAtlas, AtlasSprite, AssetServer::load_atlas, App::load_atlas | (이번 커밋) |
+| Phase 21 | Texture Atlas — TextureAtlas, AtlasSprite, AssetServer::load_atlas, App::load_atlas | `b63e9c9` |
+| Phase 22 | Reflect 시스템 — Reflect 트레잇, ReflectValue, World::register_reflect/get_reflect, egui Inspector | (이번 커밋) |
 
 ---
 
@@ -108,7 +109,71 @@ src/
 
 ---
 
-## 이번 세션에서 한 일 (Phase 21)
+## 이번 세션에서 한 일 (Phase 22)
+
+### Phase 22 — Reflect 시스템
+
+**배경**: egui 인스펙터에서 컴포넌트 속성을 이름으로 읽고 쓸 수 있는 런타임 필드 접근 API가 필요했다. proc-macro 없이 핵심 컴포넌트에 수동 구현해 복잡도를 낮췄다.
+
+**추가된 파일**: `src/reflect.rs`
+
+**수정된 파일**: `src/components.rs`, `src/prefab.rs`, `src/ecs/world.rs`, `src/app.rs`, `src/lib.rs`
+
+**새 타입**
+- `ReflectValue` (`src/reflect.rs`) — `F32 | Vec2 | Bool | String | Color([f32;4])` 열거형
+- `Reflect` 트레잇 (`src/reflect.rs`) — `fields()`, `set_field()`, `type_name()` 인터페이스
+- `ReflectEntry` (`src/ecs/world.rs`) — `Copy` 가능한 함수 포인터 쌍 (`get`, `get_mut`)
+
+**컴포넌트 구현**
+- `Transform` — x, y, rotation, scale_x, scale_y, z (모두 F32)
+- `Sprite` — color (Color), texture (String)
+- `Tag` — tag (String)
+
+**World 확장** (`src/ecs/world.rs`)
+- `reflect_registry: HashMap<TypeId, ReflectEntry>` 필드 추가
+- `register_reflect::<T>()` — TypeId → 함수 포인터 등록
+- `get_reflect(entity, TypeId)` → `Option<&dyn Reflect>`
+- `get_reflect_mut(entity, TypeId)` → `Option<&mut dyn Reflect>`
+- `reflected_components(entity)` → `Vec<TypeId>` (등록된 컴포넌트 중 보유 목록)
+- `is_alive(entity)` → `bool`
+
+**egui Inspector 패널** (`src/app.rs`)
+- F1 Debug UI 내 `Inspector` 창 추가 (기본 위치: [10, 130])
+- 좌측: 엔티티 목록 (Tag 있으면 Tag명, 없으면 "Entity N" 표시, 클릭으로 선택)
+- 우측: 선택된 엔티티의 컴포넌트별 collapsing 패널 + Grid 레이아웃 필드 편집기
+  - F32 → `DragValue` (슬라이더 속도 0.5)
+  - Color → `color_edit_button_rgba_unmultiplied`
+  - String → `text_edit_singleline`
+- 편집은 "stage-and-apply" 패턴: 읽기(불변) → egui 수정 → 쓰기(가변) — borrow 충돌 없음
+
+**자동 등록**: `App::new()` + `App::reload_scene()`에서 Transform, Sprite, Tag 자동 `register_reflect`
+
+**핵심 설계 결정**
+- `ReflectEntry`가 `Copy`인 이유: 함수 포인터를 담아 `let entry = *map.get()?` 로 복사 후 `&mut self.archetypes` borrow 가능
+- object-safe 유지: `Reflect` 트레잇에 제네릭·Self 없음 → `dyn Reflect` 사용 가능
+- `Vec2`, `Bool` ReflectValue 열거형에 포함 — 사용자 컴포넌트 확장을 위해 미리 준비
+
+**사용 패턴**
+```rust
+// 수동 등록 (App::new()에서 자동 등록되지 않는 사용자 컴포넌트)
+world.register_reflect::<MyComp>();
+
+// 읽기
+if let Some(refl) = world.get_reflect(entity, TypeId::of::<Transform>()) {
+    for (name, val) in refl.fields() { println!("{name}: {val:?}"); }
+}
+
+// 쓰기
+if let Some(refl) = world.get_reflect_mut(entity, TypeId::of::<Transform>()) {
+    refl.set_field("x", ReflectValue::F32(100.0));
+}
+
+// egui Inspector — F1 키로 토글, 별도 코드 불필요 (App 내장)
+```
+
+---
+
+## 이전 세션에서 한 일 (Phase 21)
 
 ### Phase 21 — Texture Atlas 시스템
 

@@ -1,6 +1,6 @@
 # CLAUDE.md — rust-2d-engine 에이전트 참조 문서
 
-> 버전 v0.21.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
+> 버전 v0.22.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
 > 상세 API: `REFERENCE.md` | 개발 이력/아키텍처 결정: `HANDOFF.md`
 
 ---
@@ -14,6 +14,7 @@
 | 엔진 진입점, 메인 루프, 렌더링 오케스트레이션, `load_image` | `src/app.rs` |
 | Handle<T>, ImageAsset, ScriptAsset, AssetServer (에셋 로드·캐싱·핫 리로딩) | `src/asset.rs` |
 | TextureAtlas (균일 그리드 아틀라스), AtlasSprite (아틀라스 타일 렌더 컴포넌트) | `src/atlas.rs` |
+| Reflect 트레잇, ReflectValue (런타임 필드 읽기/쓰기, egui Inspector 연동) | `src/reflect.rs` |
 | ScriptAsset, ScriptRunner, ScriptingSystem (Rhai 스크립팅) | `src/scripting.rs` |
 | DebugUi (egui 오버레이, F1 토글, `ctx()`로 커스텀 패널) | `src/debug_ui.rs` |
 | 전체 공개 API re-export 목록 | `src/lib.rs` |

@@ -38,6 +38,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::components::{Sprite, Transform};
 use crate::ecs::{Entity, World};
+use crate::reflect::{Reflect, ReflectValue};
 use crate::save::{load, save, SaveError};
 
 // ─── Tag 컴포넌트 ─────────────────────────────────────────────────────────────
@@ -62,6 +63,19 @@ use crate::save::{load, save, SaveError};
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tag(pub String);
+
+impl Reflect for Tag {
+    fn fields(&self) -> Vec<(&'static str, ReflectValue)> {
+        vec![("tag", ReflectValue::String(self.0.clone()))]
+    }
+    fn set_field(&mut self, name: &str, val: ReflectValue) -> bool {
+        match (name, val) {
+            ("tag", ReflectValue::String(s)) => { self.0 = s; true }
+            _ => false,
+        }
+    }
+    fn type_name(&self) -> &'static str { "Tag" }
+}
 
 // ─── EntityDef ────────────────────────────────────────────────────────────────
 

@@ -2,6 +2,7 @@ use glam::{Mat4, Quat, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
 use crate::asset::{Handle, ImageAsset};
+use crate::reflect::{Reflect, ReflectValue};
 
 // ─── 렌더 컴포넌트 ────────────────────────────────────────────────────────────
 
@@ -91,6 +92,53 @@ impl Default for Sprite {
     fn default() -> Self {
         Self::colored(1.0, 1.0, 1.0)
     }
+}
+
+// ─── Reflect 구현 ─────────────────────────────────────────────────────────────
+
+impl Reflect for Transform {
+    fn fields(&self) -> Vec<(&'static str, ReflectValue)> {
+        vec![
+            ("x",        ReflectValue::F32(self.position.x)),
+            ("y",        ReflectValue::F32(self.position.y)),
+            ("rotation", ReflectValue::F32(self.rotation)),
+            ("scale_x",  ReflectValue::F32(self.scale.x)),
+            ("scale_y",  ReflectValue::F32(self.scale.y)),
+            ("z",        ReflectValue::F32(self.z)),
+        ]
+    }
+    fn set_field(&mut self, name: &str, val: ReflectValue) -> bool {
+        match (name, val) {
+            ("x",        ReflectValue::F32(v)) => { self.position.x = v; true }
+            ("y",        ReflectValue::F32(v)) => { self.position.y = v; true }
+            ("rotation", ReflectValue::F32(v)) => { self.rotation = v; true }
+            ("scale_x",  ReflectValue::F32(v)) => { self.scale.x = v; true }
+            ("scale_y",  ReflectValue::F32(v)) => { self.scale.y = v; true }
+            ("z",        ReflectValue::F32(v)) => { self.z = v; true }
+            _ => false,
+        }
+    }
+    fn type_name(&self) -> &'static str { "Transform" }
+}
+
+impl Reflect for Sprite {
+    fn fields(&self) -> Vec<(&'static str, ReflectValue)> {
+        vec![
+            ("color",   ReflectValue::Color(self.color)),
+            ("texture", ReflectValue::String(self.texture.clone().unwrap_or_default())),
+        ]
+    }
+    fn set_field(&mut self, name: &str, val: ReflectValue) -> bool {
+        match (name, val) {
+            ("color",   ReflectValue::Color(c)) => { self.color = c; true }
+            ("texture", ReflectValue::String(s)) => {
+                self.texture = if s.is_empty() { None } else { Some(s) };
+                true
+            }
+            _ => false,
+        }
+    }
+    fn type_name(&self) -> &'static str { "Sprite" }
 }
 
 // ─── 하위 호환 재수출 ─────────────────────────────────────────────────────────
