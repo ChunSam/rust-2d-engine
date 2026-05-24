@@ -17,6 +17,7 @@ pub mod resources;
 pub mod save;
 pub use save::{delete, exists, load, load_or_default, save, save_path, SaveError};
 pub mod scene;
+pub mod scripting;
 pub mod tilemap;
 pub mod timer;
 pub mod tween;
@@ -24,7 +25,7 @@ pub mod ui;
 
 // ── 편의 재수출 ────────────────────────────────────────────────────────────────
 
-pub use asset::{AssetServer, Handle, ImageAsset};
+pub use asset::{AssetServer, Handle, ImageAsset, ScriptAsset};
 pub use debug_ui::DebugUi;
 pub use animation::{
     AnimParam, AnimState, AnimTransition, AnimationClip, AnimationPlayer, AnimationStateMachine,
@@ -51,6 +52,7 @@ pub use scene::{Scene, SceneChange, SceneCmd};
 pub use tilemap::{Tilemap, TilemapAtlas, TilemapSystem};
 pub use timer::Timer;
 pub use tween::{Easing, Tween};
+pub use scripting::{ScriptRunner, ScriptingSystem};
 pub use ui::{
     Anchor, Button, ButtonState, CheckBox, Label, LayoutDir, LayoutSystem, Panel, ScrollView,
     Slider, TextInput, UiEvent, UiNode, UiSystem,

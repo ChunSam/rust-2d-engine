@@ -37,7 +37,8 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 15 | 게임패드(gilrs) + UI Slider/CheckBox — GamepadState, Slider, CheckBox, UiEvent 확장 | `30d1b9e` |
 | Phase 16 | 씬 직렬화 + 프리팹 시스템 — Tag, EntityDef, SceneDef, Prefab, spawn_entity_def | `2bfbffa` |
 | Phase 17 | 에셋 파이프라인 + 핫 리로딩 — Handle<T>, ImageAsset, AssetServer, App::load_image | `f985118` |
-| Phase 18 | egui 인게임 디버그 에디터 — DebugUi, F1 토글, Engine Stats 내장 패널 | (현재 커밋) |
+| Phase 18 | egui 인게임 디버그 에디터 — DebugUi, F1 토글, Engine Stats 내장 패널 | `83838a7` |
+| Phase 19 | Rhai 스크립팅 — ScriptAsset, ScriptRunner, ScriptingSystem, App::load_script | (현재 커밋) |
 
 ---
 
@@ -105,7 +106,79 @@ src/
 
 ---
 
-## 이번 세션에서 한 일 (Phase 18)
+## 이번 세션에서 한 일 (Phase 19)
+
+### Phase 19 — Rhai 스크립팅
+
+**배경**: 게임 로직을 Rust 재컴파일 없이 `.rhai` 스크립트로 작성할 수 있게 한다. 각 엔티티에 `ScriptRunner`를 붙이면 매 프레임 `on_update(dt)`가 실행되고, Transform이 자동 동기화된다.
+
+**추가된 파일**: `src/scripting.rs`  
+**변경된 파일**: `Cargo.toml`, `src/asset.rs`, `src/app.rs`, `src/lib.rs`
+
+#### 주요 타입
+
+| 타입 | 역할 |
+|------|------|
+| `ScriptAsset` | CPU-side Rhai AST + 소스 문자열 (AssetServer 관리) |
+| `ScriptRunner` | 엔티티 컴포넌트; 스크립트 핸들 + Scope 보유 |
+| `ScriptingSystem` | 매 프레임 `on_update(dt)` 실행 + Transform 동기화 |
+
+#### 공개 API
+
+```rust
+// 스크립트 로드
+let handle = app.load_script("assets/enemy_ai.rhai");
+
+// 엔티티에 부착
+world.add_component(entity, ScriptRunner::new(handle));
+
+// 시스템 등록
+app.add_system(Box::new(ScriptingSystem::new()));
+```
+
+**스크립트 예시 (`enemy_ai.rhai`)**:
+```rhai
+fn on_start() {
+    log("AI 초기화");
+}
+
+fn on_update(dt) {
+    x += 100.0 * dt;   // 오른쪽 이동
+    rot += 2.0 * dt;   // 회전
+}
+```
+
+#### 스코프 변수 (읽기/쓰기)
+
+| 변수 | 타입 | 설명 |
+|------|------|------|
+| `x`, `y` | `f64` | Transform.position |
+| `rot` | `f64` | Transform.rotation (라디안) |
+| `sx`, `sy` | `f64` | Transform.scale |
+
+#### 등록된 함수
+
+| 함수 | 설명 |
+|------|------|
+| `log(msg)` | 디버그 출력 (`[Script] msg`) |
+
+#### 설계 결정
+
+- `ScriptingSystem`이 `Engine`을 직접 소유 — `ScriptEngine` 리소스 없이 간단하게 유지
+- `on_start` / `on_update` 없어도 오류 없이 무시 (`EvalAltResult::ErrorFunctionNotFound` 처리)
+- 핫 리로딩: `poll_reloads`가 `.rhai` 파일 변경 감지 시 AST 재컴파일. `runner.reset()` 호출 시 `on_start` 재실행
+- `max_operations = 1_000_000` 제한으로 스크립트 무한 루프 방지
+- `rhai = { features = ["sync"] }` — Engine을 `Send+Sync`로 만들어 향후 멀티스레드 확장 지원
+
+#### Cargo.toml 변경
+
+```toml
+rhai = { version = "1", features = ["sync"] }
+```
+
+---
+
+## 이전 세션에서 한 일 (Phase 18)
 
 ### Phase 18 — egui 인게임 디버그 에디터
 
@@ -738,6 +811,7 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 16~~ | ~~씬 직렬화 + 프리팹 시스템~~ | — | 완료 |
 | ~~Phase 17~~ | ~~에셋 파이프라인 + 핫 리로딩~~ | — | 완료 |
 | ~~Phase 18~~ | ~~egui 인게임 디버그 에디터~~ | — | 완료 |
+| ~~Phase 19~~ | ~~Rhai 스크립팅 — ScriptAsset/ScriptRunner/ScriptingSystem~~ | — | 완료 |
 
 ---
 

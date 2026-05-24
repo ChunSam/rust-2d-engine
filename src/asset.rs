@@ -77,6 +77,14 @@ pub struct ImageAsset {
     pub height: u32,
 }
 
+// ─── ScriptAsset ─────────────────────────────────────────────────────────────
+
+/// CPU-side Rhai 스크립트 에셋.
+pub struct ScriptAsset {
+    pub source: String,
+    pub ast: rhai::AST,
+}
+
 // ─── AssetServer ──────────────────────────────────────────────────────────────
 
 /// 에셋 관리자 — 이미지 로드·캐싱·핫 리로딩.
@@ -97,6 +105,8 @@ pub struct ImageAsset {
 pub struct AssetServer {
     images: HashMap<AssetId, ImageAsset>,
     path_to_id: HashMap<Arc<str>, AssetId>,
+    scripts: HashMap<AssetId, ScriptAsset>,
+    script_path_to_id: HashMap<Arc<str>, AssetId>,
     reload_rx: Option<Receiver<PathBuf>>,
     _watcher: Option<RecommendedWatcher>,
 }
@@ -121,6 +131,8 @@ impl AssetServer {
             Ok(w) => Self {
                 images: HashMap::new(),
                 path_to_id: HashMap::new(),
+                scripts: HashMap::new(),
+                script_path_to_id: HashMap::new(),
                 reload_rx: Some(rx),
                 _watcher: Some(w),
             },
@@ -129,6 +141,8 @@ impl AssetServer {
                 Self {
                     images: HashMap::new(),
                     path_to_id: HashMap::new(),
+                    scripts: HashMap::new(),
+                    script_path_to_id: HashMap::new(),
                     reload_rx: None,
                     _watcher: None,
                 }
@@ -170,6 +184,27 @@ impl AssetServer {
         self.images.get(&handle.id)
     }
 
+    /// 스크립트를 로드해 핸들을 반환한다. 같은 경로 재호출 시 캐시된 핸들 반환.
+    pub fn load_script(&mut self, path: impl AsRef<Path>) -> Handle<ScriptAsset> {
+        let key: Arc<str> = path.as_ref().to_string_lossy().as_ref().into();
+        if let Some(&id) = self.script_path_to_id.get(&key) {
+            return Handle { id, path: key, _marker: PhantomData };
+        }
+        let id = alloc_id();
+        let asset = compile_script_file(&key);
+        self.scripts.insert(id, asset);
+        self.script_path_to_id.insert(Arc::clone(&key), id);
+        if let Some(ref mut w) = self._watcher {
+            let _ = w.watch(path.as_ref(), RecursiveMode::NonRecursive);
+        }
+        Handle { id, path: key, _marker: PhantomData }
+    }
+
+    /// 스크립트 에셋을 id로 조회한다 (ScriptingSystem 내부용).
+    pub fn get_script_by_id(&self, id: AssetId) -> Option<&ScriptAsset> {
+        self.scripts.get(&id)
+    }
+
     /// 변경된 파일 경로 목록을 반환하고 내부 CPU 캐시를 갱신한다.
     ///
     /// `App`이 매 프레임 이를 호출하고, 반환된 경로들에 대해 GPU 텍스처를 재업로드한다.
@@ -182,8 +217,11 @@ impl AssetServer {
         while let Ok(path) = rx.try_recv() {
             if let Some(s) = path.to_str() {
                 let key: Arc<str> = s.into();
-                if self.path_to_id.contains_key(&key) && !seen.contains(&s.to_string()) {
-                    seen.push(s.to_string());
+                let s_str = s.to_string();
+                let is_known = self.path_to_id.contains_key(&key)
+                    || self.script_path_to_id.contains_key(&key);
+                if is_known && !seen.contains(&s_str) {
+                    seen.push(s_str);
                 }
             }
         }
@@ -191,6 +229,9 @@ impl AssetServer {
             let key: Arc<str> = path_str.as_str().into();
             if let Some(&id) = self.path_to_id.get(&key) {
                 self.images.insert(id, decode_image(path_str));
+            }
+            if let Some(&id) = self.script_path_to_id.get(&key) {
+                self.scripts.insert(id, compile_script_file(path_str));
             }
         }
         seen
@@ -227,6 +268,22 @@ fn decode_image(path: &str) -> ImageAsset {
             magenta_fallback()
         }
     }
+}
+
+fn compile_script_file(path: &str) -> ScriptAsset {
+    let source = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("스크립트 파일 읽기 실패 '{path}': {e}");
+            String::new()
+        }
+    };
+    let engine = rhai::Engine::new();
+    let ast = engine.compile(&source).unwrap_or_else(|e| {
+        log::error!("스크립트 컴파일 실패 '{path}': {e}");
+        engine.compile("").unwrap()
+    });
+    ScriptAsset { source, ast }
 }
 
 fn magenta_fallback() -> ImageAsset {

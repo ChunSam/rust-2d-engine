@@ -144,6 +144,14 @@ impl App {
             .load_image(&path)
     }
 
+    /// 스크립트 파일을 로드하고 핸들을 반환한다.
+    pub fn load_script(&mut self, path: impl AsRef<std::path::Path>) -> Handle<crate::asset::ScriptAsset> {
+        self.world
+            .resource_mut::<AssetServer>()
+            .expect("AssetServer 없음")
+            .load_script(path)
+    }
+
     /// ECS 월드를 초기화하고 기본 리소스를 재삽입한다.
     ///
     /// 씬 전환 시 엔티티·컴포넌트를 전부 지우고 싶을 때 사용한다.
