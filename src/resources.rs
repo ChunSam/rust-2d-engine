@@ -98,3 +98,16 @@ pub struct FontData(pub Vec<u8>);
 /// 해상도 변경 요청. 게임 시스템이 Some((w, h)) 으로 설정하면 App 이 창 크기를 조정한다.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PendingResize(pub Option<(u32, u32)>);
+
+/// Inspector에서 현재 선택된 엔티티를 World 리소스로 노출한다.
+///
+/// `App`이 매 프레임 `inspector_selected`와 동기화한다.
+/// 시스템에서 읽어 선택 강조, 경로 계획 등 에디터 연동에 사용한다.
+///
+/// ```text
+/// if let Some(e) = world.resource::<SelectedEntity>().and_then(|s| s.0) {
+///     // e 가 현재 Inspector에서 선택된 엔티티
+/// }
+/// ```
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SelectedEntity(pub Option<crate::ecs::world::Entity>);

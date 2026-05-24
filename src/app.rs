@@ -37,8 +37,8 @@ use crate::{
         TextRenderer, UiQueue,
     },
     resources::{
-        DebugDrawQueue, DisplayScaleFactor, FontData, GameState, PendingResize, ShouldQuit,
-        ViewportSize, WindowConfig,
+        DebugDrawQueue, DebugRect, DisplayScaleFactor, FontData, GameState, PendingResize,
+        ShouldQuit, ViewportSize, WindowConfig,
     },
     scene::{Scene, SceneChange, SceneCmd},
 };
@@ -85,6 +85,10 @@ pub struct App {
     egui_output: Option<(Vec<egui::ClippedPrimitive>, egui::TexturesDelta, f32)>,
     /// Inspector 패널에서 현재 선택된 엔티티.
     inspector_selected: Option<Entity>,
+    /// Gizmo 드래그 중인지 여부.
+    gizmo_dragging: bool,
+    /// 드래그 시작 시 (엔티티 position - 커서 월드 좌표) 오프셋.
+    gizmo_drag_offset: glam::Vec2,
 }
 
 impl App {
@@ -103,6 +107,7 @@ impl App {
         world.insert_resource(TextQueue::default());
         world.insert_resource(UiQueue::default());
         world.insert_resource(DebugDrawQueue::default());
+        world.insert_resource(crate::resources::SelectedEntity::default());
         world.insert_resource(SceneChange::default());
         world.insert_resource(AssetServer::new());
         // 엔진 내장 컴포넌트를 Reflect 레지스트리에 자동 등록
@@ -129,6 +134,8 @@ impl App {
             egui_state: None,
             egui_output: None,
             inspector_selected: None,
+            gizmo_dragging: false,
+            gizmo_drag_offset: glam::Vec2::ZERO,
         }
     }
 
@@ -223,6 +230,7 @@ impl App {
         self.world.insert_resource(TextQueue::default());
         self.world.insert_resource(UiQueue::default());
         self.world.insert_resource(DebugDrawQueue::default());
+        self.world.insert_resource(crate::resources::SelectedEntity::default());
         self.world.insert_resource(SceneChange::default());
         self.world.insert_resource(AssetServer::new());
         // 등록된 이벤트 리소스 재삽입
@@ -381,8 +389,33 @@ impl App {
                 // Inspector 패널: 엔티티 목록 + 컴포넌트 필드 편집기
                 egui::Window::new("Inspector")
                     .default_pos([10.0, 130.0])
-                    .default_size([440.0, 300.0])
+                    .default_size([440.0, 340.0])
                     .show(ctx, |ui| {
+                        // ── 에디터 액션 버튼 ─────────────────────────────────────
+                        ui.horizontal(|ui| {
+                            if ui.button("＋ New Entity").clicked() {
+                                let e = self.world.spawn();
+                                self.world.add_component(
+                                    e,
+                                    crate::components::Transform::default(),
+                                );
+                                self.world.add_component(
+                                    e,
+                                    crate::prefab::Tag("New Entity".into()),
+                                );
+                                self.inspector_selected = Some(e);
+                            }
+                            if let Some(sel) = self.inspector_selected {
+                                if ui
+                                    .add_enabled(true, egui::Button::new("🗑 Delete"))
+                                    .clicked()
+                                {
+                                    self.world.despawn(sel);
+                                    self.inspector_selected = None;
+                                }
+                            }
+                        });
+                        ui.separator();
                         ui.horizontal_top(|ui| {
                             // 왼쪽: 엔티티 목록
                             ui.vertical(|ui| {
@@ -513,6 +546,85 @@ impl App {
                     }
                 }
             }
+        }
+
+        // ── SelectedEntity 리소스 동기화 ─────────────────────────────────────────
+        if let Some(res) = self.world.resource_mut::<crate::resources::SelectedEntity>() {
+            res.0 = self.inspector_selected;
+        }
+
+        // ── Gizmo: 선택 엔티티 강조 + 드래그 이동 ────────────────────────────────
+        let egui_wants_mouse = egui_ctx
+            .as_ref()
+            .map(|c| c.wants_pointer_input())
+            .unwrap_or(false);
+
+        if let Some(sel) = self.inspector_selected {
+            // 선택된 엔티티의 Transform을 복사 (borrow 해방)
+            let tr_copy = self.world.get::<crate::components::Transform>(sel).cloned();
+
+            if let Some(tr) = tr_copy {
+                // 선택 강조: DebugDrawQueue에 테두리 사각형 추가
+                if let Some(dq) = self.world.resource_mut::<DebugDrawQueue>() {
+                    let half = tr.scale * 0.5;
+                    // 외곽 강조 (3px 두께 효과: 약간 확장)
+                    let margin = glam::Vec2::splat(3.0 / tr.scale.x.max(1.0) * tr.scale.x);
+                    dq.items.push(DebugRect {
+                        min: tr.position - half - margin,
+                        max: tr.position + half + margin,
+                        color: [0.2, 0.85, 1.0, 0.65],
+                        z: tr.z + 999.0,
+                    });
+                }
+
+                // Gizmo 드래그 — egui가 마우스를 소비하지 않을 때만 동작
+                if !egui_wants_mouse {
+                    // 마우스 입력 + 카메라 좌표 변환 (짧은 borrow 블록)
+                    let cam_default = crate::camera::Camera::default();
+                    let gizmo_input = {
+                        let cam = self.world.resource::<crate::camera::Camera>()
+                            .unwrap_or(&cam_default);
+                        self.world.resource::<crate::input::InputState>().map(|inp| {
+                            let world_pos = cam.screen_to_world(inp.cursor());
+                            let pressed = inp.mouse_just_pressed(winit::event::MouseButton::Left);
+                            let held = inp.is_mouse_pressed(winit::event::MouseButton::Left);
+                            let released =
+                                inp.mouse_just_released(winit::event::MouseButton::Left);
+                            (world_pos, pressed, held, released)
+                        })
+                    };
+
+                    if let Some((world_pos, just_pressed, held, just_released)) = gizmo_input {
+                        if just_pressed && !self.gizmo_dragging {
+                            let half = tr.scale * 0.5;
+                            let hit = world_pos.x >= tr.position.x - half.x
+                                && world_pos.x <= tr.position.x + half.x
+                                && world_pos.y >= tr.position.y - half.y
+                                && world_pos.y <= tr.position.y + half.y;
+                            if hit {
+                                self.gizmo_dragging = true;
+                                self.gizmo_drag_offset = tr.position - world_pos;
+                            }
+                        }
+
+                        if self.gizmo_dragging && held {
+                            if let Some(t) =
+                                self.world.get_mut::<crate::components::Transform>(sel)
+                            {
+                                t.position = world_pos + self.gizmo_drag_offset;
+                            }
+                        }
+
+                        if just_released {
+                            self.gizmo_dragging = false;
+                        }
+                    }
+                } else {
+                    self.gizmo_dragging = false;
+                }
+            }
+        } else {
+            self.gizmo_dragging = false;
         }
 
         // egui 프레임 종료 + tessellate → render() 로 전달

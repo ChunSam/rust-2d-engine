@@ -94,7 +94,14 @@ mod tests {
     }
 
     fn unique_test_dir() -> PathBuf {
-        std::env::temp_dir().join(format!("rust-gameengine-save-test-{}", std::process::id()))
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "rust-gameengine-save-test-{}-{}",
+            std::process::id(),
+            id
+        ))
     }
 
     #[test]
