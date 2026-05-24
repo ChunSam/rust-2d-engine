@@ -13,6 +13,7 @@ use winit::{
 use crate::{
     asset::{AssetServer, Handle, ImageAsset},
     camera::Camera,
+    debug_ui::DebugUi,
     ecs::{Events, System, World},
     hierarchy::HierarchySystem,
     input::{GamepadState, InputState},
@@ -54,6 +55,12 @@ pub struct App {
     event_initializers: Vec<Box<dyn Fn(&mut World)>>,
     /// gilrs 게임패드 컨텍스트. 초기화 실패 시 None (게임패드 없이 동작).
     gilrs: Option<gilrs::Gilrs>,
+    /// egui 렌더러 (wgpu 백엔드).
+    egui_renderer: Option<egui_wgpu::Renderer>,
+    /// winit ↔ egui 이벤트 변환기.
+    egui_state: Option<egui_winit::State>,
+    /// update() 에서 tessellate 한 결과를 render() 까지 전달하는 임시 버퍼.
+    egui_output: Option<(Vec<egui::ClippedPrimitive>, egui::TexturesDelta, f32)>,
 }
 
 impl App {
@@ -87,6 +94,9 @@ impl App {
             event_flushers: Vec::new(),
             event_initializers: Vec::new(),
             gilrs,
+            egui_renderer: None,
+            egui_state: None,
+            egui_output: None,
         }
     }
 
@@ -213,11 +223,59 @@ impl App {
             self.world
                 .insert_resource(ViewportSize::new(gpu.config.width, gpu.config.height));
         }
+
+        // egui 프레임 시작
+        let egui_ctx: Option<egui::Context> = {
+            let window = self.window.as_ref();
+            let state = self.egui_state.as_mut();
+            if let (Some(window), Some(state)) = (window, state) {
+                if let Some(debug_ui) = self.world.resource::<DebugUi>() {
+                    let ctx = debug_ui.ctx().clone();
+                    let raw_input = state.take_egui_input(window);
+                    ctx.begin_pass(raw_input);
+                    Some(ctx)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
         for system in &mut self.systems {
             system.run(&mut self.world, dt);
         }
         // 계층 변환 전파 — 유저 시스템(물리 포함) 이후, 렌더 직전에 실행
         HierarchySystem.run(&mut self.world, dt);
+
+        // 내장 EngineStats 패널
+        if let Some(ctx) = &egui_ctx {
+            if self.world.resource::<DebugUi>().map(|d| d.is_enabled()).unwrap_or(false) {
+                let entity_count = self.world.entity_count();
+                let asset_count = self
+                    .world
+                    .resource::<AssetServer>()
+                    .map(|a| a.image_count())
+                    .unwrap_or(0);
+                egui::Window::new("Engine Stats")
+                    .default_pos([10.0, 10.0])
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        ui.label(format!("FPS   {:>6.1}", 1.0_f32 / dt.max(0.001)));
+                        ui.label(format!("ms    {:>6.2}", dt * 1000.0));
+                        ui.label(format!("Ent   {entity_count}"));
+                        ui.label(format!("Asset {asset_count}"));
+                    });
+            }
+        }
+
+        // egui 프레임 종료 + tessellate → render() 로 전달
+        if let Some(ctx) = egui_ctx {
+            let ppp = self.window.as_ref().map(|w| w.scale_factor() as f32).unwrap_or(1.0);
+            let full_output = ctx.end_pass();
+            let paint_jobs = ctx.tessellate(full_output.shapes, ppp);
+            self.egui_output = Some((paint_jobs, full_output.textures_delta, ppp));
+        }
         // 모든 시스템 실행 후 이벤트 큐를 비운다.
         // std::mem::take 으로 꺼내야 &mut self.world 와 충돌하지 않는다.
         let flushers = std::mem::take(&mut self.event_flushers);
@@ -391,7 +449,41 @@ impl App {
             }
         }
 
+        // 씬+포스트프로세스 완료 후 제출
         gpu.queue.submit(std::iter::once(enc.finish()));
+
+        // 5단계: egui 오버레이 패스
+        if let (Some(mut er), Some((paint_jobs, textures_delta, ppp))) =
+            (self.egui_renderer.take(), self.egui_output.take())
+        {
+            let screen_desc = egui_wgpu::ScreenDescriptor {
+                size_in_pixels: [gpu.config.width, gpu.config.height],
+                pixels_per_point: ppp,
+            };
+            for (id, delta) in &textures_delta.set {
+                er.update_texture(&gpu.device, &gpu.queue, *id, delta);
+            }
+            let mut egui_enc =
+                gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("egui encoder"),
+                });
+            er.update_buffers(
+                &gpu.device,
+                &gpu.queue,
+                &mut egui_enc,
+                &paint_jobs,
+                &screen_desc,
+            );
+            // Renderer::render<'rp>(&'rp self, &mut RenderPass<'rp>) 의 lifetime 제약 때문에
+            // 독립 함수에서 &er 와 &mut egui_enc 를 동일 lifetime 'a 로 묶는다.
+            egui_render_pass(&er, &mut egui_enc, &paint_jobs, &screen_desc, &final_view);
+            gpu.queue.submit(std::iter::once(egui_enc.finish()));
+            for id in &textures_delta.free {
+                er.free_texture(id);
+            }
+            self.egui_renderer = Some(er);
+        }
+
         frame.present();
         Ok(())
     }
@@ -437,6 +529,22 @@ impl ApplicationHandler for App {
         let text_renderer =
             TextRenderer::new(&gpu.device, &gpu.queue, gpu.config.format, &font_bytes);
 
+        // egui 초기화 (gpu 이동 전에 device/format 접근)
+        let egui_ctx = egui::Context::default();
+        let egui_state = egui_winit::State::new(
+            egui_ctx.clone(),
+            egui::ViewportId::ROOT,
+            &*window,
+            Some(window.scale_factor() as f32),
+            None,
+            None,
+        );
+        let egui_renderer =
+            egui_wgpu::Renderer::new(&gpu.device, gpu.config.format, None, 1, false);
+        self.world.insert_resource(DebugUi::new_with_ctx(egui_ctx));
+        self.egui_renderer = Some(egui_renderer);
+        self.egui_state = Some(egui_state);
+
         self.sprite_renderer = Some(sprite_renderer);
         self.text_renderer = Some(text_renderer);
         self.gpu = Some(gpu);
@@ -447,6 +555,11 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        // egui에 이벤트 선전달
+        if let (Some(state), Some(window)) = (&mut self.egui_state, &self.window) {
+            let _ = state.on_window_event(window, &event);
+        }
+
         match event {
             // ── 창 닫기 ──────────────────────────────────────────────────────
             WindowEvent::CloseRequested => event_loop.exit(),
@@ -469,6 +582,12 @@ impl ApplicationHandler for App {
                     },
                 ..
             } => {
+                // F1 → DebugUi 토글
+                if key == winit::keyboard::KeyCode::F1 && state == ElementState::Pressed {
+                    if let Some(debug_ui) = self.world.resource_mut::<DebugUi>() {
+                        debug_ui.toggle();
+                    }
+                }
                 if let Some(input) = self.world.resource_mut::<InputState>() {
                     match state {
                         ElementState::Pressed => {
@@ -591,5 +710,42 @@ impl App {
                 state.process_event(event);
             }
         }
+    }
+}
+
+// ── egui 렌더 헬퍼 ───────────────────────────────────────────────────────────
+// egui-wgpu 0.29 의 PaintCallbackFn 이 &mut RenderPass<'static> 을 요구하기 때문에
+// render<'rp>(&'rp self, &mut RenderPass<'rp>) 가 'rp: 'static 을 강제한다.
+//
+// SAFETY: paint callback 을 등록하지 않으므로 'static transmute 는 실제로 안전하다.
+// rpass 를 transmute 로 소비(move)하면 NLL borrow checker 가 enc 의 borrow 를 해제하고,
+// 새 RenderPass<'static> 은 enc 와 독립적 lifetime 으로 추론되어 enc.finish() 가 가능해진다.
+fn egui_render_pass(
+    er: &egui_wgpu::Renderer,
+    enc: &mut wgpu::CommandEncoder,
+    paint_jobs: &[egui::ClippedPrimitive],
+    screen_desc: &egui_wgpu::ScreenDescriptor,
+    view: &wgpu::TextureView,
+) {
+    let rpass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("egui"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        occlusion_query_set: None,
+        timestamp_writes: None,
+    });
+    // SAFETY: rpass 는 이 함수 밖으로 탈출하지 않는다. transmute 로 'encoder borrow 를
+    // 'static 으로 변환해 NLL 이 enc borrow 를 해제하도록 한다. er 도 동일하게 처리.
+    unsafe {
+        let er_s: &'static egui_wgpu::Renderer = &*(er as *const _);
+        let mut rpass_s: wgpu::RenderPass<'static> = std::mem::transmute(rpass);
+        er_s.render(&mut rpass_s, paint_jobs, screen_desc);
     }
 }

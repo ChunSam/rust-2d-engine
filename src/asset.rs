@@ -160,6 +160,11 @@ impl AssetServer {
         }
     }
 
+    /// 현재 캐시된 이미지 에셋 수를 반환한다.
+    pub fn image_count(&self) -> usize {
+        self.images.len()
+    }
+
     /// CPU-side 이미지 데이터를 반환한다.
     pub fn get_image(&self, handle: &Handle<ImageAsset>) -> Option<&ImageAsset> {
         self.images.get(&handle.id)

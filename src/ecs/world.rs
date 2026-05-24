@@ -56,6 +56,11 @@ impl World {
         }
     }
 
+    /// 현재 살아있는 엔티티 수를 반환한다.
+    pub fn entity_count(&self) -> usize {
+        self.entities.len()
+    }
+
     /// 빈 엔티티를 생성하고 반환한다.
     pub fn spawn(&mut self) -> Entity {
         let id = if let Some(reused) = self.free_ids.pop_front() {

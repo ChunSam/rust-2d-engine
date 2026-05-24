@@ -1,6 +1,6 @@
 # CLAUDE.md — rust-2d-engine 에이전트 참조 문서
 
-> 버전 v0.17.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
+> 버전 v0.18.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
 > 상세 API: `REFERENCE.md` | 개발 이력/아키텍처 결정: `HANDOFF.md`
 
 ---
@@ -13,6 +13,7 @@
 |---------|------|
 | 엔진 진입점, 메인 루프, 렌더링 오케스트레이션, `load_image` | `src/app.rs` |
 | Handle<T>, ImageAsset, AssetServer (에셋 로드·캐싱·핫 리로딩) | `src/asset.rs` |
+| DebugUi (egui 오버레이, F1 토글, `ctx()`로 커스텀 패널) | `src/debug_ui.rs` |
 | 전체 공개 API re-export 목록 | `src/lib.rs` |
 | Entity / Component / Resource / Query | `src/ecs/world.rs` |
 | 이벤트 버스 (`Events<E>`) | `src/ecs/events.rs` |

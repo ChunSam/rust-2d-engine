@@ -37,6 +37,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 15 | 게임패드(gilrs) + UI Slider/CheckBox — GamepadState, Slider, CheckBox, UiEvent 확장 | `30d1b9e` |
 | Phase 16 | 씬 직렬화 + 프리팹 시스템 — Tag, EntityDef, SceneDef, Prefab, spawn_entity_def | `2bfbffa` |
 | Phase 17 | 에셋 파이프라인 + 핫 리로딩 — Handle<T>, ImageAsset, AssetServer, App::load_image | `f985118` |
+| Phase 18 | egui 인게임 디버그 에디터 — DebugUi, F1 토글, Engine Stats 내장 패널 | (현재 커밋) |
 
 ---
 
@@ -101,6 +102,58 @@ src/
 │       └── post_process.wgsl                                      ← Phase 10
 └── save.rs           RON 세이브/불러오기 (save/load/load_or_default/exists/delete)
 ```
+
+---
+
+## 이번 세션에서 한 일 (Phase 18)
+
+### Phase 18 — egui 인게임 디버그 에디터
+
+**배경**: 개발 중 엔티티/컴포넌트 상태를 실시간으로 확인할 수 없었다. egui를 통합해 인게임 오버레이 패널을 `System` 안에서 자유롭게 추가할 수 있게 한다.
+
+**추가된 파일**: `src/debug_ui.rs`  
+**변경된 파일**: `Cargo.toml`, `src/app.rs`, `src/lib.rs`, `src/ecs/world.rs`, `src/asset.rs`
+
+#### 주요 타입
+
+| 타입 | 역할 |
+|------|------|
+| `DebugUi` | ECS Resource; egui Context 보유, enabled 토글 |
+
+#### 공개 API
+
+```rust
+// System 안에서 자유롭게 egui 윈도우 추가
+let debug = world.resource::<DebugUi>().unwrap();
+if debug.is_enabled() {
+    egui::Window::new("My Panel").show(debug.ctx(), |ui| {
+        ui.label("Hello!");
+    });
+}
+
+// F1 키 → 자동 토글 (별도 코드 불필요)
+// 내장 패널: "Engine Stats" — FPS / ms / 엔티티 수 / 에셋 수
+```
+
+#### 렌더 아키텍처
+
+- 씬 → (포스트프로세스) → **egui 오버레이** → present
+- egui는 별도 `CommandEncoder`로 렌더해 씬 인코더와 lifetime 분리
+- egui-wgpu 0.29의 `PaintCallbackFn`이 `&mut RenderPass<'static>`을 요구하는 설계 제약 때문에 `egui_render_pass()` 헬퍼 함수에서 `unsafe transmute` 사용 (paint callback 미등록 상태에서 안전)
+
+#### Cargo.toml 변경
+
+```toml
+egui = "0.29"
+egui-wgpu = "0.29"   # wgpu 22 호환
+egui-winit = { version = "0.29", default-features = false }  # clipboard 제외 (macOS objc2 충돌)
+```
+
+#### 설계 결정
+
+- `egui-winit`의 clipboard 기능 비활성화: macOS에서 `objc2-app-kit 0.3.2`와 버전 충돌 발생
+- F1 토글은 egui_state 이벤트 처리 전에 InputState와 별도로 처리
+- `DebugUi::ctx()`는 `begin_pass`/`end_pass` 사이에서만 유효; 엔진이 update() 에서 자동 관리
 
 ---
 
@@ -684,6 +737,7 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 15~~ | ~~게임패드(gilrs) + UI Slider/CheckBox~~ | — | 완료 |
 | ~~Phase 16~~ | ~~씬 직렬화 + 프리팹 시스템~~ | — | 완료 |
 | ~~Phase 17~~ | ~~에셋 파이프라인 + 핫 리로딩~~ | — | 완료 |
+| ~~Phase 18~~ | ~~egui 인게임 디버그 에디터~~ | — | 완료 |
 
 ---
 
