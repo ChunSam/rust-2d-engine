@@ -29,7 +29,8 @@ pub use asset::{AssetServer, Handle, ImageAsset, ScriptAsset};
 pub use debug_ui::DebugUi;
 pub use animation::{
     AnimParam, AnimState, AnimTransition, AnimationClip, AnimationPlayer, AnimationStateMachine,
-    AnimationSystem, StateMachineSystem, TransitionCond, UvRect,
+    AnimationSystem, BlendEntry, BlendTree1D, BlendTreeSystem, BlendWeight,
+    StateMachineSystem, TransitionCond, UvRect,
 };
 pub use app::App;
 pub use audio::AudioManager;

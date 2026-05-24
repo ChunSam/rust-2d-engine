@@ -1,6 +1,6 @@
 # CLAUDE.md — rust-2d-engine 에이전트 참조 문서
 
-> 버전 v0.19.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
+> 버전 v0.20.0 | wgpu 기반 Rust 2D 게임 엔진 | 단일 크레이트 (`engine`)  
 > 상세 API: `REFERENCE.md` | 개발 이력/아키텍처 결정: `HANDOFF.md`
 
 ---
@@ -29,8 +29,9 @@
 | CharacterController, RaycastHit, cast_ray, cast_ray_with_normal, move_character | `src/physics/character.rs`, `src/physics/world.rs` |
 | add_kinematic_box, add_kinematic_circle | `src/physics/world.rs` |
 | SpatialGrid, Collider, CollisionLayer | `src/collision/` |
-| AnimationPlayer, AnimationClip, AnimationSystem | `src/animation/player.rs`, `src/animation/system.rs` |
+| AnimationPlayer, AnimationClip, AnimationSystem, BlendWeight | `src/animation/player.rs`, `src/animation/system.rs` |
 | AnimationStateMachine, StateMachineSystem, TransitionCond, AnimParam | `src/animation/state_machine.rs` |
+| BlendTree1D, BlendEntry, BlendTreeSystem (1D 파라미터 기반 자동 전환 + 크로스페이드) | `src/animation/blend_tree.rs`, `src/animation/blend_system.rs` |
 | UI (UiNode, Button, Label, TextInput, ScrollView, Panel, LayoutSystem, UiEvent) | `src/ui/` |
 | Slider (수평 슬라이더), CheckBox (토글 체크박스) | `src/ui/slider.rs`, `src/ui/checkbox.rs` |
 | Tag, EntityDef, SceneDef, Prefab, spawn_entity_def, spawn_scene_def | `src/prefab.rs` |

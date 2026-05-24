@@ -409,6 +409,60 @@ if let Some(anim) = world.get_mut::<AnimationPlayer>(entity) {
 app.add_system(AnimationSystem);
 ```
 
+### 크로스페이드 전환
+
+`play_with_crossfade(clip_index, duration)`으로 지정한 시간(초)에 걸쳐 부드럽게 전환한다.  
+전환 중 `BlendWeight` 컴포넌트가 자동으로 갱신되며, 게임 코드에서 알파 보간 등에 활용할 수 있다.
+
+```rust
+use engine::{AnimationPlayer, BlendWeight};
+
+// 0.2초 크로스페이드
+if let Some(player) = world.get_mut::<AnimationPlayer>(entity) {
+    player.play_with_crossfade(1, 0.2);
+}
+
+// 전환 진행도 읽기 (0.0 = 이전 클립, 1.0 = 새 클립 / 전환 없으면 1.0)
+if let Some(bw) = world.get_mut::<BlendWeight>(entity) {
+    // bw.0 : f32 [0.0 ~ 1.0]
+}
+```
+
+### 1D 블렌드 트리
+
+`BlendTree1D`는 float 파라미터에 따라 자동으로 클립을 선택하고 크로스페이드 전환을 수행한다.  
+이동 속도 → 애니메이션 자동 전환 같은 패턴에 유용하다.
+
+```rust
+use engine::{BlendEntry, BlendTree1D, BlendTreeSystem};
+
+// 트리 구성 (threshold 오름차순)
+let tree = BlendTree1D::new(
+    vec![
+        BlendEntry { threshold: 0.0, clip_index: 0 },  // idle
+        BlendEntry { threshold: 0.3, clip_index: 1 },  // walk
+        BlendEntry { threshold: 1.2, clip_index: 2 },  // run
+    ],
+    0.15,  // 클립 전환 시 크로스페이드 지속 시간 (초)
+);
+world.add_component(entity, tree);
+
+// 시스템 등록 (BlendTreeSystem은 AnimationSystem 이전에)
+app.add_system(Box::new(BlendTreeSystem));
+app.add_system(Box::new(AnimationSystem));
+
+// 매 프레임 파라미터 갱신
+if let Some(tree) = world.get_mut::<BlendTree1D>(entity) {
+    tree.set_param(speed);  // speed에 따라 idle / walk / run 자동 전환
+}
+```
+
+**등록 순서 요약**
+
+```
+BlendTreeSystem → AnimationSystem → StateMachineSystem
+```
+
 ---
 
 ## 물리 (Rapier2D)

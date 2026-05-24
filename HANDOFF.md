@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 19 갱신: 2026-05-24)  
-엔진 버전: v0.19.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 20 갱신: 2026-05-24)  
+엔진 버전: v0.20.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -39,6 +39,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 17 | 에셋 파이프라인 + 핫 리로딩 — Handle<T>, ImageAsset, AssetServer, App::load_image | `f985118` |
 | Phase 18 | egui 인게임 디버그 에디터 — DebugUi, F1 토글, Engine Stats 내장 패널 | `83838a7` |
 | Phase 19 | Rhai 스크립팅 — ScriptAsset, ScriptRunner, ScriptingSystem, App::load_script | `861e832` |
+| Phase 20 | 애니메이션 블렌딩 — BlendWeight, play_with_crossfade, BlendTree1D, BlendTreeSystem | TBD |
 
 ---
 
@@ -106,7 +107,84 @@ src/
 
 ---
 
-## 이번 세션에서 한 일 (Phase 19)
+## 이번 세션에서 한 일 (Phase 20)
+
+### Phase 20 — 애니메이션 블렌딩
+
+**배경**: `AnimationPlayer`는 클립 간 즉시 전환만 지원했다. 크로스페이드와 파라미터 기반 클립 선택을 추가해 부드러운 애니메이션 전환을 가능하게 한다.
+
+**추가된 파일**: `src/animation/blend_tree.rs`, `src/animation/blend_system.rs`  
+**변경된 파일**: `src/animation/player.rs`, `src/animation/system.rs`, `src/animation/mod.rs`, `src/lib.rs`
+
+#### 주요 타입
+
+| 타입 | 역할 |
+|------|------|
+| `BlendWeight` | 크로스페이드 진행도(0.0→1.0) 컴포넌트. `AnimationSystem`이 매 프레임 갱신 |
+| `BlendTree1D` | float 파라미터 → 자동 클립 선택 + 크로스페이드 컴포넌트 |
+| `BlendEntry` | BlendTree1D의 항목 (threshold, clip_index) |
+| `BlendTreeSystem` | BlendTree1D를 읽어 AnimationPlayer에 클립 전환을 지시하는 시스템 |
+
+#### 크로스페이드 API
+
+```rust
+// 즉시 전환 (기존)
+player.play(clip_index);
+
+// 0.2초 크로스페이드 전환 (신규)
+player.play_with_crossfade(clip_index, 0.2);
+
+// 전환 진행도 읽기 (0.0 = from 클립, 1.0 = to 클립 / 전환 없으면 1.0)
+let w = player.blend_weight();
+
+// 전환 중 여부
+let crossfading = player.is_crossfading();
+
+// BlendWeight 컴포넌트로도 읽을 수 있다 (AnimationSystem이 자동 갱신)
+if let Some(bw) = world.get_mut::<BlendWeight>(entity) {
+    sprite.alpha = bw.0;  // 알파 보간 예시
+}
+```
+
+#### 1D 블렌드 트리 API
+
+```rust
+// 트리 구성 (threshold 오름차순)
+let tree = BlendTree1D::new(
+    vec![
+        BlendEntry { threshold: 0.0, clip_index: 0 },  // idle
+        BlendEntry { threshold: 0.3, clip_index: 1 },  // walk
+        BlendEntry { threshold: 1.2, clip_index: 2 },  // run
+    ],
+    0.15,  // 클립 전환 시 크로스페이드 0.15초
+);
+world.add_component(entity, tree);
+
+// 매 프레임 파라미터 갱신 (예: speed)
+world.get_mut::<BlendTree1D>(entity).unwrap().set_param(speed);
+```
+
+#### 등록 순서
+
+```rust
+app.add_system(Box::new(BlendTreeSystem));   // 클립 선택
+app.add_system(Box::new(AnimationSystem));   // 프레임 진행 + BlendWeight 갱신
+app.add_system(Box::new(StateMachineSystem)); // 상태 머신 (기존)
+```
+
+#### 크로스페이드 동작 원리
+
+| 진행도 | 출력 UV | 설명 |
+|--------|---------|------|
+| 0.0 ~ 0.5 미만 | from_clip 현재 프레임 | 이전 클립 계속 표시 |
+| 0.5 이상 ~ 1.0 | to_clip 현재 프레임 | 새 클립으로 전환 |
+| 완료(elapsed ≥ duration) | to_clip 프레임 | crossfade 해제, 정상 재생 |
+
+두 클립 모두 진행도와 무관하게 계속 진행되므로, UV 전환 시점에 to_clip이 자연스럽게 앞서 재생된 상태다.
+
+---
+
+## 이전 세션에서 한 일 (Phase 19)
 
 ### Phase 19 — Rhai 스크립팅
 
@@ -812,6 +890,7 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 17~~ | ~~에셋 파이프라인 + 핫 리로딩~~ | — | 완료 |
 | ~~Phase 18~~ | ~~egui 인게임 디버그 에디터~~ | — | 완료 |
 | ~~Phase 19~~ | ~~Rhai 스크립팅 — ScriptAsset/ScriptRunner/ScriptingSystem~~ | — | 완료 |
+| ~~Phase 20~~ | ~~애니메이션 블렌딩 — BlendWeight/play_with_crossfade/BlendTree1D~~ | — | 완료 |
 
 ---
 
