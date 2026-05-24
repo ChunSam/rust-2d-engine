@@ -41,7 +41,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 19 | Rhai 스크립팅 — ScriptAsset, ScriptRunner, ScriptingSystem, App::load_script | `861e832` |
 | Phase 20 | 애니메이션 블렌딩 — BlendWeight, play_with_crossfade, BlendTree1D, BlendTreeSystem | `d6ff7f9` |
 | Phase 21 | Texture Atlas — TextureAtlas, AtlasSprite, AssetServer::load_atlas, App::load_atlas | `b63e9c9` |
-| Phase 22 | Reflect 시스템 — Reflect 트레잇, ReflectValue, World::register_reflect/get_reflect, egui Inspector | (이번 커밋) |
+| Phase 22 | Reflect 시스템 — Reflect 트레잇, ReflectValue, World::register_reflect/get_reflect, egui Inspector | `90f65e3` |
 
 ---
 
