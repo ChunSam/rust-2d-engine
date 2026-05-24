@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 16 갱신: 2026-05-24)  
-엔진 버전: v0.16.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 17 갱신: 2026-05-24)  
+엔진 버전: v0.17.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -35,6 +35,8 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 13 | 물리 레이캐스트 + 캐릭터 컨트롤러 — RaycastHit, add_kinematic_*, move_character | `eee451d` |
 | Phase 14 | 애니메이션 상태 머신 — AnimationStateMachine, StateMachineSystem, TransitionCond, AnimParam | `93eb65f` |
 | Phase 15 | 게임패드(gilrs) + UI Slider/CheckBox — GamepadState, Slider, CheckBox, UiEvent 확장 | `30d1b9e` |
+| Phase 16 | 씬 직렬화 + 프리팹 시스템 — Tag, EntityDef, SceneDef, Prefab, spawn_entity_def | `2bfbffa` |
+| Phase 17 | 에셋 파이프라인 + 핫 리로딩 — Handle<T>, ImageAsset, AssetServer, App::load_image | `f985118` |
 
 ---
 
@@ -49,8 +51,9 @@ src/
 │   └── system.rs     System 트레잇
 ├── hierarchy.rs      Parent, Children, GlobalTransform, HierarchySystem, attach/detach  ← Phase 12
 ├── scene.rs          Scene 트레잇, SceneCmd, SceneChange
+├── asset.rs          Handle<T>, ImageAsset, AssetServer  ← Phase 17
 ├── prefab.rs         Tag, EntityDef, SceneDef, Prefab, spawn_entity_def, spawn_scene_def  ← Phase 16
-├── components.rs     Transform, Sprite (Serialize/Deserialize 추가 ← Phase 16)
+├── components.rs     Transform, Sprite (image_handle 추가 ← Phase 17)
 ├── resources.rs      WindowConfig, ViewportSize, GameState, ShouldQuit, ...
 ├── camera.rs         Camera (position, zoom, screen_to_world)
 ├── input/
@@ -101,7 +104,67 @@ src/
 
 ---
 
-## 이번 세션에서 한 일 (Phase 16)
+## 이번 세션에서 한 일 (Phase 17)
+
+### Phase 17 — 에셋 파이프라인 + 핫 리로딩
+
+**배경**: 텍스처를 문자열 경로 대신 타입 안전한 `Handle<T>`로 참조하고, 런타임 중 파일이 변경되면 자동으로 GPU 텍스처를 재업로드한다.
+
+**추가된 파일**: `src/asset.rs`  
+**변경된 파일**: `Cargo.toml`, `src/components.rs`, `src/lib.rs`, `src/app.rs`, `src/renderer/sprite.rs`, `src/particle.rs`
+
+#### 주요 타입
+
+| 타입 | 역할 |
+|------|------|
+| `AssetId` | `u64` 전역 단조 증가 ID |
+| `Handle<T>` | 타입 지정 에셋 참조 (Clone O(1), id + Arc<str> 경로 보유) |
+| `ImageAsset` | CPU-side RGBA8 이미지 데이터 (Arc<Vec<u8>> + 크기) |
+| `AssetServer` | 에셋 로드·캐싱·파일 감시·핫 리로딩 리소스 |
+
+#### 공개 API
+
+```rust
+// App 레벨 편의 메서드
+let handle: Handle<ImageAsset> = app.load_image("assets/player.png");
+
+// 직접 AssetServer 사용
+let as_ = world.resource_mut::<AssetServer>().unwrap();
+let handle = as_.load_image("assets/bg.png");
+let image: Option<&ImageAsset> = as_.get_image(&handle);
+
+// Sprite에 핸들 지정 (texture 경로보다 우선 적용)
+Sprite::with_handle(handle)
+```
+
+#### Sprite Breaking Change
+
+`Sprite` 구조체에 `image_handle: Option<Handle<ImageAsset>>` 필드 추가.
+
+- `#[serde(skip)]` — RON 직렬화 무영향 (기존 씬 파일 그대로 사용 가능)
+- 리터럴 `Sprite { texture: None, color: ... }` 초기화 코드는 `image_handle: None` 추가 필요
+- `Sprite::colored()`, `Sprite::textured()`, `Sprite::with_handle()` 생성자는 모두 안전
+
+#### 핫 리로딩 동작
+
+1. `App::new()` 시 `AssetServer::new()` 생성 → World 리소스로 삽입
+2. `notify::recommended_watcher`가 백그라운드 스레드에서 파일 변경 감시
+3. `App::update()` 매 프레임: `AssetServer::poll_reloads()` → 변경 경로 수신
+4. `SpriteRenderer::reload_texture(path)` 호출 → GPU 텍스처 갱신
+
+#### Cargo.toml 변경
+
+- `notify = "6"` — 크로스 플랫폼 파일 감시 (macOS FSEvents, Linux inotify, Windows ReadDirectoryChanges)
+
+#### 설계 결정
+
+- **Handle에 경로 내재**: `Handle<T>`이 `Arc<str>` 경로를 보유해 렌더러가 AssetServer 없이 GPU 텍스처를 조회 가능.
+- **기존 `texture` 경로와 공존**: `image_handle`이 있으면 우선 적용, 없으면 `texture` 문자열 경로를 그대로 사용 — 기존 코드 마이그레이션 불필요.
+- **파일 감시 실패 시 graceful degradation**: `notify` 초기화 실패(샌드박스 등)해도 로드·캐싱은 정상 동작, 핫 리로딩만 비활성.
+
+---
+
+## 이전 세션 (Phase 16)
 
 ### Phase 16 — 씬 직렬화 + 프리팹 시스템
 
@@ -620,7 +683,7 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 14~~ | ~~애니메이션 상태 머신~~ | — | 완료 |
 | ~~Phase 15~~ | ~~게임패드(gilrs) + UI Slider/CheckBox~~ | — | 완료 |
 | ~~Phase 16~~ | ~~씬 직렬화 + 프리팹 시스템~~ | — | 완료 |
-| Phase 17 | 에셋 파이프라인 + 핫 리로딩 | XL | Handle 기반, Breaking Change 포함 |
+| ~~Phase 17~~ | ~~에셋 파이프라인 + 핫 리로딩~~ | — | 완료 |
 
 ---
 
