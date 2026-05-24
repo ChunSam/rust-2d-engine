@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
@@ -143,6 +144,15 @@ pub struct SpriteRenderer {
     ui_camera_bind_group: wgpu::BindGroup,
     ui_instance_buf: wgpu::Buffer,
     ui_instance_capacity: usize,
+    // ── ShaderMaterial 커스텀 렌더링용 ────────────────────────────────────────
+    sprite_shader: wgpu::ShaderModule,
+    camera_layout: wgpu::BindGroupLayout,
+    surface_format: wgpu::TextureFormat,
+    params_layout: wgpu::BindGroupLayout,
+    mat_instance_buf: wgpu::Buffer,
+    mat_instance_capacity: usize,
+    custom_pipelines: HashMap<u64, wgpu::RenderPipeline>,
+    params_buffers: HashMap<u32, (wgpu::Buffer, wgpu::BindGroup)>,
 }
 
 impl SpriteRenderer {
@@ -276,6 +286,30 @@ impl SpriteRenderer {
             mapped_at_creation: false,
         });
 
+        // ── ShaderMaterial: params 유니폼 레이아웃 (@group(2)) ──────────────
+        let params_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("material params layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        // ── ShaderMaterial: 인스턴스 버퍼 (머티리얼 엔티티 수만큼 동적 재할당) ──
+        let mat_capacity = 16usize;
+        let mat_instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("material instance buffer"),
+            size: (mat_capacity * std::mem::size_of::<InstanceRaw>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         Self {
             pipeline,
             vertex_buf,
@@ -291,6 +325,14 @@ impl SpriteRenderer {
             ui_camera_bind_group,
             ui_instance_buf,
             ui_instance_capacity: ui_capacity,
+            sprite_shader: shader,
+            camera_layout,
+            surface_format: format,
+            params_layout,
+            mat_instance_buf,
+            mat_instance_capacity: mat_capacity,
+            custom_pipelines: HashMap::new(),
+            params_buffers: HashMap::new(),
         }
     }
 
@@ -403,36 +445,268 @@ impl SpriteRenderer {
             }
         }
 
-        if sprites.is_empty() {
-            return;
-        }
-
         // ── 전역 z 오름차순 안정 정렬 ────────────────────────────────────
         // z가 같으면 수집 순서를 유지한다 (stable sort).
         sprites.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-        // ── GPU 버퍼에 전체 인스턴스 업로드 ─────────────────────────────
-        let all_instances: Vec<InstanceRaw> = sprites.iter().map(|(_, _, raw)| *raw).collect();
+        // ── 일반 스프라이트 렌더 패스 ────────────────────────────────────────
+        if !sprites.is_empty() {
+            let all_instances: Vec<InstanceRaw> = sprites.iter().map(|(_, _, raw)| *raw).collect();
 
-        if all_instances.len() > self.instance_capacity {
-            self.instance_capacity = all_instances.len().next_power_of_two();
-            self.instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("instance buffer"),
-                size: (self.instance_capacity * std::mem::size_of::<InstanceRaw>()) as u64,
+            if all_instances.len() > self.instance_capacity {
+                self.instance_capacity = all_instances.len().next_power_of_two();
+                self.instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("instance buffer"),
+                    size: (self.instance_capacity * std::mem::size_of::<InstanceRaw>()) as u64,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            }
+            queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&all_instances));
+
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("sprite pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
+            pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
+
+            // ── 연속된 같은 텍스처 구간마다 draw call 1회 ──────────────
+            // 텍스처가 바뀔 때만 bind group을 교체해 전환 횟수를 최소화한다.
+            let instance_size = std::mem::size_of::<InstanceRaw>() as u64;
+            let mut i = 0usize;
+            while i < sprites.len() {
+                let run_key = &sprites[i].1;
+                let run_start = i;
+                while i < sprites.len() && &sprites[i].1 == run_key {
+                    i += 1;
+                }
+                let run_len = i - run_start;
+                let byte_start = run_start as u64 * instance_size;
+                let byte_end = byte_start + run_len as u64 * instance_size;
+
+                let bind_group = match run_key {
+                    Some(path) => self
+                        .texture_cache
+                        .get(path)
+                        .map(|t| &t.bind_group)
+                        .unwrap_or(&self.white_texture.bind_group),
+                    None => &self.white_texture.bind_group,
+                };
+
+                pass.set_bind_group(1, bind_group, &[]);
+                pass.set_vertex_buffer(1, self.instance_buf.slice(byte_start..byte_end));
+                pass.draw_indexed(0..INDICES.len() as u32, 0, 0..run_len as u32);
+            }
+            // pass drops here → encoder 해방
+        }
+
+        // ── ShaderMaterial 렌더 패스 (별도 패스, z-sort 독립) ───────────────
+        self.render_materials(device, queue, view, encoder, world, width, height);
+    }
+
+    /// 소스 해시를 키로 커스텀 파이프라인을 컴파일·캐싱한다.
+    /// 렌더 패스가 열리기 **전에** 호출해야 한다.
+    fn compile_material_pipeline(
+        &mut self,
+        device: &wgpu::Device,
+        hash: u64,
+        frag_source: &str,
+    ) {
+        let frag_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("custom material frag"),
+            source: wgpu::ShaderSource::Wgsl(frag_source.into()),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("material pipeline layout"),
+            bind_group_layouts: &[
+                &self.camera_layout,
+                &self.texture_layout,
+                &self.params_layout,
+            ],
+            push_constant_ranges: &[],
+        });
+        let vertex_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2],
+        };
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("material pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &self.sprite_shader,
+                entry_point: "vs_main",
+                buffers: &[vertex_layout, InstanceRaw::layout()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &frag_module,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: self.surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+        self.custom_pipelines.insert(hash, pipeline);
+    }
+
+    /// [`crate::material::ShaderMaterial`] 컴포넌트를 가진 엔티티를 렌더링한다.
+    ///
+    /// 일반 스프라이트 패스 **이후**, UI 패스 **이전**에 호출된다.
+    /// z-sort는 머티리얼 엔티티끼리만 적용된다 (일반 스프라이트와 인터리브 없음).
+    fn render_materials(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        view: &wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+        world: &World,
+        _width: u32,
+        _height: u32,
+    ) {
+        use crate::material::ShaderMaterial;
+
+        // 1. 머티리얼 엔티티 데이터 수집 (borrow 해방 전)
+        struct MatEntry {
+            entity: crate::ecs::Entity,
+            hash: u64,
+            frag_source: String,
+            params: [f32; 4],
+            instance: InstanceRaw,
+            tex_key: Option<String>,
+            z: f32,
+        }
+
+        let mat_ids: Vec<(crate::ecs::Entity, u64, String, [f32; 4])> = world
+            .query::<ShaderMaterial>()
+            .map(|(e, mat)| {
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                mat.frag_source.hash(&mut h);
+                (e, h.finish(), mat.frag_source.clone(), mat.params)
+            })
+            .collect();
+
+        if mat_ids.is_empty() {
+            return;
+        }
+
+        let mut entries: Vec<MatEntry> = Vec::new();
+        for (e, hash, frag_source, params) in mat_ids {
+            let uv = world.get::<UvRect>(e).copied().unwrap_or(UvRect::FULL);
+            let sprite = match world.get::<Sprite>(e) {
+                Some(s) => s,
+                None => continue,
+            };
+            let tex_key = sprite
+                .image_handle
+                .as_ref()
+                .map(|h| h.path().to_string())
+                .or_else(|| sprite.texture.clone());
+
+            if let Some(gt) = world.get::<GlobalTransform>(e) {
+                entries.push(MatEntry {
+                    entity: e, hash, frag_source, params, tex_key,
+                    instance: InstanceRaw::from_global(gt, sprite, uv),
+                    z: gt.z,
+                });
+            } else if let Some(tr) = world.get::<Transform>(e) {
+                entries.push(MatEntry {
+                    entity: e, hash, frag_source, params, tex_key,
+                    instance: InstanceRaw::from(tr, sprite, uv),
+                    z: tr.z,
+                });
+            }
+        }
+
+        if entries.is_empty() {
+            return;
+        }
+
+        // 2. z 오름차순 안정 정렬
+        entries.sort_by(|a, b| a.z.partial_cmp(&b.z).unwrap_or(std::cmp::Ordering::Equal));
+
+        // 3. 파이프라인 컴파일 (렌더 패스 열기 전)
+        let hashes: Vec<(u64, String)> = entries
+            .iter()
+            .map(|e| (e.hash, e.frag_source.clone()))
+            .collect();
+        for (hash, src) in &hashes {
+            if !self.custom_pipelines.contains_key(hash) {
+                self.compile_material_pipeline(device, *hash, src);
+            }
+        }
+
+        // 4. params 유니폼 버퍼 생성/갱신 (렌더 패스 열기 전)
+        for entry in &entries {
+            let eid = entry.entity.0;
+            if !self.params_buffers.contains_key(&eid) {
+                let buf = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("material params buf"),
+                    size: 16, // vec4<f32>
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("material params bind group"),
+                    layout: &self.params_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: buf.as_entire_binding(),
+                    }],
+                });
+                self.params_buffers.insert(eid, (buf, bg));
+            }
+            let (buf, _) = &self.params_buffers[&eid];
+            queue.write_buffer(buf, 0, bytemuck::cast_slice(&entry.params));
+        }
+
+        // 5. 인스턴스 데이터 일괄 업로드 (렌더 패스 열기 전)
+        let instances: Vec<InstanceRaw> = entries.iter().map(|e| e.instance).collect();
+        if instances.len() > self.mat_instance_capacity {
+            self.mat_instance_capacity = instances.len().next_power_of_two();
+            self.mat_instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("material instance buffer"),
+                size: (self.mat_instance_capacity * std::mem::size_of::<InstanceRaw>()) as u64,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
         }
-        queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&all_instances));
+        queue.write_buffer(&self.mat_instance_buf, 0, bytemuck::cast_slice(&instances));
 
-        // ── 렌더 패스 ───────────────────────────────────────────────────────
+        // 6. 렌더 패스 — 엔티티별로 커스텀 파이프라인 적용
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("sprite pass"),
+            label: Some("material pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load, // 배경색은 App이 먼저 Clear
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -441,39 +715,30 @@ impl SpriteRenderer {
             timestamp_writes: None,
         });
 
-        pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.camera_bind_group, &[]);
         pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
         pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
 
-        // ── 연속된 같은 텍스처 구간마다 draw call 1회 ────────────────────
-        // 텍스처가 바뀔 때만 bind group을 교체하므로 bind group 전환 횟수가 최소화된다.
         let instance_size = std::mem::size_of::<InstanceRaw>() as u64;
-        let mut i = 0usize;
-        while i < sprites.len() {
-            let run_key = &sprites[i].1;
-            let run_start = i;
-            // 동일 텍스처가 연속되는 끝 위치를 찾는다
-            while i < sprites.len() && &sprites[i].1 == run_key {
-                i += 1;
-            }
-            let run_len = i - run_start;
+        for (i, entry) in entries.iter().enumerate() {
+            let pipeline = &self.custom_pipelines[&entry.hash];
+            pass.set_pipeline(pipeline);
 
-            let byte_start = run_start as u64 * instance_size;
-            let byte_end = byte_start + run_len as u64 * instance_size;
+            let tex_bg = entry
+                .tex_key
+                .as_ref()
+                .and_then(|k| self.texture_cache.get(k))
+                .map(|t| &t.bind_group)
+                .unwrap_or(&self.white_texture.bind_group);
+            pass.set_bind_group(1, tex_bg, &[]);
 
-            let bind_group = match run_key {
-                Some(path) => self
-                    .texture_cache
-                    .get(path)
-                    .map(|t| &t.bind_group)
-                    .unwrap_or(&self.white_texture.bind_group),
-                None => &self.white_texture.bind_group,
-            };
+            let (_, params_bg) = &self.params_buffers[&entry.entity.0];
+            pass.set_bind_group(2, params_bg, &[]);
 
-            pass.set_bind_group(1, bind_group, &[]);
-            pass.set_vertex_buffer(1, self.instance_buf.slice(byte_start..byte_end));
-            pass.draw_indexed(0..INDICES.len() as u32, 0, 0..run_len as u32);
+            let byte_start = i as u64 * instance_size;
+            let byte_end = byte_start + instance_size;
+            pass.set_vertex_buffer(1, self.mat_instance_buf.slice(byte_start..byte_end));
+            pass.draw_indexed(0..INDICES.len() as u32, 0, 0..1);
         }
     }
 

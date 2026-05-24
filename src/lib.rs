@@ -15,6 +15,7 @@ pub mod particle;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod physics;
 pub mod prefab;
+pub mod material;
 pub mod network;
 pub mod reflect;
 pub mod renderer;
@@ -55,6 +56,7 @@ pub use physics::{
     CharacterController, CollisionEvent, PhysicsBody, PhysicsSystem, PhysicsWorld, RaycastHit,
 };
 pub use prefab::{spawn_entity_def, spawn_scene_def, EntityDef, Prefab, SceneDef, Tag};
+pub use material::ShaderMaterial;
 pub use network::{NetworkClient, NetworkEvent, NetworkSystem};
 // par_query_for_each / par_query_map / par_query2_for_each / par_query2_map 은
 // World 메서드이므로 World re-export를 통해 자동 접근 가능 (별도 re-export 불필요)
