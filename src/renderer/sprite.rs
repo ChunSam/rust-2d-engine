@@ -15,6 +15,7 @@ use crate::ecs::World;
 use crate::hierarchy::GlobalTransform;
 use crate::renderer::texture::Texture;
 use crate::renderer::ui::DrawRect;
+use crate::resources::CullConfig;
 
 // ─── GPU에 올라가는 버텍스 구조체 ─────────────────────────────────────────────
 #[repr(C)]
@@ -378,6 +379,38 @@ impl SpriteRenderer {
         };
         queue.write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cam));
 
+        // ── 컬링 설정 + 가시 영역 ──────────────────────────────────────────
+        let cull = world
+            .resource::<CullConfig>()
+            .copied()
+            .unwrap_or_default();
+        let (vmin, vmax) = camera.visible_rect(width as f32, height as f32);
+
+        // 회전을 고려한 보수적 AABB 교차 판정 헬퍼.
+        // |cos θ|·w/2 + |sin θ|·h/2 공식으로 회전 후 AABB 반폭을 계산한다.
+        let is_visible = |pos: glam::Vec2, scale: glam::Vec2, rotation: f32| -> bool {
+            if !cull.frustum_culling {
+                return true;
+            }
+            let sin_r = rotation.sin().abs();
+            let cos_r = rotation.cos().abs();
+            let hw = cos_r * scale.x * 0.5 + sin_r * scale.y * 0.5;
+            let hh = sin_r * scale.x * 0.5 + cos_r * scale.y * 0.5;
+            pos.x + hw >= vmin.x
+                && pos.x - hw <= vmax.x
+                && pos.y + hh >= vmin.y
+                && pos.y - hh <= vmax.y
+        };
+
+        let is_above_lod = |scale: glam::Vec2| -> bool {
+            if cull.min_pixel_size <= 0.0 {
+                return true;
+            }
+            let px_w = scale.x * camera.zoom;
+            let px_h = scale.y * camera.zoom;
+            px_w.min(px_h) >= cull.min_pixel_size
+        };
+
         // ── 전체 스프라이트 수집: (z, texture_key, InstanceRaw) ─────────
         // GlobalTransform이 있으면 계층 합성 결과를 사용하고, 없으면 Transform으로 fallback.
         let mut sprites: Vec<(f32, Option<String>, InstanceRaw)> = Vec::new();
@@ -390,8 +423,20 @@ impl SpriteRenderer {
                 .map(|h| h.path().to_string())
                 .or_else(|| sprite.texture.clone());
             if let Some(gt) = world.get::<GlobalTransform>(entity) {
+                if !is_visible(gt.position, gt.scale, gt.rotation) {
+                    continue;
+                }
+                if !is_above_lod(gt.scale) {
+                    continue;
+                }
                 sprites.push((gt.z, tex_key, InstanceRaw::from_global(gt, sprite, uv)));
             } else if let Some(transform) = world.get::<Transform>(entity) {
+                if !is_visible(transform.position, transform.scale, transform.rotation) {
+                    continue;
+                }
+                if !is_above_lod(transform.scale) {
+                    continue;
+                }
                 sprites.push((
                     transform.z,
                     tex_key,
@@ -418,6 +463,12 @@ impl SpriteRenderer {
                         let uv = atlas.uv_rect(*index);
                         let tex_key = Some(atlas.texture_path().to_string());
                         if let Some(gt) = world.get::<GlobalTransform>(*entity) {
+                            if !is_visible(gt.position, gt.scale, gt.rotation) {
+                                continue;
+                            }
+                            if !is_above_lod(gt.scale) {
+                                continue;
+                            }
                             sprites.push((
                                 gt.z,
                                 tex_key,
@@ -429,6 +480,12 @@ impl SpriteRenderer {
                                 },
                             ));
                         } else if let Some(tr) = world.get::<Transform>(*entity) {
+                            if !is_visible(tr.position, tr.scale, tr.rotation) {
+                                continue;
+                            }
+                            if !is_above_lod(tr.scale) {
+                                continue;
+                            }
                             sprites.push((
                                 tr.z,
                                 tex_key,

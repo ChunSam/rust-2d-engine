@@ -63,7 +63,7 @@ pub use network::{NetworkClient, NetworkEvent, NetworkSystem};
 pub use reflect::{Reflect, ReflectValue};
 pub use renderer::{DrawRect, DrawText, PostProcessConfig, TextQueue, TextRenderer, UiQueue};
 pub use resources::{
-    DebugDrawQueue, DebugRect, DisplayScaleFactor, FontData, GameState, PendingResize,
+    CullConfig, DebugDrawQueue, DebugRect, DisplayScaleFactor, FontData, GameState, PendingResize,
     SelectedEntity, ShouldQuit, ViewportSize, WindowConfig,
 };
 pub use scene::{Scene, SceneChange, SceneCmd};

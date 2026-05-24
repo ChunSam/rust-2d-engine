@@ -99,6 +99,37 @@ pub struct FontData(pub Vec<u8>);
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PendingResize(pub Option<(u32, u32)>);
 
+// ─── 렌더링 최적화 ──────────────────────────────────────────────────────────
+
+/// 뷰 프러스텀 컬링 + 거리 기반 LOD 설정.
+///
+/// `App::run()` 전에 삽입하거나, 시스템 내에서 `world.resource_mut::<CullConfig>()` 로 조작.
+/// 삽입하지 않으면 엔진 기본값(`frustum_culling: true, min_pixel_size: 0.0`)이 적용된다.
+///
+/// ```text
+/// world.insert_resource(CullConfig {
+///     frustum_culling: true,
+///     min_pixel_size: 1.0,  // 화면 1px 미만 스프라이트 스킵
+/// });
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct CullConfig {
+    /// true이면 카메라 뷰포트 밖 스프라이트를 GPU 제출 전에 컬링한다.
+    pub frustum_culling: bool,
+    /// 화면 픽셀 단위 스프라이트 크기(min(w,h))가 이 값 미만이면 렌더링 스킵.
+    /// `0.0`이면 거리 LOD 비활성화.
+    pub min_pixel_size: f32,
+}
+
+impl Default for CullConfig {
+    fn default() -> Self {
+        Self {
+            frustum_culling: true,
+            min_pixel_size: 0.0,
+        }
+    }
+}
+
 /// Inspector에서 현재 선택된 엔티티를 World 리소스로 노출한다.
 ///
 /// `App`이 매 프레임 `inspector_selected`와 동기화한다.

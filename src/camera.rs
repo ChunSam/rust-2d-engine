@@ -49,6 +49,15 @@ impl Camera {
         )
     }
 
+    /// 현재 카메라의 월드 공간 가시 AABB를 `(min, max)` 로 반환한다.
+    ///
+    /// 이 직사각형 밖에 있는 스프라이트는 렌더링해도 화면에 보이지 않으므로 컬링 가능.
+    pub fn visible_rect(&self, viewport_w: f32, viewport_h: f32) -> (Vec2, Vec2) {
+        let min = self.position;
+        let max = self.position + Vec2::new(viewport_w / self.zoom, viewport_h / self.zoom);
+        (min, max)
+    }
+
     /// 뷰포트 크기 `(width, height)` 를 받아 MVP 용 직교 투영 행렬을 반환한다.
     ///
     /// left = position.x,  right = position.x + width/zoom
@@ -131,5 +140,21 @@ mod tests {
             m.abs_diff_eq(expected, 1e-6),
             "zoom=2 view_proj mismatch\ngot:      {m:?}\nexpected: {expected:?}"
         );
+    }
+
+    #[test]
+    fn visible_rect_no_zoom() {
+        let cam = Camera::new(Vec2::new(100.0, 50.0), 1.0);
+        let (min, max) = cam.visible_rect(W, H);
+        assert_eq!(min, Vec2::new(100.0, 50.0));
+        assert_eq!(max, Vec2::new(100.0 + W, 50.0 + H));
+    }
+
+    #[test]
+    fn visible_rect_with_zoom() {
+        let cam = Camera::new(Vec2::ZERO, 2.0);
+        let (min, max) = cam.visible_rect(W, H);
+        assert_eq!(min, Vec2::ZERO);
+        assert_eq!(max, Vec2::new(W / 2.0, H / 2.0));
     }
 }
