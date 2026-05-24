@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 25 갱신: 2026-05-25)  
-엔진 버전: v0.25.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 26 갱신: 2026-05-25)  
+엔진 버전: v0.26.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -49,6 +49,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 25-C | 커스텀 셰이더 머티리얼 — ShaderMaterial, params uniform, 파이프라인 캐시, 스프라이트 배칭 정리 | `9a7b375` |
 | Phase 25-D | 에디터 기즈모 — SelectedEntity 리소스, Inspector 엔티티 생성/삭제, 드래그 이동, DebugRect 강조 | `c19d0b6` |
 | Phase 25-E | rust-survivors 연동 — Sprite 필드 대응, EnemyAiSystem par_query2_map 병렬화 (game repo) | — |
+| Phase 26 | LOD/컬링 — Camera::visible_rect, CullConfig 리소스, 회전 고려 AABB 프러스텀 컬링, min_pixel_size LOD | `8db9bbe` |
 
 ---
 
@@ -1119,7 +1120,7 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 23~~ | ~~WASM 빌드 지원 — cfg-gate 4개 의존성, fs 추상화, 진입점 분기~~ | — | 완료 |
 | ~~Phase 24~~ | ~~WASM 브라우저 실행 — WebGL2 강제, 비동기 GPU init, web-time~~ | — | 완료 |
 | ~~Phase 25~~ | ~~네트워킹 / ECS 병렬 / 셰이더 머티리얼 / 에디터 기즈모 / 연동~~ | — | 완료 |
-| Phase 26 | LOD / 컬링 — 카메라 뷰 frustum 컬링, 거리 기반 스프라이트 LOD | ★★☆ | 씬 규모 확장 대비 |
+| ~~Phase 26~~ | ~~LOD / 컬링 — Camera::visible_rect, CullConfig, AABB 프러스텀 컬링, min_pixel_size LOD~~ | — | 완료 |
 | Phase 27 | 멀티플레이어 데모 — NetworkClient 기반 서버-클라 롤플레잉 예제 | ★★★ | Phase 25-A 완료 위에 구현 |
 | Phase 28 | 에디터 씬 저장 — 기즈모로 배치한 엔티티를 SceneDef RON으로 직렬화 | ★★☆ | Phase 25-D 위에 구현 |
 
