@@ -28,17 +28,22 @@ rhai        = { version = "1", features = ["sync"] }
 
 # ── 네이티브 전용 (OS API 의존) ──────────────────────────────────────────────
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rapier2d = { version = "0.22", features = ["default"] }
-rodio    = { version = "0.19", default-features = false, features = ["wav", "vorbis"] }
-dirs     = "5"
-gilrs    = "0.10"
-notify   = "6"
+rapier2d    = { version = "0.22", features = ["default"] }
+rodio       = { version = "0.19", default-features = false, features = ["wav", "vorbis"] }
+dirs        = "5"
+gilrs       = "0.10"
+notify      = "6"
+tungstenite = { version = "0.21", features = [] }
 
 # ── WASM 전용 ────────────────────────────────────────────────────────────────
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen          = "0.2"
 wasm-bindgen-futures  = "0.4"
-web-sys               = { version = "0.3", features = ["Window", "Performance", "HtmlCanvasElement", "Document", "Element"] }
+js-sys                = "0.3"
+web-sys               = { version = "0.3", features = [
+    "Window", "Performance", "HtmlCanvasElement", "Document", "Element",
+    "WebSocket", "MessageEvent", "CloseEvent", "BinaryType",
+] }
 console_error_panic_hook = "0.1"
 getrandom             = { version = "0.2", features = ["js"] }
 web-time              = "1"

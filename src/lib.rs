@@ -15,6 +15,7 @@ pub mod particle;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod physics;
 pub mod prefab;
+pub mod network;
 pub mod reflect;
 pub mod renderer;
 pub mod resources;
@@ -54,6 +55,7 @@ pub use physics::{
     CharacterController, CollisionEvent, PhysicsBody, PhysicsSystem, PhysicsWorld, RaycastHit,
 };
 pub use prefab::{spawn_entity_def, spawn_scene_def, EntityDef, Prefab, SceneDef, Tag};
+pub use network::{NetworkClient, NetworkEvent, NetworkSystem};
 pub use reflect::{Reflect, ReflectValue};
 pub use renderer::{DrawRect, DrawText, PostProcessConfig, TextQueue, TextRenderer, UiQueue};
 pub use resources::{
