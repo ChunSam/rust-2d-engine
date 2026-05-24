@@ -43,7 +43,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 21 | Texture Atlas — TextureAtlas, AtlasSprite, AssetServer::load_atlas, App::load_atlas | `b63e9c9` |
 | Phase 22 | Reflect 시스템 — Reflect 트레잇, ReflectValue, World::register_reflect/get_reflect, egui Inspector | `90f65e3` |
 | Phase 23 | WASM 빌드 지원 — 플랫폼별 deps 분리, cfg-gate, EventLoopExtWebSys, getrandom wasm_js | `b9f4bdb` |
-| Phase 24 | WASM 브라우저 실행 — WebGL2 강제, 비동기 GPU init, web-time, 캔버스 크기 수정 | (이번 커밋) |
+| Phase 24 | WASM 브라우저 실행 — WebGL2 강제, 비동기 GPU init, web-time, 캔버스 크기 수정 | `24e2108` |
 
 ---
 
