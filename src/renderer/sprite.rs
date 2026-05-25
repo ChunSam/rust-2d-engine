@@ -412,17 +412,23 @@ impl SpriteRenderer {
             px_w.min(px_h) >= cull.min_pixel_size
         };
 
-        // ── 전체 스프라이트 수집: (z, texture_key, InstanceRaw) ─────────
+        // ── 전체 스프라이트 수집: (layer, tex_key, z, InstanceRaw) ──────
         // GlobalTransform이 있으면 계층 합성 결과를 사용하고, 없으면 Transform으로 fallback.
-        let mut sprites: Vec<(f32, Option<String>, InstanceRaw)> = Vec::new();
+        // RenderLayer(i32)가 없으면 0 으로 취급한다.
+        let mut sprites: Vec<(i32, String, f32, InstanceRaw)> = Vec::new();
         for (entity, sprite) in world.query::<Sprite>() {
             let uv = world.get::<UvRect>(entity).copied().unwrap_or(UvRect::FULL);
+            let layer = world
+                .get::<crate::components::RenderLayer>(entity)
+                .map(|l| l.0)
+                .unwrap_or(0);
             // image_handle이 있으면 그 경로를 우선 사용, 없으면 texture 경로 사용
             let tex_key = sprite
                 .image_handle
                 .as_ref()
                 .map(|h| h.path().to_string())
-                .or_else(|| sprite.texture.clone());
+                .or_else(|| sprite.texture.clone())
+                .unwrap_or_default();
             if let Some(gt) = world.get::<GlobalTransform>(entity) {
                 if !is_visible(gt.position, gt.scale, gt.rotation) {
                     stats.sprites_culled += 1;
@@ -432,7 +438,7 @@ impl SpriteRenderer {
                     stats.sprites_culled += 1;
                     continue;
                 }
-                sprites.push((gt.z, tex_key, InstanceRaw::from_global(gt, sprite, uv)));
+                sprites.push((layer, tex_key, gt.z, InstanceRaw::from_global(gt, sprite, uv)));
             } else if let Some(transform) = world.get::<Transform>(entity) {
                 if !is_visible(transform.position, transform.scale, transform.rotation) {
                     stats.sprites_culled += 1;
@@ -443,8 +449,9 @@ impl SpriteRenderer {
                     continue;
                 }
                 sprites.push((
-                    transform.z,
+                    layer,
                     tex_key,
+                    transform.z,
                     InstanceRaw::from(transform, sprite, uv),
                 ));
             }
@@ -466,7 +473,11 @@ impl SpriteRenderer {
                 for (entity, index, color, atlas_handle) in &atlas_entries {
                     if let Some(atlas) = server.get_atlas(atlas_handle) {
                         let uv = atlas.uv_rect(*index);
-                        let tex_key = Some(atlas.texture_path().to_string());
+                        let tex_key = atlas.texture_path().to_string();
+                        let layer = world
+                            .get::<crate::components::RenderLayer>(*entity)
+                            .map(|l| l.0)
+                            .unwrap_or(0);
                         if let Some(gt) = world.get::<GlobalTransform>(*entity) {
                             if !is_visible(gt.position, gt.scale, gt.rotation) {
                                 stats.sprites_culled += 1;
@@ -477,8 +488,9 @@ impl SpriteRenderer {
                                 continue;
                             }
                             sprites.push((
-                                gt.z,
+                                layer,
                                 tex_key,
+                                gt.z,
                                 InstanceRaw {
                                     model: gt.to_matrix().to_cols_array_2d(),
                                     color: *color,
@@ -496,8 +508,9 @@ impl SpriteRenderer {
                                 continue;
                             }
                             sprites.push((
-                                tr.z,
+                                layer,
                                 tex_key,
+                                tr.z,
                                 InstanceRaw {
                                     model: tr.to_matrix().to_cols_array_2d(),
                                     color: *color,
@@ -511,14 +524,19 @@ impl SpriteRenderer {
             }
         }
 
-        // ── 전역 z 오름차순 안정 정렬 ────────────────────────────────────
-        // z가 같으면 수집 순서를 유지한다 (stable sort).
-        sprites.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        // ── (layer, tex_key, z) 기준 안정 정렬 ──────────────────────────
+        // layer가 같으면 tex_key 기준으로 배칭 → 같은 텍스처는 항상 인접.
+        // tex_key가 같으면 z 오름차순으로 정렬.
+        sprites.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| a.1.cmp(&b.1))
+                .then_with(|| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
+        });
         stats.sprites_rendered = sprites.len() as u32;
 
         // ── 일반 스프라이트 렌더 패스 ────────────────────────────────────────
         if !sprites.is_empty() {
-            let all_instances: Vec<InstanceRaw> = sprites.iter().map(|(_, _, raw)| *raw).collect();
+            let all_instances: Vec<InstanceRaw> = sprites.iter().map(|(_, _, _, raw)| *raw).collect();
 
             if all_instances.len() > self.instance_capacity {
                 self.instance_capacity = all_instances.len().next_power_of_two();
@@ -552,7 +570,8 @@ impl SpriteRenderer {
             pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
 
             // ── 연속된 같은 텍스처 구간마다 draw call 1회 ──────────────
-            // 텍스처가 바뀔 때만 bind group을 교체해 전환 횟수를 최소화한다.
+            // (layer, tex_key) 기준으로 정렬됐으므로 같은 텍스처는 항상 연속.
+            // 텍스처가 바뀔 때만 bind group을 교체한다.
             let instance_size = std::mem::size_of::<InstanceRaw>() as u64;
             let mut i = 0usize;
             while i < sprites.len() {
@@ -565,13 +584,13 @@ impl SpriteRenderer {
                 let byte_start = run_start as u64 * instance_size;
                 let byte_end = byte_start + run_len as u64 * instance_size;
 
-                let bind_group = match run_key {
-                    Some(path) => self
-                        .texture_cache
-                        .get(path)
+                let bind_group = if run_key.is_empty() {
+                    &self.white_texture.bind_group
+                } else {
+                    self.texture_cache
+                        .get(run_key.as_str())
                         .map(|t| &t.bind_group)
-                        .unwrap_or(&self.white_texture.bind_group),
-                    None => &self.white_texture.bind_group,
+                        .unwrap_or(&self.white_texture.bind_group)
                 };
 
                 pass.set_bind_group(1, bind_group, &[]);

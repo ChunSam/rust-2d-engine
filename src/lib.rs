@@ -46,7 +46,7 @@ pub use camera::Camera;
 pub use collision::{
     Collider, CollisionDebugSystem, CollisionGridSystem, CollisionLayer, DebugConfig, SpatialGrid,
 };
-pub use components::{Sprite, Transform};
+pub use components::{RenderLayer, Sprite, Transform};
 pub use debug_ui::DebugUi;
 pub use ecs::{Entity, Events, System, World};
 pub use hierarchy::{attach, detach, Children, GlobalTransform, HierarchySystem, Parent};

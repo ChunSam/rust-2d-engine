@@ -169,6 +169,24 @@ impl Reflect for Sprite {
     }
 }
 
+// ─── RenderLayer ──────────────────────────────────────────────────────────────
+
+/// 스프라이트 렌더링 레이어 (선택 컴포넌트, 기본값 0).
+///
+/// 낮은 값이 먼저(뒤에) 그려진다. 같은 layer 안에서는
+/// 텍스처 키 기준으로 배칭한 뒤 z 오름차순으로 렌더링한다.
+///
+/// # 예
+/// ```
+/// // 배경 레이어 (-1): 게임플레이보다 항상 뒤에 그려짐
+/// // 기본 레이어  ( 0): 대부분의 게임오브젝트
+/// // 전경 레이어  ( 1): HUD, 이펙트 등 항상 앞에 그려져야 하는 것들
+/// world.add_component(bg, RenderLayer(-1));
+/// world.add_component(effect, RenderLayer(1));
+/// ```
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub struct RenderLayer(pub i32);
+
 // ─── 하위 호환 재수출 ─────────────────────────────────────────────────────────
 // resources.rs로 이동한 타입들을 engine::components::* 경로로도 접근할 수 있도록 유지.
 pub use crate::animation::player::{AnimationClip, AnimationPlayer, UvRect};
