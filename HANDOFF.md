@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 32 갱신: 2026-05-25)  
-엔진 버전: v0.32.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 33 갱신: 2026-05-25)  
+엔진 버전: v0.33.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -215,6 +215,51 @@ cargo run --example mp_client   # 터미널 2, 3, ...
 - `sprite.rs render()` 반환 타입 `RenderStats`로 변경, culling/draw call 카운터 수집
 - Engine Stats 패널에 "Systems" / "Render" collapsible 섹션 추가, `resizable(true)`로 변경
 - `ProfilerData`, `RenderStats`, `SystemProfile` re-export (`lib.rs`)
+
+---
+
+### Phase 33 — A* 경로 탐색 + ECS 쿼리 필터
+
+**배경**: 적 AI가 장애물을 피해 이동할 수단이 없었고, ECS 쿼리에서 "특정 컴포넌트가 있는/없는 엔티티만"을 표현하는 방법이 없어 시스템 내부에서 수동으로 필터링해야 했다. 두 기능은 파일 충돌 없이 병렬 구현 가능해 서브 에이전트 2개로 동시 진행했다.
+
+**변경 파일**: `src/pathfinding.rs` (신규), `src/ecs/world.rs`, `src/lib.rs`
+
+**A* 경로 탐색 (src/pathfinding.rs)**
+
+- `PathGrid { width, height, cells: Vec<bool> }` — row-major 격자
+  - `new(w, h)` — 전부 통행 가능
+  - `new_blocked(w, h)` — 전부 막힘
+  - `set_walkable(x, y, bool)` / `is_walkable(x, y) -> bool` (범위 밖 = false)
+- `find_path(grid, start: IVec2, goal: IVec2) -> Option<Vec<IVec2>>`
+  - 4방향 이동, 맨해튼 휴리스틱, `BinaryHeap` min-heap (역순 `Ord`)
+  - 반환 경로에 start 미포함, goal 포함
+  - `start == goal` → `Some(vec![goal])`, 경로 없음 → `None`
+  - 목표가 막혀 있으면 즉시 `None` (open set 탐색 없이)
+- 테스트 4개: 직선·우회·막힘·동일점
+
+**ECS 쿼리 필터 (src/ecs/world.rs)**
+
+- `World::query_with::<A, B>()` — A와 B를 **모두** 가진 엔티티만 `(Entity, &A)` 반환
+- `World::query_without::<A, B>()` — A는 있고 B가 **없는** 엔티티만 `(Entity, &A)` 반환
+- 구현: 아키타입 레벨에서 `TypeId` 포함 여부(`arch.contains(tb)`)를 판단. per-entity `get::<B>()` 호출보다 효율적이며 기존 `query2` 패턴과 일치함.
+- 마커 타입(`With<T>`, `Without<T>`) 미생성 — 불필요한 추상화 배제
+- 테스트 3개 추가 (총 16개): With 필터, Without 필터, 혼합 4-조합 케이스
+
+**사용 예**:
+```rust
+// Sprite가 있는 Transform만 처리
+for (e, t) in world.query_with::<Transform, Sprite>() { ... }
+
+// Enemy 없는 엔티티만 (NPC 처리 등)
+for (e, t) in world.query_without::<Transform, Enemy>() { ... }
+
+// A* 경로 탐색
+let mut grid = PathGrid::new(20, 15);
+grid.set_walkable(5, 3, false); // 장애물
+if let Some(path) = find_path(&grid, IVec2::new(0, 0), IVec2::new(19, 14)) {
+    // path: [IVec2, ...] goal 포함, start 미포함
+}
+```
 
 ---
 
@@ -1260,6 +1305,7 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 30~~ | ~~시스템 프로파일러 — System::name(), ProfilerData, RenderStats, Engine Stats 확장~~ | — | 완료 |
 | ~~Phase 31~~ | ~~에셋 브라우저 — ImageEntry, image_list(), Inspector Assets 탭~~ | — | 완료 |
 | ~~Phase 32~~ | ~~런타임 안정성 — AssetLoadState, SceneDef.version, Load Scene 버튼~~ | — | 완료 |
+| ~~Phase 33~~ | ~~A* 경로 탐색 (PathGrid/find_path) + ECS 쿼리 필터 (query_with/query_without)~~ | — | 완료 |
 
 ---
 
