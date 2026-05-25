@@ -1,6 +1,6 @@
 # rust-2d-engine 레퍼런스
 
-> 버전 v0.36.0 기준. wgpu 기반 2D 게임 엔진.
+> 버전 v0.38.0 기준. wgpu 기반 2D 게임 엔진.
 
 ---
 
@@ -30,7 +30,12 @@
 22. [렌더 레이어](#렌더-레이어)
 23. [비헤이비어 트리](#비헤이비어-트리)
 24. [Inspector Undo/Redo](#inspector-undoredo)
-25. [좌표 규약](#좌표-규약)
+25. [스티어링 행동](#스티어링-행동)
+26. [Blackboard](#blackboard)
+27. [CommandBuffer](#commandbuffer)
+28. [에디터 — 씬 그래프 패널](#에디터--씬-그래프-패널)
+29. [Rhai 스크립팅](#rhai-스크립팅)
+30. [좌표 규약](#좌표-규약)
 
 ---
 
@@ -1450,6 +1455,202 @@ app.add_system(BehaviorSystem);
 - Gizmo 드래그로 엔티티 이동
 
 > WASM 빌드에서는 사용 불가 (`#[cfg(not(target_arch = "wasm32"))]`로 컴파일 제외).
+
+---
+
+## 스티어링 행동
+
+`engine::steering` 모듈은 엔티티 이동 AI를 위한 스티어링 행동 컴포넌트를 제공한다.
+
+### 컴포넌트
+
+| 컴포넌트 | 설명 |
+|---|---|
+| `SteeringVelocity { velocity: Vec2, max_speed: f32 }` | 스티어링 계산 결과 저장. `SteeringSystem`이 이 값을 읽어 `Transform` 이동 |
+| `Seek { target: Vec2, max_speed: f32 }` | 목표 위치를 향해 최대 속도로 직선 이동 |
+| `Flee { target: Vec2, max_speed: f32, flee_radius: f32 }` | `flee_radius` 이내 접근 시 도망. 반경 밖이면 정지 |
+| `Arrive { target: Vec2, max_speed: f32, slow_radius: f32, stop_radius: f32 }` | 목표에 가까워질수록 감속, `stop_radius` 이내 정지 |
+| `Wander { max_speed: f32, change_interval: f32 }` | `change_interval`마다 방향 변경하며 배회 |
+
+### SteeringSystem 등록
+
+```rust
+app.add_system(SteeringSystem);  // Seek→Flee→Arrive→Wander 순서 처리 후 Transform 이동
+```
+
+### 사용 예
+
+```rust
+// 적이 플레이어를 향해 이동
+world.add_component(enemy, Seek { target: player_pos, max_speed: 120.0 });
+world.add_component(enemy, SteeringVelocity::default());
+
+// 근접 시 도망
+world.add_component(minion, Flee { target: player_pos, max_speed: 150.0, flee_radius: 80.0 });
+world.add_component(minion, SteeringVelocity::default());
+
+// 목표 지점에 부드럽게 정착
+world.add_component(unit, Arrive {
+    target: destination,
+    max_speed: 100.0,
+    slow_radius: 60.0,
+    stop_radius: 8.0,
+});
+world.add_component(unit, SteeringVelocity::default());
+```
+
+> 여러 스티어링 컴포넌트를 동시에 붙이면 마지막 처리된 것이 적용된다 (Seek→Flee→Arrive→Wander 우선순위).
+
+---
+
+## Blackboard
+
+`Blackboard`는 비헤이비어 트리 노드 간 공유 상태를 저장하는 독립 ECS 컴포넌트다.
+
+### API
+
+| 메서드 | 설명 |
+|---|---|
+| `Blackboard::new()` | 빈 Blackboard 생성 |
+| `set_bool(key, val)` / `get_bool(key) -> Option<bool>` | bool 값 |
+| `set_float(key, val)` / `get_float(key) -> Option<f32>` | f32 값 |
+| `set_int(key, val)` / `get_int(key) -> Option<i32>` | i32 값 |
+| `set_vec2(key, val)` / `get_vec2(key) -> Option<Vec2>` | Vec2 값 |
+| `set_string(key, val)` / `get_string(key) -> Option<&str>` | String 값 |
+
+### 사용 예
+
+```rust
+// 엔티티에 Blackboard 부착
+world.add_component(enemy, Blackboard::new());
+
+// BehaviorNode::tick 내부에서 접근
+fn tick(&mut self, world: &mut World, entity: Entity, _dt: f32) -> BehaviorStatus {
+    if let Some(bb) = world.get_mut::<Blackboard>(entity) {
+        let in_range = bb.get_bool("player_in_range").unwrap_or(false);
+        bb.set_float("last_seen_time", 0.0);
+    }
+    BehaviorStatus::Success
+}
+```
+
+---
+
+## CommandBuffer
+
+`Commands`는 시스템 실행 중 엔티티/컴포넌트 변경을 안전하게 지연 예약하는 버퍼다.
+
+쿼리 이터레이터가 살아있는 동안 `world.spawn()` 등을 직접 호출하면 borrow 충돌이 발생한다.
+`Commands`는 명령을 클로저로 큐에 쌓아두었다가 `world.apply_commands(cmds)` 로 일괄 적용한다.
+
+### API
+
+| 메서드 | 설명 |
+|---|---|
+| `Commands::new()` | 빈 버퍼 생성 |
+| `spawn(f)` | `f(world, entity)`를 apply 시 실행. 클로저 안에서 컴포넌트 추가 |
+| `despawn(entity)` | 엔티티 삭제 예약. 이미 없으면 noop |
+| `insert::<T>(entity, comp)` | 컴포넌트 추가 예약 |
+| `remove::<T>(entity)` | 컴포넌트 제거 예약 |
+| `world.apply_commands(cmds)` | 큐 순서대로 일괄 적용 |
+
+### 사용 예
+
+```rust
+struct SpawnSystem;
+impl System for SpawnSystem {
+    fn run(&mut self, world: &mut World, _dt: f32) {
+        let mut cmds = Commands::new();
+
+        // 쿼리 루프 중 삭제/생성 예약
+        let dead: Vec<Entity> = world.query::<Health>()
+            .filter(|(_, h)| h.0 <= 0)
+            .map(|(e, _)| e)
+            .collect();
+
+        for e in dead {
+            cmds.despawn(e);
+            cmds.spawn(|world, ne| {
+                world.add_component(ne, Particle::default());
+            });
+        }
+
+        world.apply_commands(cmds);  // 루프 끝난 뒤 일괄 적용
+    }
+}
+```
+
+---
+
+## 에디터 — 씬 그래프 패널
+
+Inspector의 **"Scene"** 탭에서 엔티티 계층 구조를 TreeView로 확인할 수 있다 (네이티브 전용).
+
+- `Parent` 없는 루트 엔티티부터 `Children` 기준으로 들여쓰기 표시
+- 항목 클릭 → Inspector 선택 엔티티 변경
+- `Tag` 컴포넌트가 있으면 이름 표시, 없으면 `"Entity {id}"`
+- Scene 탭 하단 및 Entities 탭 상단에서 이름(Tag) 인라인 편집 가능
+
+> WASM 빌드에서는 사용 불가 (`#[cfg(not(target_arch = "wasm32"))]`로 컴파일 제외).
+
+---
+
+## Rhai 스크립팅
+
+`engine::scripting` 모듈은 Rhai 스크립트 파일을 에셋으로 로드하고 엔티티에 부착해 실행한다.
+
+### 기본 사용
+
+```rust
+use engine::{ScriptAsset, ScriptRunner, ScriptingSystem};
+
+// 스크립트 로드
+let handle = assets.load_script("assets/scripts/enemy_ai.rhai");
+
+// 엔티티에 ScriptRunner 부착
+world.add_component(enemy, ScriptRunner::new(handle));
+
+// 시스템 등록
+app.add_system(ScriptingSystem);
+```
+
+### 스크립트에서 사용 가능한 함수 (확장 API)
+
+#### Commands
+
+| 함수 | 설명 |
+|---|---|
+| `spawn_entity() -> i64` | 새 엔티티 생성. 임시 핸들 반환 (음수) |
+| `despawn_entity(id)` | 엔티티 삭제 예약 |
+
+#### Blackboard
+
+| 함수 | 설명 |
+|---|---|
+| `bb_get_bool(key)` / `bb_set_bool(key, val)` | bool 읽기/쓰기 |
+| `bb_get_float(key)` / `bb_set_float(key, val)` | f32 읽기/쓰기 |
+| `bb_get_int(key)` / `bb_set_int(key, val)` | i32 읽기/쓰기 |
+
+#### Steering
+
+| 함수 | 설명 |
+|---|---|
+| `seek_target(tx, ty, speed)` | Seek 컴포넌트 설정 |
+| `flee_from(tx, ty, speed, radius)` | Flee 컴포넌트 설정 |
+| `stop_steering()` | 스티어링 속도 0으로 초기화 |
+
+### 스크립트 예시
+
+```rhai
+// enemy_ai.rhai
+let in_range = bb_get_bool("player_in_range");
+if in_range {
+    seek_target(player_x, player_y, 120.0);
+} else {
+    stop_steering();
+    bb_set_float("idle_time", bb_get_float("idle_time") + dt);
+}
+```
 
 ---
 
