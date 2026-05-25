@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 44 갱신: 2026-05-25)  
-엔진 버전: v0.45.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 45~53 갱신: 2026-05-26)  
+엔진 버전: v0.46.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -80,6 +80,14 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 43a | 씬 전환 트랜지션 — FadeTransition::fade_in/out, FadeRenderer (WGSL alpha blend) | `c4a05f6` |
 | Phase 44b | 물리 조인트 — add_distance_joint/revolute_joint/prismatic_joint, ImpulseJointHandle | `96b35d1` |
 | Phase 44c | 오디오 이펙트 — AudioEffect (low_pass_hz/pitch/attack_secs), set_effect/clear_effect | `7ea4763` |
+| Phase 45 | 시스템 실행 순서 — SystemLabel/before/after(위상정렬+순환감지), SystemSet on/off | `9f2273d` |
+| Phase 48 | 물리 레이어/센서 — CollisionGroups(비트마스크), 센서 trigger zone, TriggerEvent | `b352ecd` |
+| Phase 49 | 텍스트 완성 — 멀티라인/정렬(TextAlign), 리치텍스트, IME 조합 입력(preedit) | `d648371` |
+| Phase 50 | 로컬라이제이션 — LocaleResource, t API, TextDirection(RTL), LocaleBundle/Data | `9321cac` |
+| Phase 53 | 저장 보안 — chacha20poly1305 AEAD 암호화 + 변조 감지(SaveError::Corrupted) | `34aa368` |
+
+> Phase 45·48·49·50·53은 멀티 세션 병렬 진행(Track A: 45·49 / Track B: 48·50·53) 후 main에 머지.
+> **Milestone 1 잔여**: Phase 46(렌더 텍스처)·47(터치 입력) 미완.
 
 ---
 
@@ -147,7 +155,57 @@ src/
 
 ---
 
-## 이번 세션에서 한 일 (Phase 44)
+## 이번 세션에서 한 일 (Phase 45·48·49·50·53 — 멀티 세션 병렬)
+
+> ROADMAP "동시 진행 가이드"에 따라 5개 페이즈를 여러 세션에서 병렬 진행 후 main에 머지.
+> 충돌 병목인 `src/app.rs`를 건드리는 Track A(45·49)는 직렬, app.rs 무관 Track B(48·50·53)는 병렬.
+> 각 phase-* 브랜치 → `merge:` 커밋으로 main 통합. 테스트 166개 통과, native+WASM 빌드 통과.
+
+### Phase 45 — 시스템 실행 순서 명시 (Track A)
+
+**변경 파일**: `src/ecs/schedule.rs`(신규), `src/ecs/mod.rs`, `src/app.rs`, `src/lib.rs`
+
+- `SystemLabel`(= `&'static str`), `SystemConfig` 빌더(`.label/.before/.after/.in_set`), `SystemMeta`
+- `compute_order()` — Kahn 위상정렬, 삽입 순서 타이브레이커(결정적), 순환 시 `ScheduleError::Cycle`
+- `App::add_system_labeled(system, config)` — 순서 지정 등록 (기존 `add_system`은 불변)
+- `App::set_enabled(set, bool)` — SystemSet 그룹 일괄 on/off
+- `update()` 루프: dirty 시 `exec_order` 재계산 → 순회 + 비활성 set 스킵
+- 씬 Push/Pop/Replace 후 `reconcile_meta()`로 메타 동기화 (`Scene::on_enter` 시그니처 불변)
+
+### Phase 48 — 물리 레이어/마스크 + 센서 (Track B)
+
+**변경 파일**: `src/physics/world.rs`, `src/physics/events.rs`, `src/physics/system.rs`, `src/physics/mod.rs`, `src/lib.rs`
+
+- `CollisionGroups`(rapier `InteractionGroups` 래핑, 비트마스크) — 레이어별 선택적 충돌
+- 센서(trigger zone) — `sensor(true)` 콜라이더 + `intersection_pairs()` 폴링
+- `TriggerEvent`(Entered/Exited) — 사용자가 `register_event::<TriggerEvent>()` 필요
+
+### Phase 49 — 텍스트 완성 + IME (Track A)
+
+**변경 파일**: `src/renderer/text.rs`, `src/ui/text_input.rs`, `src/input/state.rs`, `src/app.rs`, `src/lib.rs`
+
+- 멀티라인 + 정렬(`TextAlign::Left/Center/Right`), 리치 텍스트
+- IME 조합 입력 — winit `WindowEvent::Ime` 처리, 조합 중 preedit 미리보기 렌더
+
+### Phase 50 — 로컬라이제이션 i18n (Track B)
+
+**변경 파일**: `src/locale.rs`(신규), `src/lib.rs`
+
+- `LocaleResource` — locale → key → 문자열, 전환 API, `t(key)` 조회 + fallback
+- `LocaleBundle`/`LocaleData`(RON 파싱), `TextDirection`(RTL 메타)
+- WASM 호환: 파일 읽기는 호출자 책임, API는 문자열/바이트 파싱만
+
+### Phase 53 — 저장 데이터 보안 (Track B)
+
+**변경 파일**: `src/save.rs`, `Cargo.toml`, `src/lib.rs`
+
+- `chacha20poly1305`(XChaCha20-Poly1305 AEAD)로 RON 평문 암호화
+- AEAD 인증 태그로 변조 감지 → `SaveError::Corrupted` (체크섬 별도 불필요)
+- 기존 save/load API 시그니처 하위 호환 유지 (내부만 암호화 교체)
+
+---
+
+## 이전 세션 (Phase 44)
 
 ### Phase 44b — 물리 조인트
 

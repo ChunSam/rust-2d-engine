@@ -131,7 +131,7 @@ impl EditorHistory {
                 }
                 *selected = Some(*entity);
             }
-            EditorCmd::CreateEntity { entity } => {
+            EditorCmd::CreateEntity { entity: _ } => {
                 // 엔티티가 이미 despawn 됐으므로 새로 스폰 (id가 달라짐 — 허용)
                 let e = world.spawn();
                 world.add_component(e, crate::components::Transform::default());
