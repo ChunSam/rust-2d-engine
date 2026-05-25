@@ -26,7 +26,8 @@
 18. [에셋 서버](#에셋-서버)
 19. [씬 직렬화 (SceneDef)](#씬-직렬화-scenedef)
 20. [저장/불러오기](#저장불러오기)
-21. [좌표 규약](#좌표-규약)
+21. [경로 탐색 (A*)](#경로-탐색-a)
+22. [좌표 규약](#좌표-규약)
 
 ---
 
@@ -152,6 +153,22 @@ for e in targets {
     }
 }
 ```
+
+### 쿼리 필터 (With / Without)
+
+```rust
+// Sprite가 있는 Transform만
+for (e, t) in world.query_with::<Transform, Sprite>() {
+    // t: &Transform
+}
+
+// Enemy 컴포넌트가 없는 Transform만
+for (e, t) in world.query_without::<Transform, Enemy>() {
+    // t: &Transform
+}
+```
+
+아키타입 레벨에서 `TypeId` 포함 여부를 판단하므로 per-entity 필터링보다 효율적이다.
 
 ### System 트레잇
 
@@ -1240,6 +1257,73 @@ if exists(&path) { delete(&path).unwrap(); }
 | `exists(path)` | 파일 존재 여부 확인 |
 | `delete(path)` | 파일 삭제. 파일 없으면 `Ok(())` |
 | `save_path(app, file)` | OS 데이터 디렉토리 아래 경로 반환 |
+
+---
+
+## 경로 탐색 (A*)
+
+`engine::pathfinding` 모듈은 격자 기반 A* 알고리즘을 제공한다.
+
+### PathGrid
+
+통행 가능 여부를 저장하는 격자. row-major `Vec<bool>` 배열.
+
+```rust
+use engine::{PathGrid, find_path};
+use glam::IVec2;
+
+// 20×15 격자 생성 (전부 통행 가능)
+let mut grid = PathGrid::new(20, 15);
+
+// 장애물 설정
+grid.set_walkable(5, 3, false);
+grid.set_walkable(5, 4, false);
+grid.set_walkable(5, 5, false);
+
+// 통행 가능 여부 확인 (범위 밖이면 false, 패닉 없음)
+let ok = grid.is_walkable(5, 3); // false
+```
+
+| 메서드 | 설명 |
+|---|---|
+| `PathGrid::new(w, h)` | 전부 통행 가능 상태로 초기화 |
+| `PathGrid::new_blocked(w, h)` | 전부 막힌 상태로 초기화 |
+| `set_walkable(x, y, bool)` | 특정 셀 통행 가능 여부 설정 |
+| `is_walkable(x, y)` | 통행 가능 여부 반환. 범위 밖 = `false` |
+
+### find_path
+
+```rust
+let path: Option<Vec<IVec2>> = find_path(&grid, IVec2::new(0, 0), IVec2::new(19, 14));
+
+match path {
+    Some(steps) => {
+        // steps: start 미포함, goal 포함
+        for cell in &steps {
+            println!("→ ({}, {})", cell.x, cell.y);
+        }
+    }
+    None => println!("경로 없음"),
+}
+```
+
+- 4방향 이동 (상하좌우). 대각선 없음.
+- `start == goal` → `Some(vec![goal])`
+- 목표 셀이 막혀 있으면 즉시 `None`
+- 반환 경로는 **start 미포함, goal 포함**
+
+### 타일맵과 연동 예
+
+```rust
+// Tilemap 크기에 맞춰 PathGrid 생성
+let grid = PathGrid::new(tilemap.width as i32, tilemap.height as i32);
+// ... 타일 종류에 따라 set_walkable 설정
+
+// 적 AI: 매 프레임 또는 경로 갱신 주기마다 호출
+if let Some(path) = find_path(&grid, enemy_tile, player_tile) {
+    // path[0]이 다음 이동 목표 셀
+}
+```
 
 ---
 

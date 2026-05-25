@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 33 갱신: 2026-05-25)  
-엔진 버전: v0.33.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 36 갱신: 2026-05-25)  
+엔진 버전: v0.36.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -215,6 +215,84 @@ cargo run --example mp_client   # 터미널 2, 3, ...
 - `sprite.rs render()` 반환 타입 `RenderStats`로 변경, culling/draw call 카운터 수집
 - Engine Stats 패널에 "Systems" / "Render" collapsible 섹션 추가, `resizable(true)`로 변경
 - `ProfilerData`, `RenderStats`, `SystemProfile` re-export (`lib.rs`)
+
+---
+
+### Phase 36 — 비헤이비어 트리
+
+**배경**: A* 경로탐색으로 이동 경로를 구할 수 있게 됐지만, 적 AI의 의사결정 구조(추적·공격·대기 전환)를 시스템 코드에 분산해야 했다. 비헤이비어 트리는 AI 로직을 계층적·재사용 가능한 노드 그래프로 선언할 수 있게 한다.
+
+**변경 파일**: `src/behavior.rs` (신규), `src/ecs/world.rs`, `src/lib.rs`
+
+**추가 기능**:
+
+*비헤이비어 트리 (src/behavior.rs)*
+- `BehaviorStatus { Running, Success, Failure }` — 노드 실행 결과
+- `BehaviorNode` 트레잇: `tick(&mut self, world, entity, dt)` + `reset()` (선택 구현)
+- `Sequence`: 자식 순서 실행, 첫 Failure에 즉시 중단 → Failure / 전부 성공 → Success
+- `Selector`: 자식 순서 실행, 첫 Success에 즉시 중단 → Success / 전부 실패 → Failure
+- `Inverter`: Success ↔ Failure 반전, Running 유지
+- `AlwaysSucceed`: 자식 결과 무시하고 항상 Success 반환
+- `BehaviorTree` 컴포넌트: 루트 `Box<dyn BehaviorNode>` 래퍼
+- `BehaviorSystem`: `take_component → tick → add_component` 패턴으로 이중 borrow 없이 실행
+- 테스트 8개
+
+*World::take_component (src/ecs/world.rs)*
+- 컴포넌트를 소유권째 꺼내 반환하는 새 API
+- placeholder(`Box<()>`) 교체 → `remove_component`로 아키타입 정리 → 이중 해제 없음
+
+```rust
+// 커스텀 노드 예
+struct ChasePlayer;
+impl BehaviorNode for ChasePlayer {
+    fn tick(&mut self, world: &mut World, entity: Entity, _dt: f32) -> BehaviorStatus {
+        // world에서 플레이어 위치를 읽어 entity를 이동
+        BehaviorStatus::Running
+    }
+}
+
+// 조합
+world.add_component(enemy, BehaviorTree::new(Box::new(Selector::new(vec![
+    Box::new(Sequence::new(vec![Box::new(CanSeePlayer), Box::new(ChasePlayer)])),
+    Box::new(Patrol),
+]))));
+app.add_system(BehaviorSystem);
+```
+
+---
+
+### Phase 35 — Inspector Undo/Redo
+
+**배경**: Inspector에서 엔티티를 잘못 이동·삭제해도 되돌릴 방법이 없어 에디터 워크플로가 불편했다.
+
+**변경 파일**: `src/app.rs` 만 수정.
+
+**추가 기능**:
+- `EditorCmd` enum: `MoveEntity { entity, old_pos, new_pos }` / `CreateEntity { entity }` / `DeleteEntity { tag, transform, sprite }`
+- `EditorHistory { undo: Vec, redo: Vec }`: `push` / `undo` / `redo` 메서드
+- **Gizmo 드래그 완료** 시 `MoveEntity` 기록 (위치 변화 없으면 기록 않음)
+- **New Entity 버튼** → `CreateEntity` 기록
+- **Delete 버튼** → 스냅샷(tag/transform/sprite) 캡처 후 `DeleteEntity` 기록
+- **Ctrl+Z** → undo, **Ctrl+Shift+Z** → redo (egui `ctx.input()` 기반)
+- 네이티브 전용 (`#[cfg(not(target_arch = "wasm32"))]`)
+
+---
+
+### Phase 34 — RenderLayer + 스프라이트 배칭
+
+**배경**: 수백 개의 동일 텍스처 스프라이트가 있어도, z 정렬 후 다른 텍스처와 교차되면 draw call이 하나씩 발생했다. 레이어 분리가 없어 배경·게임오브젝트·전경의 렌더 순서를 보장할 방법도 없었다.
+
+**변경 파일**: `src/components.rs`, `src/renderer/sprite.rs`, `src/lib.rs`
+
+**추가 기능**:
+- `RenderLayer(i32)` 컴포넌트 추가 (선택, 미지정 시 0)
+  - 낮은 값이 먼저(뒤에) 그려짐. 배경=-1, 게임플레이=0, 전경/이펙트=1 권장
+- 스프라이트 정렬 키: `z` 단독 → `(layer, tex_key, z)` 변경
+  - 같은 `(layer, tex_key)` 는 항상 연속 → 텍스처당 draw call 1회 보장
+  - 다른 layer 간 렌더 순서 항상 보장
+- `AtlasSprite`도 동일하게 `RenderLayer` 읽기 적용
+
+**트레이드오프**: 같은 layer 내 서로 다른 텍스처 간 z-ordering은 텍스처 키 사전순으로 결정된다. 정확한 교차 z-ordering이 필요하면 `RenderLayer`로 분리한다.
 
 ---
 
@@ -1306,6 +1384,9 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 31~~ | ~~에셋 브라우저 — ImageEntry, image_list(), Inspector Assets 탭~~ | — | 완료 |
 | ~~Phase 32~~ | ~~런타임 안정성 — AssetLoadState, SceneDef.version, Load Scene 버튼~~ | — | 완료 |
 | ~~Phase 33~~ | ~~A* 경로 탐색 (PathGrid/find_path) + ECS 쿼리 필터 (query_with/query_without)~~ | — | 완료 |
+| ~~Phase 34~~ | ~~RenderLayer 컴포넌트 + 스프라이트 배칭 (layer·tex·z 정렬)~~ | — | 완료 |
+| ~~Phase 35~~ | ~~Inspector Undo/Redo (Ctrl+Z/Shift+Z) — 이동·생성·삭제~~ | — | 완료 |
+| ~~Phase 36~~ | ~~비헤이비어 트리 — BehaviorTree/BehaviorSystem, Sequence/Selector/Inverter~~ | — | 완료 |
 
 ---
 
