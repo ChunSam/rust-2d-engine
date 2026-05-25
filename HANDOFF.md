@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 42 갱신: 2026-05-25)  
-엔진 버전: v0.42.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 42b/42d 갱신: 2026-05-25)  
+엔진 버전: v0.43.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -72,6 +72,8 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 41a | 2D 라이팅 — PointLight 컴포넌트, AmbientLight 리소스, LightingRenderer (WGSL, 최대 16 라이트) | `2230e31` |
 | Phase 41d | REFERENCE.md v0.41.0 — 2D 라이팅/ECS 변경 감지 섹션 추가 | — |
 | Phase 42a | 2D 노멀 맵 라이팅 — Sprite.normal_texture, PointLight.light_height, 노멀 버퍼, Lambert diffuse WGSL | `bdcd5c8` |
+| Phase 42b | 카메라 이펙트 — shake(strength,duration), follow_entity/lerp_factor, zoom_to(target,speed) | `b83ff6b` |
+| Phase 42d | 오브젝트 풀 — Pool::new/acquire/release/clear, Pooled 마커 컴포넌트 | `b83ff6b` |
 
 ---
 
@@ -136,6 +138,57 @@ src/
 │       └── post_process.wgsl                                      ← Phase 10
 └── save.rs           RON 세이브/불러오기 (save/load/load_or_default/exists/delete)
 ```
+
+---
+
+## 이번 세션에서 한 일 (Phase 42b + 42d)
+
+### Phase 42b — 카메라 이펙트
+
+**배경**: 카메라가 정적 위치/줌만 지원해 피격 효과(shake), 플레이어 추적(follow), 씬 전환 연출(zoom tween) 같은 게임 피드백을 구현할 방법이 없었다.
+
+**변경 파일**: `src/camera.rs`, `src/app.rs`
+
+**추가 기능**:
+
+*Camera 구조체 새 필드*
+- `shake_strength/shake_duration/shake_timer` — shake 상태
+- `follow_entity: Option<Entity>` — 추적 대상
+- `lerp_factor: f32` (기본 5.0) — 추적 lerp 강도 (초당)
+- `zoom_target/zoom_tween_speed` — zoom 트윈 상태
+
+*새 메서드*
+- `Camera::shake(strength, duration)` — 화면 흔들기 예약
+- `Camera::zoom_to(target_zoom, speed)` — 부드러운 줌 트윈
+- `Camera::shake_offset() -> Vec2` — 현재 shake 픽셀 오프셋 (sin/cos 두 주파수 합성)
+- `Camera::update(dt, follow_pos: Option<Vec2>)` — 이펙트 진행 (매 프레임 App 호출)
+
+*view_proj 수정*: `self.position + self.shake_offset()`으로 shake 자동 반영
+
+*App::update() 수정*: `follow_entity` 위치를 먼저 읽고 `camera.update(dt, follow_pos)` 호출 (borrow 충돌 방지)
+
+단위 테스트 6개 추가 (shake decay, zoom tween full/partial, follow lerp, no-follow noop, active shake offset)
+
+---
+
+### Phase 42d — 오브젝트 풀
+
+**배경**: 총알·파티클 같은 대량 생성/소멸 엔티티가 매 프레임 spawn/despawn을 반복하면 archetype 재할당 오버헤드가 발생한다. Pool로 엔티티를 재사용해 비용을 줄인다.
+
+**변경 파일**: `src/pool.rs` (신규), `src/lib.rs`
+
+**추가 기능**:
+
+*Pool 구조체*
+- `VecDeque<Entity>` 기반 FIFO 재사용 큐
+- `acquire(world, setup)` — 풀에서 꺼내거나 spawn. `Pooled` 마커 제거 후 setup 클로저 실행
+- `release(entity, world)` — `Pooled` 마커 추가 후 큐에 반납. capacity 초과 시 despawn
+- `clear(world)` — 풀 전체 비우기
+- 외부에서 despawn된 엔티티는 `is_alive` 체크로 자동 스킵 (멱등성 보장)
+
+*Pooled 마커 컴포넌트*: `query_without::<SomeComp, Pooled>()`로 비활성 엔티티 제외 가능
+
+단위 테스트 5개 (spawn, reacquire, overflow, clear, skip-dead)
 
 ---
 

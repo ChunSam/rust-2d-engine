@@ -1,6 +1,6 @@
 # rust-2d-engine 레퍼런스
 
-> 버전 v0.42.0 기준. wgpu 기반 2D 게임 엔진.
+> 버전 v0.43.0 기준. wgpu 기반 2D 게임 엔진.
 
 ---
 
@@ -39,7 +39,9 @@
 31. [2D 라이팅](#2d-라이팅)
 32. [ECS 변경 감지](#ecs-변경-감지)
 33. [2D 노멀 맵 라이팅](#2d-노멀-맵-라이팅)
-34. [좌표 규약](#좌표-규약)
+34. [카메라 이펙트](#카메라-이펙트)
+35. [오브젝트 풀](#오브젝트-풀)
+36. [좌표 규약](#좌표-규약)
 
 ---
 
@@ -1956,6 +1958,160 @@ impl System for SetupSystem {
             intensity: 3.0,
             light_height: 0.08,  // 낮게 — 노멀 맵 요철 강조
         });
+    }
+}
+```
+
+---
+
+## 카메라 이펙트
+
+`Camera` 리소스에 세 가지 이펙트가 내장된다. `App`이 매 프레임 자동으로 `camera.update(dt, follow_pos)`를 호출하므로 별도 시스템 등록 불필요.
+
+### Camera Shake
+
+```rust
+// 시스템 내부에서
+if let Some(cam) = world.resource_mut::<Camera>() {
+    cam.shake(15.0, 0.3); // strength=15px, duration=0.3초
+}
+```
+
+| 파라미터 | 타입 | 설명 |
+|---|---|---|
+| `strength` | `f32` | 최대 진폭 (픽셀) |
+| `duration` | `f32` | 지속 시간 (초) |
+
+shake offset은 `view_proj()` 내부에서 자동 적용된다. sin/cos 두 주파수 합성으로 자연스러운 흔들림 연출.
+
+### Smooth Follow
+
+```rust
+let cam = world.resource_mut::<Camera>().unwrap();
+cam.follow_entity = Some(player_entity);
+cam.lerp_factor = 6.0; // 초당 lerp 강도. 클수록 빠르게 추적
+```
+
+`App::update()`에서 `follow_entity`의 `Transform.position`을 읽어 `lerp_factor * dt`로 보간한다. 엔티티가 삭제되면 마지막 위치에 정지.
+
+| 필드 | 기본값 | 설명 |
+|---|---|---|
+| `follow_entity` | `None` | 추적할 엔티티 |
+| `lerp_factor` | `5.0` | 추적 속도. 1.0 이상이면 dt에 따라 snap에 가까워짐 |
+
+### Zoom Tween
+
+```rust
+// 2배로 0.5초 동안 줌인
+cam.zoom_to(2.0, 3.0); // target=2.0, speed=3.0 units/sec
+```
+
+`zoom`이 `zoom_target`에 도달하면 트윈이 자동 종료된다.
+
+| 파라미터 | 설명 |
+|---|---|
+| `target_zoom` | 목표 줌 배율 |
+| `speed` | 초당 zoom 변화량 (양수) |
+
+### 사용 예 — 플레이어 추적 + 충격 흔들기
+
+```rust
+// 초기화
+let cam = world.resource_mut::<Camera>().unwrap();
+cam.follow_entity = Some(player);
+cam.lerp_factor = 5.0;
+
+// 피격 이벤트 처리
+for ev in world.resource::<Events<HitEvent>>().unwrap().read() {
+    if let Some(cam) = world.resource_mut::<Camera>() {
+        cam.shake(20.0, 0.25);
+    }
+}
+
+// 보스 등장 시 줌인
+if boss_spawned {
+    if let Some(cam) = world.resource_mut::<Camera>() {
+        cam.zoom_to(1.5, 2.0);
+    }
+}
+```
+
+---
+
+## 오브젝트 풀
+
+총알·파티클처럼 자주 생성/소멸되는 엔티티를 재활용한다. 반납된 엔티티는 `Pooled` 마커 컴포넌트로 표시되며, `query_without::<Pooled>()` 로 시스템에서 제외할 수 있다.
+
+### Pool API
+
+```rust
+// 리소스로 등록 (최대 64개 재사용)
+world.insert_resource(Pool::new(64));
+
+// 획득 — 풀에 있으면 재사용, 없으면 새 스폰
+let pool = world.resource_mut::<Pool>().unwrap();
+let bullet = pool.acquire(&mut world, |w, e| {
+    w.add_component(e, Transform { position: spawn_pos, ..Default::default() });
+    w.add_component(e, Bullet { speed: 400.0 });
+    w.add_component(e, Sprite::colored(1.0, 1.0, 0.0));
+});
+
+// 반납 — 풀에 저장 (capacity 초과 시 despawn)
+pool.release(bullet, &mut world);
+```
+
+| 메서드 | 설명 |
+|---|---|
+| `Pool::new(capacity)` | 최대 capacity개 엔티티를 저장하는 풀 생성 |
+| `acquire(world, setup)` | 풀에서 엔티티 가져오기. 없으면 spawn. setup 클로저로 초기화 |
+| `release(entity, world)` | 엔티티 반납. `Pooled` 마커 추가. 풀 초과 시 despawn |
+| `available_count()` | 현재 대기 중인 엔티티 수 |
+| `capacity()` | 최대 풀 용량 |
+| `clear(world)` | 풀 전체 비우기 + despawn |
+
+### Pooled 마커
+
+반납된 엔티티에 자동 추가되는 마커 컴포넌트.
+
+```rust
+// 비활성 엔티티를 렌더/시스템에서 제외
+for (e, bullet) in world.query_without::<Bullet, Pooled>() {
+    // 활성화된 총알만 처리
+}
+```
+
+### 사용 예 — 총알 풀
+
+```rust
+struct BulletSystem;
+impl System for BulletSystem {
+    fn run(&mut self, world: &mut World, dt: f32) {
+        // 발사
+        if input.just_pressed(KeyCode::Space) {
+            if let Some(mut pool) = world.take_resource::<Pool>() {
+                let pos = player_transform.position;
+                pool.acquire(world, move |w, e| {
+                    w.add_component(e, Transform { position: pos, ..Default::default() });
+                    w.add_component(e, Bullet { velocity: Vec2::new(0.0, -400.0) });
+                });
+                world.insert_resource(pool);
+            }
+        }
+
+        // 화면 밖 총알 회수
+        let out_of_bounds: Vec<_> = world
+            .query_without::<Bullet, Pooled>()
+            .filter(|(_, b)| b.position.y < -100.0)
+            .map(|(e, _)| e)
+            .collect();
+        if !out_of_bounds.is_empty() {
+            if let Some(mut pool) = world.take_resource::<Pool>() {
+                for e in out_of_bounds {
+                    pool.release(e, world);
+                }
+                world.insert_resource(pool);
+            }
+        }
     }
 }
 ```
