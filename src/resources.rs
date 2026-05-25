@@ -353,3 +353,124 @@ impl ProfilerData {
         s.avg_us = s.avg_us * (1.0 - Self::ALPHA) + elapsed_us as f32 * Self::ALPHA;
     }
 }
+
+// ─── 씬 전환 페이드 이펙트 ──────────────────────────────────────────────────
+
+/// 씬 전환 페이드 이펙트 리소스.
+///
+/// `FadeState`를 설정하면 App이 자동으로 전체 화면에 색상 오버레이를 애니메이션한다.
+///
+/// # 사용 예
+/// ```rust,ignore
+/// // 검정으로 페이드 아웃 (0.5초)
+/// world.insert_resource(FadeTransition::fade_out(0.5));
+///
+/// // 현재 색에서 투명으로 페이드 인 (0.3초)
+/// world.insert_resource(FadeTransition::fade_in(0.3));
+/// ```
+#[derive(Debug, Clone)]
+pub struct FadeTransition {
+    /// 현재 알파값 (0.0 = 투명, 1.0 = 완전 불투명)
+    pub alpha: f32,
+    /// 목표 알파값
+    pub target_alpha: f32,
+    /// 초당 알파 변화량
+    pub speed: f32,
+    /// 오버레이 RGB 색상
+    pub color: [f32; 3],
+    /// 페이드 완료 여부 (App이 매 프레임 업데이트)
+    pub finished: bool,
+}
+
+impl FadeTransition {
+    /// 투명 → 불투명으로 페이드 아웃 (화면이 어두워짐)
+    pub fn fade_out(duration: f32) -> Self {
+        Self {
+            alpha: 0.0,
+            target_alpha: 1.0,
+            speed: 1.0 / duration.max(0.001),
+            color: [0.0, 0.0, 0.0],
+            finished: false,
+        }
+    }
+
+    /// 불투명 → 투명으로 페이드 인 (화면이 밝아짐)
+    pub fn fade_in(duration: f32) -> Self {
+        Self {
+            alpha: 1.0,
+            target_alpha: 0.0,
+            speed: 1.0 / duration.max(0.001),
+            color: [0.0, 0.0, 0.0],
+            finished: false,
+        }
+    }
+
+    /// 커스텀 색상으로 페이드
+    pub fn with_color(mut self, r: f32, g: f32, b: f32) -> Self {
+        self.color = [r, g, b];
+        self
+    }
+
+    /// 알파값을 dt 초 진행한다. App이 자동 호출.
+    pub fn update(&mut self, dt: f32) {
+        if self.finished {
+            return;
+        }
+        let diff = self.target_alpha - self.alpha;
+        let step = self.speed * dt;
+        if diff.abs() <= step {
+            self.alpha = self.target_alpha;
+            self.finished = true;
+        } else {
+            self.alpha += diff.signum() * step;
+        }
+    }
+}
+
+impl Default for FadeTransition {
+    fn default() -> Self {
+        Self {
+            alpha: 0.0,
+            target_alpha: 0.0,
+            speed: 1.0,
+            color: [0.0, 0.0, 0.0],
+            finished: true,
+        }
+    }
+}
+
+#[cfg(test)]
+mod fade_tests {
+    use super::*;
+
+    #[test]
+    fn fade_out_starts_at_zero() {
+        let f = FadeTransition::fade_out(1.0);
+        assert_eq!(f.alpha, 0.0);
+        assert_eq!(f.target_alpha, 1.0);
+        assert!(!f.finished);
+    }
+
+    #[test]
+    fn fade_update_reaches_target() {
+        let mut f = FadeTransition::fade_out(0.5); // speed = 2.0/sec
+        f.update(0.6); // > duration → should finish
+        assert_eq!(f.alpha, 1.0);
+        assert!(f.finished);
+    }
+
+    #[test]
+    fn fade_update_partial() {
+        let mut f = FadeTransition::fade_out(1.0); // speed = 1.0/sec
+        f.update(0.3);
+        assert!((f.alpha - 0.3).abs() < 1e-5);
+        assert!(!f.finished);
+    }
+
+    #[test]
+    fn fade_finished_does_not_update() {
+        let mut f = FadeTransition::default(); // finished = true
+        f.update(1.0);
+        assert_eq!(f.alpha, 0.0); // no change
+    }
+}

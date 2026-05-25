@@ -171,6 +171,9 @@ pub struct App {
     /// AmbientLight 리소스가 등록된 동안 활성화되는 라이팅 렌더러.
     #[cfg(not(target_arch = "wasm32"))]
     lighting_renderer: Option<crate::renderer::lighting::LightingRenderer>,
+    /// FadeTransition 리소스가 alpha > 0 일 때 마지막 패스로 실행되는 페이드 렌더러.
+    #[cfg(not(target_arch = "wasm32"))]
+    fade_renderer: Option<crate::renderer::fade::FadeRenderer>,
     /// 라이팅 패스가 씬을 먼저 그릴 중간 텍스처.
     #[cfg(not(target_arch = "wasm32"))]
     scene_texture_for_lighting: Option<(wgpu::Texture, wgpu::TextureView)>,
@@ -268,6 +271,7 @@ impl App {
             text_renderer: None,
             post_renderer: None,
             lighting_renderer: None,
+            fade_renderer: None,
             scene_texture_for_lighting: None,
             last_frame: None,
             pending_textures: Vec::new(),
@@ -1474,6 +1478,11 @@ impl App {
             self.apply_scene_cmd(cmd);
         }
 
+        // FadeTransition 알파 진행
+        if let Some(fade) = self.world.resource_mut::<crate::resources::FadeTransition>() {
+            fade.update(dt);
+        }
+
         // 핫 리로딩: 변경된 파일 목록을 받아 GPU 텍스처를 재업로드한다.
         let reloaded: Vec<String> = self
             .world
@@ -1762,7 +1771,27 @@ impl App {
             }
         }
 
-        // 씬+포스트프로세스+라이팅 완료 후 제출
+        // 5단계 (pre): 페이드 오버레이 패스 (다른 모든 패스 이후 최상위)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // 필요 시 lazy init
+            if self.fade_renderer.is_none() {
+                self.fade_renderer = Some(
+                    crate::renderer::fade::FadeRenderer::new(&gpu.device, gpu.config.format),
+                );
+            }
+            if let (Some(fr), Some(fade)) = (
+                &self.fade_renderer,
+                self.world.resource::<crate::resources::FadeTransition>(),
+            ) {
+                if fade.alpha > 0.001 {
+                    fr.update(&gpu.queue, fade.color, fade.alpha);
+                    fr.run_pass(&mut enc, &final_view);
+                }
+            }
+        }
+
+        // 씬+포스트프로세스+라이팅+페이드 완료 후 제출
         gpu.queue.submit(std::iter::once(enc.finish()));
 
         // 5단계: egui 오버레이 패스

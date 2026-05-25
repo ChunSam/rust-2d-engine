@@ -1,5 +1,7 @@
 pub mod context;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod fade;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod lighting;
 pub mod post_process;
 pub mod sprite;
