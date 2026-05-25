@@ -312,6 +312,38 @@ impl World {
             })
     }
 
+    /// A 를 가지면서 B 도 가진 엔티티만 순회한다.
+    pub fn query_with<A: 'static, B: 'static>(&self) -> impl Iterator<Item = (Entity, &A)> {
+        let ta = TypeId::of::<A>();
+        let tb = TypeId::of::<B>();
+        self.archetypes
+            .iter()
+            .filter(move |arch| arch.contains(ta) && arch.contains(tb))
+            .flat_map(move |arch| {
+                let col = arch.columns.get(&ta).unwrap();
+                arch.entities
+                    .iter()
+                    .zip(col.iter())
+                    .map(|(&e, c)| (e, c.downcast_ref::<A>().unwrap()))
+            })
+    }
+
+    /// A 를 가지면서 B 가 없는 엔티티만 순회한다.
+    pub fn query_without<A: 'static, B: 'static>(&self) -> impl Iterator<Item = (Entity, &A)> {
+        let ta = TypeId::of::<A>();
+        let tb = TypeId::of::<B>();
+        self.archetypes
+            .iter()
+            .filter(move |arch| arch.contains(ta) && !arch.contains(tb))
+            .flat_map(move |arch| {
+                let col = arch.columns.get(&ta).unwrap();
+                arch.entities
+                    .iter()
+                    .zip(col.iter())
+                    .map(|(&e, c)| (e, c.downcast_ref::<A>().unwrap()))
+            })
+    }
+
     /// A 를 가진 모든 엔티티를 순회한다. B 는 있으면 Some, 없으면 None.
     pub fn query_opt2<A: 'static, B: 'static>(
         &self,
@@ -781,6 +813,92 @@ mod tests {
         let results: Vec<_> = world.query3::<Position, Health, Velocity>().collect();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, eabc);
+    }
+
+    #[test]
+    fn query_with_returns_only_entities_with_both() {
+        let mut world = World::new();
+
+        let e_pos_only = world.spawn();
+        world.add_component(e_pos_only, Position { x: 0.0, y: 0.0 });
+
+        let e_health_only = world.spawn();
+        world.add_component(e_health_only, Health(10));
+
+        let e_both = world.spawn();
+        world.add_component(e_both, Position { x: 1.0, y: 1.0 });
+        world.add_component(e_both, Health(50));
+
+        let results: Vec<_> = world.query_with::<Position, Health>().collect();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, e_both);
+        assert_eq!(results[0].1.x, 1.0);
+    }
+
+    #[test]
+    fn query_without_returns_only_entities_lacking_filter() {
+        let mut world = World::new();
+
+        let e_pos_only = world.spawn();
+        world.add_component(e_pos_only, Position { x: 5.0, y: 0.0 });
+
+        let e_both = world.spawn();
+        world.add_component(e_both, Position { x: 2.0, y: 0.0 });
+        world.add_component(e_both, Health(30));
+
+        let results: Vec<_> = world.query_without::<Position, Health>().collect();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, e_pos_only);
+        assert_eq!(results[0].1.x, 5.0);
+    }
+
+    #[test]
+    fn query_with_and_without_mixed_entities() {
+        let mut world = World::new();
+
+        // has Position + Health + Velocity
+        let e_all = world.spawn();
+        world.add_component(e_all, Position { x: 1.0, y: 0.0 });
+        world.add_component(e_all, Health(100));
+        world.add_component(e_all, Velocity { vx: 1.0, vy: 0.0 });
+
+        // has Position + Health (no Velocity)
+        let e_ph = world.spawn();
+        world.add_component(e_ph, Position { x: 2.0, y: 0.0 });
+        world.add_component(e_ph, Health(50));
+
+        // has Position only
+        let e_p = world.spawn();
+        world.add_component(e_p, Position { x: 3.0, y: 0.0 });
+
+        // has Health only
+        let e_h = world.spawn();
+        world.add_component(e_h, Health(10));
+
+        // query_with::<Position, Health> → e_all, e_ph
+        let with_results: Vec<Entity> = world
+            .query_with::<Position, Health>()
+            .map(|(e, _)| e)
+            .collect();
+        assert_eq!(with_results.len(), 2);
+        assert!(with_results.contains(&e_all));
+        assert!(with_results.contains(&e_ph));
+
+        // query_without::<Position, Health> → e_p
+        let without_results: Vec<Entity> = world
+            .query_without::<Position, Health>()
+            .map(|(e, _)| e)
+            .collect();
+        assert_eq!(without_results.len(), 1);
+        assert_eq!(without_results[0], e_p);
+
+        // query_with::<Position, Velocity> → e_all only
+        let with_vel: Vec<Entity> = world
+            .query_with::<Position, Velocity>()
+            .map(|(e, _)| e)
+            .collect();
+        assert_eq!(with_vel.len(), 1);
+        assert_eq!(with_vel[0], e_all);
     }
 
     #[test]

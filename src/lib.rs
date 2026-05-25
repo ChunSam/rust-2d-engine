@@ -12,6 +12,7 @@ pub mod ecs;
 pub mod hierarchy;
 pub mod input;
 pub mod particle;
+pub mod pathfinding;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod physics;
 pub mod prefab;
@@ -51,6 +52,7 @@ pub use ecs::{Entity, Events, System, World};
 pub use hierarchy::{attach, detach, Children, GlobalTransform, HierarchySystem, Parent};
 pub use input::{GamepadAxis, GamepadButton, GamepadState, InputMap, InputState};
 pub use particle::{Particle, ParticleEmitter, ParticleSystem};
+pub use pathfinding::{find_path, PathGrid};
 #[cfg(not(target_arch = "wasm32"))]
 pub use physics::{
     CharacterController, CollisionEvent, PhysicsBody, PhysicsSystem, PhysicsWorld, RaycastHit,
