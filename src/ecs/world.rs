@@ -74,6 +74,8 @@ pub struct World {
     reflect_registry: HashMap<TypeId, ReflectEntry>,
     added_this_tick: HashSet<(Entity, TypeId)>,
     changed_this_tick: HashSet<(Entity, TypeId)>,
+    /// clone_entity에서 컴포넌트를 복제할 때 사용하는 함수 레지스트리.
+    clone_registry: HashMap<TypeId, Box<dyn Fn(&mut World, Entity, Entity) + Send + Sync>>,
 }
 
 impl World {
@@ -92,6 +94,7 @@ impl World {
             reflect_registry: HashMap::new(),
             added_this_tick: HashSet::new(),
             changed_this_tick: HashSet::new(),
+            clone_registry: HashMap::new(),
         }
     }
 
@@ -563,6 +566,68 @@ impl World {
         entities
             .into_iter()
             .filter_map(move |e| self.get::<T>(e).map(|c| (e, c)))
+    }
+
+    // ── 엔티티 복제 ───────────────────────────────────────────────────────────
+
+    /// 컴포넌트 T를 `clone_entity`에서 복제할 수 있도록 등록한다.
+    ///
+    /// T는 Clone + Send + Sync + 'static 이어야 한다.
+    /// 등록되지 않은 컴포넌트는 `clone_entity` 시 복사되지 않는다.
+    pub fn register_clone<T: Clone + Send + Sync + 'static>(&mut self) {
+        self.clone_registry.insert(
+            TypeId::of::<T>(),
+            Box::new(|world, src, dst| {
+                if let Some(comp) = world.get::<T>(src) {
+                    let cloned = comp.clone();
+                    world.add_component(dst, cloned);
+                }
+            }),
+        );
+    }
+
+    /// 엔티티를 복제한다. `register_clone`에 등록된 컴포넌트만 복사된다.
+    ///
+    /// `src`가 alive하지 않으면 빈 엔티티를 반환한다.
+    /// 반환값: 새로 생성된 엔티티.
+    pub fn clone_entity(&mut self, src: Entity) -> Entity {
+        if !self.is_alive(src) {
+            return self.spawn();
+        }
+
+        // 1. clone_registry에 등록된 TypeId 중 src 엔티티가 보유한 것만 수집
+        let tids: Vec<TypeId> = self
+            .clone_registry
+            .keys()
+            .filter(|&&tid| self.has_component_typeid(src, tid))
+            .copied()
+            .collect();
+
+        // 2. 새 엔티티 생성
+        let dst = self.spawn();
+
+        // 3. remove → call → reinsert 패턴으로 borrow 충돌 없이 복제
+        for tid in tids {
+            self.clone_component_by_typeid(src, dst, tid);
+        }
+
+        dst
+    }
+
+    /// entity가 주어진 TypeId의 컴포넌트를 보유하고 있는지 확인한다.
+    pub(crate) fn has_component_typeid(&self, entity: Entity, tid: TypeId) -> bool {
+        match self.entity_location.get(&entity) {
+            Some(&(arch_id, _)) => self.archetypes[arch_id].contains(tid),
+            None => false,
+        }
+    }
+
+    /// remove → clone_fn 호출 → reinsert 패턴으로 단일 TypeId 컴포넌트를 복제한다.
+    fn clone_component_by_typeid(&mut self, src: Entity, dst: Entity, tid: TypeId) {
+        if let Some(clone_fn) = self.clone_registry.remove(&tid) {
+            clone_fn(self, src, dst);
+            self.clone_registry.insert(tid, clone_fn);
+        }
     }
 
     // ── 내부 헬퍼 ─────────────────────────────────────────────────────────────
@@ -1092,5 +1157,53 @@ mod tests {
         assert_eq!(world.query_added::<u32>().count(), 1);
         world.remove_component::<u32>(e);
         assert_eq!(world.query_added::<u32>().count(), 0);
+    }
+
+    #[test]
+    fn clone_entity_copies_components() {
+        let mut world = World::new();
+        world.register_clone::<u32>();
+        world.register_clone::<f32>();
+
+        let src = world.spawn();
+        world.add_component(src, 42u32);
+        world.add_component(src, 3.14f32);
+
+        let dst = world.clone_entity(src);
+        assert_ne!(src, dst);
+        assert_eq!(*world.get::<u32>(dst).unwrap(), 42);
+        assert!((world.get::<f32>(dst).unwrap() - 3.14).abs() < 1e-5);
+        // src still intact
+        assert_eq!(*world.get::<u32>(src).unwrap(), 42);
+    }
+
+    #[test]
+    fn clone_entity_skips_unregistered_types() {
+        #[derive(Debug)]
+        struct NotCloneable(u32);
+        unsafe impl Send for NotCloneable {}
+        unsafe impl Sync for NotCloneable {}
+
+        let mut world = World::new();
+        world.register_clone::<u32>();
+
+        let src = world.spawn();
+        world.add_component(src, 99u32);
+        world.add_component(src, NotCloneable(7));
+
+        let dst = world.clone_entity(src);
+        assert_eq!(*world.get::<u32>(dst).unwrap(), 99);
+        assert!(world.get::<NotCloneable>(dst).is_none()); // not copied
+    }
+
+    #[test]
+    fn clone_entity_dead_src_returns_empty() {
+        let mut world = World::new();
+        let src = world.spawn();
+        world.despawn(src);
+
+        let dst = world.clone_entity(src);
+        assert!(world.is_alive(dst));
+        assert_eq!(world.entity_count(), 1); // only dst
     }
 }

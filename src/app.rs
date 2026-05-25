@@ -37,8 +37,8 @@ use crate::{
         TextRenderer, UiQueue,
     },
     resources::{
-        DebugDrawQueue, DebugRect, DisplayScaleFactor, FontData, GameState, PendingResize,
-        ShouldQuit, ViewportSize, WindowConfig,
+        DebugDraw, DebugDrawQueue, DebugRect, DisplayScaleFactor, FontData, GameState,
+        PendingResize, ShouldQuit, ViewportSize, WindowConfig,
     },
     scene::{Scene, SceneChange, SceneCmd},
 };
@@ -240,6 +240,7 @@ impl App {
         world.insert_resource(TextQueue::default());
         world.insert_resource(UiQueue::default());
         world.insert_resource(DebugDrawQueue::default());
+        world.insert_resource(DebugDraw::new());
         world.insert_resource(crate::resources::SelectedEntity::default());
         world.insert_resource(crate::resources::ProfilerData::default());
         world.insert_resource(SceneChange::default());
@@ -248,6 +249,13 @@ impl App {
         world.register_reflect_named::<crate::components::Transform>("Transform");
         world.register_reflect_named::<crate::components::Sprite>("Sprite");
         world.register_reflect_named::<crate::prefab::Tag>("Tag");
+        // 엔진 내장 컴포넌트를 clone_entity 복제 레지스트리에 등록
+        world.register_clone::<crate::components::Transform>();
+        world.register_clone::<crate::components::Sprite>();
+        world.register_clone::<crate::components::RenderLayer>();
+        world.register_clone::<crate::prefab::Tag>();
+        world.register_clone::<crate::animation::player::AnimationPlayer>();
+        world.register_clone::<crate::timer::Timer>();
 
         #[cfg(not(target_arch = "wasm32"))]
         let mut app = Self {
@@ -441,6 +449,7 @@ impl App {
         self.world.insert_resource(TextQueue::default());
         self.world.insert_resource(UiQueue::default());
         self.world.insert_resource(DebugDrawQueue::default());
+        self.world.insert_resource(DebugDraw::new());
         self.world.insert_resource(crate::resources::SelectedEntity::default());
         self.world.insert_resource(crate::resources::ProfilerData::default());
         self.world.insert_resource(SceneChange::default());
@@ -456,6 +465,13 @@ impl App {
             .register_reflect_named::<crate::components::Transform>("Transform");
         self.world.register_reflect_named::<crate::components::Sprite>("Sprite");
         self.world.register_reflect_named::<crate::prefab::Tag>("Tag");
+        // clone_entity 복제 레지스트리 재등록
+        self.world.register_clone::<crate::components::Transform>();
+        self.world.register_clone::<crate::components::Sprite>();
+        self.world.register_clone::<crate::components::RenderLayer>();
+        self.world.register_clone::<crate::prefab::Tag>();
+        self.world.register_clone::<crate::animation::player::AnimationPlayer>();
+        self.world.register_clone::<crate::timer::Timer>();
         self.inspector_selected = None;
         self.editor_save_status = None;
     }
@@ -465,6 +481,64 @@ impl App {
     /// 현재 씬 스택을 전부 종료하고 월드를 리셋한 뒤 `scene`을 진입시킨다.
     pub fn set_scene(&mut self, scene: Box<dyn Scene>) {
         self.apply_scene_cmd(SceneCmd::Replace(scene));
+    }
+
+    // ── DebugDraw 도형 → DrawRect 변환 ──────────────────────────────────────
+
+    /// `DebugShape`를 `UiQueue`에 `DrawRect` 목록으로 변환한다.
+    fn debug_shape_to_draw_rects(shape: crate::resources::DebugShape, q: &mut UiQueue) {
+        use crate::resources::DebugShape;
+        const Z: f32 = 999.0;
+
+        // 선분 근사 헬퍼: 두 점 사이를 thickness×thickness 점들로 채운다.
+        let mut push_line = |start: glam::Vec2, end: glam::Vec2, color: [f32; 4], thickness: f32| {
+            let delta = end - start;
+            let len = delta.length();
+            if len < 0.001 {
+                return;
+            }
+            let steps = (len / thickness.max(0.5)).ceil() as usize;
+            let half = thickness / 2.0;
+            for i in 0..=steps {
+                let t = i as f32 / steps.max(1) as f32;
+                let pos = start + delta * t;
+                q.push(DrawRect::new(pos.x - half, pos.y - half, thickness, thickness, color).with_z(Z));
+            }
+        };
+
+        match shape {
+            DebugShape::Rect { min, max, color } => {
+                let t = 1.5_f32;
+                let w = max.x - min.x;
+                let h = max.y - min.y;
+                // 위
+                q.push(DrawRect::new(min.x, min.y, w, t, color).with_z(Z));
+                // 아래
+                q.push(DrawRect::new(min.x, max.y - t, w, t, color).with_z(Z));
+                // 왼쪽
+                q.push(DrawRect::new(min.x, min.y, t, h, color).with_z(Z));
+                // 오른쪽
+                q.push(DrawRect::new(max.x - t, min.y, t, h, color).with_z(Z));
+            }
+            DebugShape::Line { start, end, color, thickness } => {
+                push_line(start, end, color, thickness);
+            }
+            DebugShape::Circle { center, radius, color } => {
+                let n = 24u32;
+                for i in 0..n {
+                    let a0 = (i as f32 / n as f32) * std::f32::consts::TAU;
+                    let a1 = ((i + 1) as f32 / n as f32) * std::f32::consts::TAU;
+                    let p0 = center + glam::Vec2::new(a0.cos(), a0.sin()) * radius;
+                    let p1 = center + glam::Vec2::new(a1.cos(), a1.sin()) * radius;
+                    push_line(p0, p1, color, 1.5);
+                }
+            }
+            DebugShape::Cross { pos, size, color } => {
+                let half = size / 2.0;
+                push_line(pos - glam::Vec2::X * half, pos + glam::Vec2::X * half, color, 1.5);
+                push_line(pos - glam::Vec2::Y * half, pos + glam::Vec2::Y * half, color, 1.5);
+            }
+        }
     }
 
     // ── 씬 전환 처리 ─────────────────────────────────────────────────────────
@@ -918,6 +992,16 @@ impl App {
                                     }
                                     self.world.despawn(sel);
                                     self.inspector_selected = None;
+                                }
+                                if ui
+                                    .add_enabled(true, egui::Button::new("⎘ Duplicate"))
+                                    .clicked()
+                                {
+                                    let new_entity = self.world.clone_entity(sel);
+                                    if let Some(t) = self.world.get_mut::<crate::components::Transform>(new_entity) {
+                                        t.position += glam::Vec2::new(16.0, 16.0);
+                                    }
+                                    self.inspector_selected = Some(new_entity);
                                 }
                             }
                         });
@@ -1585,6 +1669,20 @@ impl App {
             .unwrap_or_default();
         if let Some(q) = self.world.resource_mut::<UiQueue>() {
             q.items.extend(debug_rects);
+        }
+
+        // 2.6단계: DebugDraw 도형 → UiQueue 변환 (Rect/Line/Circle/Cross)
+        let debug_shapes: Vec<crate::resources::DebugShape> = self
+            .world
+            .resource_mut::<DebugDraw>()
+            .map(|d| std::mem::take(&mut d.shapes))
+            .unwrap_or_default();
+        if !debug_shapes.is_empty() {
+            if let Some(q) = self.world.resource_mut::<UiQueue>() {
+                for shape in debug_shapes {
+                    Self::debug_shape_to_draw_rects(shape, q);
+                }
+            }
         }
 
         let ui_rects: Vec<DrawRect> = self
