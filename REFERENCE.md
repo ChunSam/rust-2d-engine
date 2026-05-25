@@ -1,6 +1,6 @@
 # rust-2d-engine 레퍼런스
 
-> 버전 v0.32.0 기준. wgpu 기반 2D 게임 엔진.
+> 버전 v0.36.0 기준. wgpu 기반 2D 게임 엔진.
 
 ---
 
@@ -27,7 +27,10 @@
 19. [씬 직렬화 (SceneDef)](#씬-직렬화-scenedef)
 20. [저장/불러오기](#저장불러오기)
 21. [경로 탐색 (A*)](#경로-탐색-a)
-22. [좌표 규약](#좌표-규약)
+22. [렌더 레이어](#렌더-레이어)
+23. [비헤이비어 트리](#비헤이비어-트리)
+24. [Inspector Undo/Redo](#inspector-undoredo)
+25. [좌표 규약](#좌표-규약)
 
 ---
 
@@ -1324,6 +1327,129 @@ if let Some(path) = find_path(&grid, enemy_tile, player_tile) {
     // path[0]이 다음 이동 목표 셀
 }
 ```
+
+---
+
+## 렌더 레이어
+
+`RenderLayer(i32)` 컴포넌트로 스프라이트의 렌더링 순서를 명시적으로 제어한다.
+
+```rust
+use engine::RenderLayer;
+
+// 낮은 값 = 먼저 렌더 (배경)
+world.add_component(bg_entity, RenderLayer(-10));
+
+// 기본값 = 0
+world.add_component(player_entity, RenderLayer(0));
+
+// 높은 값 = 나중에 렌더 (전경 UI 효과 등)
+world.add_component(fx_entity, RenderLayer(10));
+```
+
+### 배칭 동작
+
+렌더러는 스프라이트를 `(layer, texture_key, z)` 순서로 정렬한 뒤 같은 텍스처가 연속되면 한 번의 드로우 콜로 묶는다.
+
+| 정렬 키 | 의미 |
+|---|---|
+| `layer` (i32) | `RenderLayer` 값. 없으면 0 |
+| `texture_key` (String) | 텍스처 경로. 같은 레이어 내 텍스처 변경 최소화 |
+| `z` (f32) | `Transform.z`. 같은 레이어·텍스처 내 미세 순서 |
+
+> **주의**: 같은 레이어에서 서로 다른 텍스처를 사용하는 스프라이트 간 z-정렬은 보장되지 않는다. 엄격한 순서가 필요하면 `RenderLayer`로 레이어를 분리하라.
+
+---
+
+## 비헤이비어 트리
+
+`engine::behavior` 모듈은 AI 행동 트리를 ECS 컴포넌트로 제공한다.
+
+### BehaviorNode 트레잇
+
+커스텀 행동을 구현할 때 이 트레잇을 구현한다.
+
+```rust
+use engine::behavior::{BehaviorNode, BehaviorStatus};
+use engine::ecs::{World, Entity};
+
+struct ChasePlayer {
+    speed: f32,
+}
+
+impl BehaviorNode for ChasePlayer {
+    fn tick(&mut self, world: &mut World, entity: Entity, dt: f32) -> BehaviorStatus {
+        // world에서 플레이어 위치, 자신의 Transform 읽기 가능
+        BehaviorStatus::Running
+    }
+}
+```
+
+### 내장 복합 노드
+
+| 타입 | 동작 |
+|---|---|
+| `Sequence` | 자식을 순서대로 실행. 첫 `Failure`에 즉시 중단 |
+| `Selector` | 자식을 순서대로 실행. 첫 `Success`에 즉시 중단 |
+| `Inverter` | 자식 결과를 반전 (`Success↔Failure`, `Running` 유지) |
+| `AlwaysSucceed` | 자식 결과와 무관하게 항상 `Success` 반환 |
+
+### BehaviorTree 컴포넌트
+
+```rust
+use engine::behavior::{BehaviorTree, BehaviorNode, BehaviorStatus, Sequence, Selector, Inverter};
+
+// 트리 구성
+let tree = BehaviorTree::new(Box::new(Sequence::new(vec![
+    Box::new(CheckPlayerInRange { range: 200.0 }),
+    Box::new(Selector::new(vec![
+        Box::new(AttackPlayer),
+        Box::new(Inverter::new(Box::new(FleePlayer))),
+    ])),
+])));
+
+// 엔티티에 부착
+world.add_component(enemy, tree);
+```
+
+### BehaviorSystem 등록
+
+```rust
+use engine::behavior::BehaviorSystem;
+
+app.add_system(BehaviorSystem);
+```
+
+매 프레임 `BehaviorTree`를 가진 모든 엔티티를 자동으로 tick한다. `BehaviorNode::tick`에서 `world`에 자유롭게 접근할 수 있다 (`take_component` 패턴으로 이중 borrow 없이 처리).
+
+### BehaviorStatus
+
+| 값 | 의미 |
+|---|---|
+| `Running` | 아직 실행 중. 다음 프레임에도 같은 노드 계속 tick |
+| `Success` | 성공 완료 |
+| `Failure` | 실패 |
+
+---
+
+## Inspector Undo/Redo
+
+에디터 Inspector (네이티브 전용)에서 Ctrl+Z / Ctrl+Shift+Z로 변경을 되돌릴 수 있다.
+
+지원되는 조작:
+
+| 조작 | 단축키 |
+|---|---|
+| 되돌리기 | Ctrl+Z |
+| 다시 실행 | Ctrl+Shift+Z |
+
+자동으로 히스토리에 기록되는 편집:
+
+- 엔티티 생성 (New Entity 버튼)
+- 엔티티 삭제 (Delete 버튼)
+- Gizmo 드래그로 엔티티 이동
+
+> WASM 빌드에서는 사용 불가 (`#[cfg(not(target_arch = "wasm32"))]`로 컴파일 제외).
 
 ---
 
