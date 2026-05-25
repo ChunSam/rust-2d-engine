@@ -1,6 +1,6 @@
 # rust-2d-engine 레퍼런스
 
-> 버전 v0.6.0 기준. wgpu 기반 2D 게임 엔진.
+> 버전 v0.32.0 기준. wgpu 기반 2D 게임 엔진.
 
 ---
 
@@ -23,8 +23,10 @@
 15. [카메라](#카메라)
 16. [이벤트 시스템](#이벤트-시스템)
 17. [UI 위젯](#ui-위젯)
-18. [저장/불러오기](#저장불러오기)
-19. [좌표 규약](#좌표-규약)
+18. [에셋 서버](#에셋-서버)
+19. [씬 직렬화 (SceneDef)](#씬-직렬화-scenedef)
+20. [저장/불러오기](#저장불러오기)
+21. [좌표 규약](#좌표-규약)
 
 ---
 
@@ -1052,24 +1054,192 @@ if let Some(lbl_comp) = world.get_mut::<Label>(lbl) {
 
 ---
 
-## 저장/불러오기
+## 에셋 서버
 
-`save` 모듈은 JSON 기반 세이브 파일을 제공한다.
+`AssetServer` 리소스가 이미지·스크립트·아틀라스를 로드·캐싱·핫리로딩한다.  
+`App::new()`가 자동으로 삽입하므로 직접 생성할 필요 없다.
+
+### 이미지 로드
 
 ```rust
-use engine::save::SaveData;
+// App 레벨 (run() 전)
+let handle: Handle<ImageAsset> = app.load_image("assets/player.png");
+
+// 시스템 내부
+let assets = world.resource_mut::<AssetServer>().unwrap();
+let handle = assets.load_image("assets/enemy.png");
+
+// Sprite에 적용
+world.add_component(e, Sprite { texture: Some(handle.path().into()), ..Default::default() });
+```
+
+같은 경로를 다시 호출하면 캐시된 핸들을 반환한다 (파일 I/O 없음).
+
+### 로드 상태 확인 (Phase 32)
+
+파일이 없거나 디코딩에 실패하면 마젠타(1×1) 폴백 텍스처로 대체된다.  
+`load_state()`로 성공/실패 여부와 실패 원인을 확인할 수 있다.
+
+```rust
+use engine::AssetLoadState;
+
+let assets = world.resource::<AssetServer>().unwrap();
+match assets.load_state(&handle) {
+    AssetLoadState::Loaded => { /* 정상 */ }
+    AssetLoadState::Failed(reason) => {
+        eprintln!("텍스처 로드 실패: {reason}");
+    }
+}
+
+// 실패한 핸들 ID 목록 (디버그용)
+let failed: Vec<AssetId> = assets.failed_images();
+```
+
+핫 리로딩 후에도 상태가 갱신된다.
+
+### 에셋 목록 조회
+
+```rust
+// 현재 로드된 이미지 목록 (에셋 브라우저용)
+let list: Vec<ImageEntry> = assets.image_list();
+for entry in &list {
+    println!("{} — {}×{}", entry.path, entry.width, entry.height);
+}
+
+// id로 직접 조회
+let img: Option<&ImageAsset> = assets.get_image_by_id(entry.id);
+```
+
+| 메서드 | 반환 | 설명 |
+|---|---|---|
+| `load_image(path)` | `Handle<ImageAsset>` | 로드 또는 캐시 반환 |
+| `load_state(&handle)` | `AssetLoadState` | `Loaded` / `Failed(String)` |
+| `failed_images()` | `Vec<AssetId>` | 실패한 이미지 id 목록 |
+| `get_image(&handle)` | `Option<&ImageAsset>` | CPU 픽셀 데이터 |
+| `image_list()` | `Vec<ImageEntry>` | 로드된 이미지 전체 목록 |
+| `image_count()` | `usize` | 캐시된 이미지 수 |
+| `load_script(path)` | `Handle<ScriptAsset>` | Rhai 스크립트 로드 |
+| `load_atlas(path, cols, rows)` | `Handle<TextureAtlas>` | 텍스처 아틀라스 로드 |
+| `poll_reloads()` | `Vec<String>` | 변경된 파일 경로 목록 (App이 매 프레임 호출) |
+
+---
+
+## 씬 직렬화 (SceneDef)
+
+`SceneDef`는 레벨 전체를 RON 파일로 저장·복원하는 구조체다.
+
+### 기본 사용
+
+```rust
+use engine::{SceneDef, EntityDef, spawn_scene_def, Transform, Sprite, Tag};
+use std::path::Path;
+
+// 씬 구성
+let scene = SceneDef {
+    entities: vec![
+        EntityDef {
+            tag: Some("ground".into()),
+            transform: Some(Transform::new(Vec2::ZERO, Vec2::new(800.0, 32.0), 0.0)),
+            sprite: Some(Sprite::colored(0.3, 0.6, 0.3)),
+            parent: None,
+        },
+    ],
+    ..SceneDef::default()
+};
+
+// 저장 (version 필드 자동 기록)
+scene.save(Path::new("levels/level1.ron")).unwrap();
+
+// 로드
+let loaded = SceneDef::load(Path::new("levels/level1.ron")).unwrap();
+let entities = spawn_scene_def(&mut world, &loaded);
+```
+
+### 스키마 버전 관리 (Phase 32)
+
+`SceneDef`에 `version: u32` 필드가 있다. `save()`는 항상 현재 버전(`SCENE_DEF_VERSION = 1`)으로 저장한다.  
+구 파일(version 필드 없음)을 로드하면 `version = 0`으로 역직렬화되며, 버전이 다를 경우 `log::warn`을 출력하고 로드를 계속한다.
+
+```ron
+// Phase 32 이후 저장된 파일 형식
+SceneDef(
+    version: 1,
+    entities: [
+        EntityDef(
+            tag: Some("player"),
+            transform: Some(Transform( ... )),
+            sprite: None,
+            parent: None,
+        ),
+    ],
+)
+```
+
+```rust
+// 버전 상수
+use engine::SCENE_DEF_VERSION;  // 현재 = 1
+```
+
+### 계층 구조 (parent 필드)
+
+```rust
+EntityDef {
+    tag: Some("child".into()),
+    parent: Some("parent_tag".into()),  // 부모 엔티티의 tag 문자열
+    ..Default::default()
+}
+```
+
+`spawn_scene_def`는 2패스로 스폰한다: 1패스에서 모든 엔티티를 만들고, 2패스에서 parent 링크를 연결한다.
+
+### Inspector에서 사용
+
+에디터(F1) Inspector의 Entities 탭 하단:
+- `Path:` 입력 필드에 경로 지정
+- `📂 Load Scene` — RON을 읽어 현재 월드의 Transform 엔티티를 교체
+- `💾 Save Scene` — 현재 월드를 RON으로 직렬화
+
+---
+
+## 저장/불러오기
+
+`engine::save` 모듈은 RON 기반 세이브 파일을 제공한다.  
+`serde::Serialize + serde::Deserialize`를 구현한 임의의 타입을 저장·복원할 수 있다.
+
+```rust
+use engine::save::{save, load, load_or_default, exists, delete, save_path};
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize, Default)]
+struct GameProgress {
+    level: u32,
+    score: u64,
+}
+
+// OS 표준 데이터 디렉토리 아래 경로 생성
+let path = save_path("my_game", "progress.ron");
 
 // 저장
-let data = SaveData {
-    level: 3,
-    score: 15000,
-    // serde::Serialize/Deserialize 구현 필요
-};
-data.save("save.json").unwrap();
+save(&path, &GameProgress { level: 3, score: 15000 }).unwrap();
 
 // 불러오기
-let data: SaveData = SaveData::load("save.json").unwrap();
+let progress: GameProgress = load(&path).unwrap();
+
+// 파일 없으면 Default 반환
+let progress: GameProgress = load_or_default(&path).unwrap();
+
+// 존재 확인 / 삭제
+if exists(&path) { delete(&path).unwrap(); }
 ```
+
+| 함수 | 설명 |
+|---|---|
+| `save(path, &T)` | RON 직렬화 후 파일 저장. 부모 디렉토리 자동 생성 |
+| `load(path)` | RON 파일 읽어 역직렬화. 파일 없으면 `SaveError::Io(NotFound)` |
+| `load_or_default(path)` | 파일 없으면 `T::default()` 반환. 파싱 오류는 전파 |
+| `exists(path)` | 파일 존재 여부 확인 |
+| `delete(path)` | 파일 삭제. 파일 없으면 `Ok(())` |
+| `save_path(app, file)` | OS 데이터 디렉토리 아래 경로 반환 |
 
 ---
 
