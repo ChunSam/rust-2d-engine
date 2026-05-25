@@ -29,6 +29,7 @@ pub mod scripting;
 pub mod tilemap;
 pub mod timer;
 pub mod tween;
+pub mod steering;
 pub mod ui;
 
 // ── 편의 재수출 ────────────────────────────────────────────────────────────────
@@ -39,6 +40,7 @@ pub use animation::{
     TransitionCond, UvRect,
 };
 pub use app::App;
+pub use behavior::{Blackboard, BlackboardValue};
 pub use asset::{AssetLoadState, AssetServer, Handle, ImageAsset, ImageEntry, ScriptAsset};
 pub use atlas::{AtlasSprite, TextureAtlas};
 #[cfg(not(target_arch = "wasm32"))]
@@ -49,7 +51,7 @@ pub use collision::{
 };
 pub use components::{RenderLayer, Sprite, Transform};
 pub use debug_ui::DebugUi;
-pub use ecs::{Entity, Events, System, World};
+pub use ecs::{Commands, Entity, Events, System, World};
 pub use hierarchy::{attach, detach, Children, GlobalTransform, HierarchySystem, Parent};
 pub use input::{GamepadAxis, GamepadButton, GamepadState, InputMap, InputState};
 pub use particle::{Particle, ParticleEmitter, ParticleSystem};
@@ -75,6 +77,7 @@ pub use resources::{
 };
 pub use scene::{Scene, SceneChange, SceneCmd};
 pub use scripting::{ScriptRunner, ScriptingSystem};
+pub use steering::{Arrive, Flee, Seek, SteeringSystem, SteeringVelocity, Wander};
 pub use tilemap::{Tilemap, TilemapAtlas, TilemapSystem};
 pub use timer::Timer;
 pub use tween::{Easing, Tween};

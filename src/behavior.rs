@@ -1,4 +1,4 @@
-//! 비헤이비어 트리 (Behavior Tree) 시스템 (Phase 36)
+//! 비헤이비어 트리 (Behavior Tree) 시스템 (Phase 36) + Blackboard (Phase 37a)
 //!
 //! # 핵심 타입
 //! - [`BehaviorStatus`] — 노드 실행 결과 (`Running` / `Success` / `Failure`)
@@ -8,16 +8,22 @@
 //! - [`Inverter`] — 자식 결과를 반전 (Success↔Failure)
 //! - [`BehaviorTree`] — ECS 컴포넌트. 루트 노드를 감싼다.
 //! - [`BehaviorSystem`] — 매 프레임 `BehaviorTree`를 가진 엔티티를 tick.
+//! - [`Blackboard`] — 독립 ECS 컴포넌트. Key-Value 공유 상태 저장소.
+//! - [`BlackboardValue`] — Blackboard에 저장 가능한 값 타입.
 //!
 //! # 사용 예
 //! ```rust,no_run
-//! use engine::behavior::{BehaviorNode, BehaviorStatus, BehaviorTree, Sequence, Selector};
+//! use engine::behavior::{BehaviorNode, BehaviorStatus, BehaviorTree, Sequence, Selector, Blackboard};
 //! use engine::ecs::World;
 //! use engine::System;
 //!
 //! struct ChasePlayer;
 //! impl BehaviorNode for ChasePlayer {
-//!     fn tick(&mut self, _world: &mut World, _entity: engine::ecs::Entity, _dt: f32) -> BehaviorStatus {
+//!     fn tick(&mut self, world: &mut World, entity: engine::ecs::Entity, _dt: f32) -> BehaviorStatus {
+//!         // Blackboard는 독립 ECS 컴포넌트로, world.get_mut::<Blackboard>(entity)로 접근
+//!         if let Some(bb) = world.get_mut::<Blackboard>(entity) {
+//!             bb.set_bool("chasing", true);
+//!         }
 //!         BehaviorStatus::Success
 //!     }
 //! }
@@ -27,10 +33,111 @@
 //! world.add_component(e, BehaviorTree::new(Box::new(Sequence::new(vec![
 //!     Box::new(ChasePlayer),
 //! ]))));
+//! world.add_component(e, Blackboard::new());
 //! ```
+
+use std::collections::HashMap;
+
+use glam::Vec2;
 
 use crate::ecs::{Entity, World};
 use crate::System;
+
+// ─── Blackboard ───────────────────────────────────────────────────────────────
+
+/// Blackboard에 저장 가능한 값 타입.
+#[derive(Debug, Clone)]
+pub enum BlackboardValue {
+    Bool(bool),
+    Float(f32),
+    Int(i32),
+    Vec2(Vec2),
+    String(String),
+}
+
+/// BehaviorTree와 함께 사용하는 공유 Key-Value 상태 저장소.
+///
+/// `BehaviorTree`와 독립된 ECS 컴포넌트로, 같은 엔티티에 추가한다.
+/// `BehaviorNode::tick` 내부에서 `world.get_mut::<Blackboard>(entity)` 로 접근한다.
+///
+/// # 예시
+/// ```rust,no_run
+/// # use engine::behavior::Blackboard;
+/// let mut bb = Blackboard::new();
+/// bb.set_bool("is_running", true);
+/// assert_eq!(bb.get_bool("is_running"), Some(true));
+/// assert_eq!(bb.get_bool("unknown"), None);
+/// ```
+pub struct Blackboard {
+    values: HashMap<String, BlackboardValue>,
+}
+
+impl Blackboard {
+    pub fn new() -> Self {
+        Self { values: HashMap::new() }
+    }
+
+    pub fn set_bool(&mut self, key: &str, v: bool) {
+        self.values.insert(key.to_string(), BlackboardValue::Bool(v));
+    }
+
+    pub fn set_float(&mut self, key: &str, v: f32) {
+        self.values.insert(key.to_string(), BlackboardValue::Float(v));
+    }
+
+    pub fn set_int(&mut self, key: &str, v: i32) {
+        self.values.insert(key.to_string(), BlackboardValue::Int(v));
+    }
+
+    pub fn set_vec2(&mut self, key: &str, v: Vec2) {
+        self.values.insert(key.to_string(), BlackboardValue::Vec2(v));
+    }
+
+    pub fn set_string(&mut self, key: &str, v: impl Into<String>) {
+        self.values.insert(key.to_string(), BlackboardValue::String(v.into()));
+    }
+
+    pub fn get_bool(&self, key: &str) -> Option<bool> {
+        match self.values.get(key) {
+            Some(BlackboardValue::Bool(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn get_float(&self, key: &str) -> Option<f32> {
+        match self.values.get(key) {
+            Some(BlackboardValue::Float(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn get_int(&self, key: &str) -> Option<i32> {
+        match self.values.get(key) {
+            Some(BlackboardValue::Int(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn get_vec2(&self, key: &str) -> Option<Vec2> {
+        match self.values.get(key) {
+            Some(BlackboardValue::Vec2(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn get_string(&self, key: &str) -> Option<&str> {
+        match self.values.get(key) {
+            Some(BlackboardValue::String(v)) => Some(v.as_str()),
+            _ => None,
+        }
+    }
+}
+
+impl Default for Blackboard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 // ─── BehaviorStatus ───────────────────────────────────────────────────────────
 
@@ -357,5 +464,62 @@ mod tests {
         sys.run(&mut world, 0.016);
 
         assert!(*ticked.lock().unwrap());
+    }
+
+    // ── Blackboard 테스트 ──────────────────────────────────────────────────────
+
+    #[test]
+    fn blackboard_bool() {
+        let mut bb = Blackboard::new();
+        assert_eq!(bb.get_bool("flag"), None);
+        bb.set_bool("flag", true);
+        assert_eq!(bb.get_bool("flag"), Some(true));
+        bb.set_bool("flag", false);
+        assert_eq!(bb.get_bool("flag"), Some(false));
+    }
+
+    #[test]
+    fn blackboard_float() {
+        let mut bb = Blackboard::new();
+        assert_eq!(bb.get_float("speed"), None);
+        bb.set_float("speed", 3.14);
+        let v = bb.get_float("speed").unwrap();
+        assert!((v - 3.14).abs() < 1e-5);
+    }
+
+    #[test]
+    fn blackboard_int() {
+        let mut bb = Blackboard::new();
+        assert_eq!(bb.get_int("count"), None);
+        bb.set_int("count", 42);
+        assert_eq!(bb.get_int("count"), Some(42));
+    }
+
+    #[test]
+    fn blackboard_vec2() {
+        let mut bb = Blackboard::new();
+        assert!(bb.get_vec2("pos").is_none());
+        bb.set_vec2("pos", Vec2::new(1.0, 2.0));
+        let v = bb.get_vec2("pos").unwrap();
+        assert!((v.x - 1.0).abs() < 1e-5);
+        assert!((v.y - 2.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn blackboard_string() {
+        let mut bb = Blackboard::new();
+        assert!(bb.get_string("name").is_none());
+        bb.set_string("name", "hero");
+        assert_eq!(bb.get_string("name"), Some("hero"));
+    }
+
+    #[test]
+    fn blackboard_missing_key_returns_none() {
+        let bb = Blackboard::new();
+        assert!(bb.get_bool("x").is_none());
+        assert!(bb.get_float("x").is_none());
+        assert!(bb.get_int("x").is_none());
+        assert!(bb.get_vec2("x").is_none());
+        assert!(bb.get_string("x").is_none());
     }
 }
