@@ -6,9 +6,9 @@ struct Uniforms {
     chroma_offset:     f32,   // 색수차 강도
     bloom_threshold:   f32,   // 블룸 발생 휘도 임계값
     bloom_intensity:   f32,   // 블룸 밝기 배율
-    _pad0: f32,
-    _pad1: f32,
-    _pad2: f32,
+    brightness:        f32,   // 밝기 오프셋 (-1~1, 0=원본)
+    contrast:          f32,   // 대비 배율 (1=원본)
+    saturation:        f32,   // 채도 배율 (1=원본, 0=흑백)
 }
 
 @group(0) @binding(0) var scene_tex:     texture_2d<f32>;
@@ -84,6 +84,17 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
     let vig_dist = length(center) / max(u.vignette_radius, 0.001);
     let vignette = 1.0 - smoothstep(1.0 - u.vignette_strength, 1.0, vig_dist);
     color = vec4<f32>(color.rgb * vignette, color.a);
+
+    // ── 색상 그레이딩 (Color Grading) ──────────────────────────────────────
+    var graded = color.rgb;
+    // 밝기
+    graded = graded + vec3<f32>(u.brightness);
+    // 대비 (0.5 중심)
+    graded = (graded - 0.5) * u.contrast + 0.5;
+    // 채도 (luminance 보존)
+    let lum = dot(graded, vec3<f32>(0.2126, 0.7152, 0.0722));
+    graded = mix(vec3<f32>(lum), graded, u.saturation);
+    color = vec4<f32>(clamp(graded, vec3<f32>(0.0), vec3<f32>(1.0)), color.a);
 
     return color;
 }

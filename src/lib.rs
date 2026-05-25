@@ -18,6 +18,8 @@ pub mod network;
 pub mod particle;
 pub mod pathfinding;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod gpu_particle;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod physics;
 pub mod pool;
 pub mod prefab;
@@ -63,6 +65,8 @@ pub use material::ShaderMaterial;
 pub use network::{NetworkClient, NetworkEvent, NetworkSystem};
 pub use particle::{Particle, ParticleEmitter, ParticleSystem};
 pub use pathfinding::{find_path, PathGrid};
+#[cfg(not(target_arch = "wasm32"))]
+pub use gpu_particle::GpuParticleEmitter;
 #[cfg(not(target_arch = "wasm32"))]
 pub use physics::{
     CharacterController, CollisionEvent, CollisionGroups, ImpulseJointHandle, PhysicsBody,

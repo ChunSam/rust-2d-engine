@@ -265,7 +265,11 @@ pub struct App {
     /// 라이팅 패스가 씬을 먼저 그릴 중간 텍스처.
     #[cfg(not(target_arch = "wasm32"))]
     scene_texture_for_lighting: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// GPU 컴퓨트 셰이더 기반 파티클 렌더러 (lazy init).
+    #[cfg(not(target_arch = "wasm32"))]
+    gpu_particle_renderer: Option<crate::renderer::gpu_particle::GpuParticleRenderer>,
     last_frame: Option<Instant>,
+    last_dt: f32,
     /// GPU 초기화 전에 등록된 텍스처 경로를 보관한다. resumed()에서 실제로 로드한다.
     pending_textures: Vec<String>,
     /// 등록된 오프스크린 렌더 타겟 맵 (이름 → RenderTarget).
@@ -379,7 +383,9 @@ impl App {
             lighting_renderer: None,
             fade_renderer: None,
             scene_texture_for_lighting: None,
+            gpu_particle_renderer: None,
             last_frame: None,
+            last_dt: 1.0 / 60.0,
             pending_textures: Vec::new(),
             render_targets: HashMap::new(),
             pending_render_targets: Vec::new(),
@@ -426,6 +432,7 @@ impl App {
             text_renderer: None,
             post_renderer: None,
             last_frame: None,
+            last_dt: 1.0 / 60.0,
             pending_textures: Vec::new(),
             render_targets: HashMap::new(),
             pending_render_targets: Vec::new(),
@@ -2297,6 +2304,41 @@ impl App {
             }
         }
 
+        // 2.8단계: GPU 파티클 렌더링 (네이티브 전용)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let has_emitters = self
+                .world
+                .query::<crate::gpu_particle::GpuParticleEmitter>()
+                .next()
+                .is_some();
+            if has_emitters && self.gpu_particle_renderer.is_none() {
+                self.gpu_particle_renderer = Some(
+                    crate::renderer::gpu_particle::GpuParticleRenderer::new(
+                        &gpu.device,
+                        gpu.config.format,
+                        4096,
+                    ),
+                );
+            }
+            if let Some(gpr) = &self.gpu_particle_renderer {
+                let new_particles =
+                    crate::gpu_particle::collect_new_particles(&mut self.world, gpr.capacity(), self.last_dt);
+                for (slot, p) in &new_particles {
+                    gpr.upload_particles(&gpu.queue, std::slice::from_ref(p), *slot);
+                }
+                gpr.dispatch_compute(&mut enc, &gpu.queue, self.last_dt);
+                gpr.render(
+                    &gpu.queue,
+                    render_view,
+                    &mut enc,
+                    &self.world,
+                    logical_w,
+                    logical_h,
+                );
+            }
+        }
+
         // 3단계: 텍스트 그리기
         let (w, h) = (gpu.config.width, gpu.config.height);
         if let Some(tr) = &mut self.text_renderer {
@@ -2639,6 +2681,7 @@ impl ApplicationHandler for App {
                     .map(|t| (now - t).as_secs_f32().min(0.1))
                     .unwrap_or(1.0 / 60.0);
                 self.last_frame = Some(now);
+                self.last_dt = dt;
 
                 self.update(dt);
 

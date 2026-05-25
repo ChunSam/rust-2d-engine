@@ -26,6 +26,12 @@ pub struct PostProcessConfig {
     pub bloom_threshold: f32,
     /// 블룸 밝기 배율
     pub bloom_intensity: f32,
+    /// 밝기 오프셋 (-1.0~1.0, 0.0=원본)
+    pub brightness: f32,
+    /// 대비 배율 (0.0~3.0, 1.0=원본)
+    pub contrast: f32,
+    /// 채도 배율 (0.0~3.0, 1.0=원본, 0.0=흑백)
+    pub saturation: f32,
 }
 
 impl Default for PostProcessConfig {
@@ -37,6 +43,9 @@ impl Default for PostProcessConfig {
             chroma_offset: 0.003,
             bloom_threshold: 0.75,
             bloom_intensity: 0.4,
+            brightness: 0.0,
+            contrast: 1.0,
+            saturation: 1.0,
         }
     }
 }
@@ -50,7 +59,9 @@ struct PostProcessUniforms {
     chroma_offset: f32,
     bloom_threshold: f32,
     bloom_intensity: f32,
-    _pad: [f32; 3],
+    brightness: f32,
+    contrast: f32,
+    saturation: f32,
 }
 
 impl From<&PostProcessConfig> for PostProcessUniforms {
@@ -61,7 +72,9 @@ impl From<&PostProcessConfig> for PostProcessUniforms {
             chroma_offset: c.chroma_offset,
             bloom_threshold: c.bloom_threshold,
             bloom_intensity: c.bloom_intensity,
-            _pad: [0.0; 3],
+            brightness: c.brightness,
+            contrast: c.contrast,
+            saturation: c.saturation,
         }
     }
 }
