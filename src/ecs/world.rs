@@ -167,6 +167,31 @@ impl World {
         self.move_entity(entity, new_arch_id);
     }
 
+    /// 엔티티에서 컴포넌트 T를 꺼내 반환한다. 없으면 None.
+    ///
+    /// `remove_component`와 달리 컴포넌트 값을 소유권째 돌려준다.
+    /// `BehaviorSystem` 등 컴포넌트를 임시로 빌려서 World와 동시에 사용해야 할 때 쓴다.
+    pub fn take_component<T: Send + Sync + 'static>(&mut self, entity: Entity) -> Option<T> {
+        let tid = TypeId::of::<T>();
+        // Step 1: 실제 값을 Box<()> placeholder로 교체하고 소유권을 확보
+        let value: T = {
+            let (arch_id, row) = *self.entity_location.get(&entity)?;
+            let arch = &mut self.archetypes[arch_id];
+            if !arch.contains(tid) {
+                return None;
+            }
+            let col = arch.columns.get_mut(&tid)?;
+            // 실제 값을 unit placeholder로 swap
+            let placeholder: ComponentBox = Box::new(());
+            let extracted = std::mem::replace(&mut col[row], placeholder);
+            // Box<dyn Any+Send+Sync> → Box<T> → T
+            *extracted.downcast::<T>().ok()?
+        }; // archetypes 빌림 해제
+        // Step 2: placeholder를 포함한 슬롯을 아키타입에서 제거
+        self.remove_component::<T>(entity);
+        Some(value)
+    }
+
     /// 엔티티에 컴포넌트를 붙인다. 이미 있으면 교체한다.
     ///
     /// `T: Send + Sync`가 요구된다 — 병렬 쿼리(`par_query*`)에서 스레드 간 공유를 허용하기 위해서다.

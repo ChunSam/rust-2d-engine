@@ -2,6 +2,7 @@ pub mod animation;
 pub mod app;
 pub mod asset;
 pub mod atlas;
+pub mod behavior;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod audio;
 pub mod camera;
