@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 41 갱신: 2026-05-25)  
-엔진 버전: v0.41.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 42 갱신: 2026-05-25)  
+엔진 버전: v0.42.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -71,6 +71,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 41b | ECS 변경 감지 — query_added<T>/query_changed<T>, clear_change_tracking, HashSet 기반 | `5cf3233` |
 | Phase 41a | 2D 라이팅 — PointLight 컴포넌트, AmbientLight 리소스, LightingRenderer (WGSL, 최대 16 라이트) | `2230e31` |
 | Phase 41d | REFERENCE.md v0.41.0 — 2D 라이팅/ECS 변경 감지 섹션 추가 | — |
+| Phase 42a | 2D 노멀 맵 라이팅 — Sprite.normal_texture, PointLight.light_height, 노멀 버퍼, Lambert diffuse WGSL | `bdcd5c8` |
 
 ---
 
@@ -134,6 +135,59 @@ src/
 │       ├── sprite.wgsl
 │       └── post_process.wgsl                                      ← Phase 10
 └── save.rs           RON 세이브/불러오기 (save/load/load_or_default/exists/delete)
+```
+
+---
+
+## 이번 세션에서 한 일 (Phase 42)
+
+### Phase 42a — 2D 노멀 맵 라이팅
+
+**배경**: Phase 41a의 `PointLight` 시스템이 거리 감쇠(atten²)만 적용해 모든 방향에서 균일하게 밝아졌다. 노멀 맵과 Lambert diffuse를 추가해 광원 방향에 따라 요철이 표현되는 방향성 조명을 구현한다.
+
+**변경 파일**: `src/components.rs`, `src/renderer/lighting.rs`, `src/app.rs`, `src/particle.rs` (Sprite 구조체 literal 수정)
+
+**추가 기능**:
+
+*`Sprite` 확장*
+- `normal_texture: Option<String>` — 노멀 맵 파일 경로 (RON 직렬화 지원)
+- `normal_handle: Option<Handle<ImageAsset>>` — 런타임 핸들 (`#[serde(skip)]`)
+
+*`PointLight` 확장*
+- `light_height: f32` (기본 `0.15`) — 광원 가상 Z 높이. L 벡터의 Z 성분으로 사용. 작을수록 측면광 → 노멀 맵 요철 강조, 클수록 정면광
+
+*`GpuLightData` 수정*
+- `_pad: f32` → `light_height: f32` (32 bytes 유지, `LightingUniforms` 544 bytes 유지)
+
+*노멀 버퍼 (LightingRenderer)*
+- `normal_texture: wgpu::Texture` + `normal_view: wgpu::TextureView` — `Rgba8Unorm`, `RENDER_ATTACHMENT | TEXTURE_BINDING`
+- `clear_normal_buffer(encoder)` — `LoadOp::Clear([0.5, 0.5, 1.0, 1.0])` 로 평면 노멀 초기화 (draw call 없음)
+- `resize()` 에서도 normal_texture 재생성
+- bind group layout binding 3 = normal_tex (fragment)
+- `run_pass()` bind group 4개 entries
+
+*WGSL 셰이더 (Lambert diffuse)*
+```wgsl
+let N = normalize(n_sample.xyz * 2.0 - vec3(1.0));
+let L = normalize(vec3(diff_uv.x, -diff_uv.y * aspect_ratio, l.light_height));
+let diffuse = max(0.0, dot(N, L));
+total = total + l.color * l.intensity * diffuse * atten * atten;
+```
+
+**현재 동작**: 노멀 버퍼는 항상 평면 노멀로 초기화 → 스프라이트별 노멀 텍스처 렌더링은 향후 스프라이트 렌더러 확장 시 추가 예정. `light_height`만으로도 측광/정면광 전환 효과 있음.
+
+```rust
+// 노멀 맵 스프라이트 설정 예
+let mut sprite = Sprite::textured("assets/stone.png");
+sprite.normal_texture = Some("assets/stone_normal.png".to_string());
+
+// 측면 방향성 조명
+world.add_component(light, PointLight {
+    color: [1.0, 0.7, 0.3],
+    radius: 400.0,
+    intensity: 2.5,
+    light_height: 0.08,  // 낮게 → 노멀 맵 요철 강조
+});
 ```
 
 ---

@@ -1,6 +1,6 @@
 # rust-2d-engine 레퍼런스
 
-> 버전 v0.41.0 기준. wgpu 기반 2D 게임 엔진.
+> 버전 v0.42.0 기준. wgpu 기반 2D 게임 엔진.
 
 ---
 
@@ -38,7 +38,8 @@
 30. [Rhai 스크립팅](#rhai-스크립팅)
 31. [2D 라이팅](#2d-라이팅)
 32. [ECS 변경 감지](#ecs-변경-감지)
-33. [좌표 규약](#좌표-규약)
+33. [2D 노멀 맵 라이팅](#2d-노멀-맵-라이팅)
+34. [좌표 규약](#좌표-규약)
 
 ---
 
@@ -1860,6 +1861,101 @@ impl System for TransformDirtySystem {
                 grid.update(entity, pos);
             }
         }
+    }
+}
+```
+
+---
+
+## 2D 노멀 맵 라이팅
+
+Phase 41a의 `PointLight` + `AmbientLight` 라이팅 시스템을 확장해, 스프라이트별 노멀 맵 텍스처로 방향성 조명(Lambert diffuse)을 구현한다.
+
+### 노멀 맵이 없을 때 기본 동작
+
+라이팅 패스는 매 프레임 노멀 버퍼를 평면 노멀 `[0.5, 0.5, 1.0]` (카메라 방향)로 초기화한다. 노멀 맵 없이도 `PointLight`의 `light_height` 값에 따라 방향성 조명 효과를 얻을 수 있다.
+
+### Sprite.normal_texture
+
+```rust
+// 노멀 맵이 있는 스프라이트
+let mut sprite = Sprite::textured("assets/rock.png");
+sprite.normal_texture = Some("assets/rock_normal.png".to_string());
+world.add_component(entity, sprite);
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `normal_texture` | `Option<String>` | 노멀 맵 파일 경로 (None이면 평면 노멀) |
+| `normal_handle` | `Option<Handle<ImageAsset>>` | 런타임 핸들 (직렬화 제외) |
+
+### PointLight.light_height
+
+광원의 가상 Z 높이. 노멀 맵과 함께 Lambert 조명의 방향 벡터 L의 Z 성분으로 사용된다.
+
+```rust
+world.add_component(light_entity, PointLight {
+    color: [1.0, 0.9, 0.7],
+    radius: 300.0,
+    intensity: 2.0,
+    light_height: 0.15,  // 작을수록 측광(그라데이션), 클수록 정면광
+});
+```
+
+| `light_height` | 효과 |
+|---|---|
+| `0.05` | 강한 측면 조명 — 노멀 맵 요철이 뚜렷하게 표현 |
+| `0.15` | 기본값 — 자연스러운 방향성 조명 |
+| `0.5~1.0` | 거의 정면광 — 노멀 맵 효과 약해짐 |
+
+### 노멀 맵 파일 형식
+
+- OpenGL 기준 노멀 맵: RGB채널에 `(R=X, G=Y, B=Z)` 저장, 평면은 `(128, 128, 255)`
+- 일반 게임 툴(Substance, NormalMap-Online 등) 기본 출력 포맷과 호환
+
+### 렌더 파이프라인 순서
+
+```
+스프라이트 렌더링 (scene_tex)
+    ↓
+노멀 버퍼 초기화 (flat normal [0.5, 0.5, 1.0])
+    (추후: 스프라이트 노멀 텍스처 → 노멀 버퍼 렌더)
+    ↓
+LightingRenderer (scene_tex + normal_buf → Lambert diffuse)
+    ↓
+화면 출력
+```
+
+### 사용 예 — 돌 텍스처에 조명 효과
+
+```rust
+struct SetupSystem;
+impl System for SetupSystem {
+    fn run(&mut self, world: &mut World, _dt: f32) {
+        world.insert_resource(AmbientLight { color: [1.0, 1.0, 1.0], intensity: 0.04 });
+
+        let rock = world.spawn();
+        let mut sprite = Sprite::textured("assets/rock.png");
+        sprite.normal_texture = Some("assets/rock_normal.png".to_string());
+        world.add_component(rock, Transform {
+            position: Vec2::new(0.0, 0.0),
+            scale: Vec2::splat(128.0),
+            ..Default::default()
+        });
+        world.add_component(rock, sprite);
+
+        // 측면에서 비추는 따뜻한 빛
+        let torch = world.spawn();
+        world.add_component(torch, Transform {
+            position: Vec2::new(-200.0, -100.0),
+            ..Default::default()
+        });
+        world.add_component(torch, PointLight {
+            color: [1.0, 0.7, 0.3],
+            radius: 400.0,
+            intensity: 3.0,
+            light_height: 0.08,  // 낮게 — 노멀 맵 요철 강조
+        });
     }
 }
 ```
