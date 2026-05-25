@@ -37,7 +37,7 @@ pub use animation::{
     TransitionCond, UvRect,
 };
 pub use app::App;
-pub use asset::{AssetServer, Handle, ImageAsset, ImageEntry, ScriptAsset};
+pub use asset::{AssetLoadState, AssetServer, Handle, ImageAsset, ImageEntry, ScriptAsset};
 pub use atlas::{AtlasSprite, TextureAtlas};
 #[cfg(not(target_arch = "wasm32"))]
 pub use audio::AudioManager;
@@ -56,8 +56,8 @@ pub use physics::{
     CharacterController, CollisionEvent, PhysicsBody, PhysicsSystem, PhysicsWorld, RaycastHit,
 };
 pub use prefab::{
-    spawn_entity_def, spawn_scene_def, topological_sort_entities, EntityDef, Prefab, SceneDef,
-    Tag,
+    spawn_entity_def, spawn_scene_def, topological_sort_entities, EntityDef, Prefab,
+    SceneDef, SCENE_DEF_VERSION, Tag,
 };
 pub use material::ShaderMaterial;
 pub use network::{NetworkClient, NetworkEvent, NetworkSystem};

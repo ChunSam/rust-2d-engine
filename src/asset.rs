@@ -97,6 +97,17 @@ pub struct ScriptAsset {
     pub ast: rhai::AST,
 }
 
+// ─── AssetLoadState ───────────────────────────────────────────────────────────
+
+/// 에셋 로드 결과 상태. `AssetServer::load_state()`로 조회한다.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AssetLoadState {
+    /// 정상 로드됨.
+    Loaded,
+    /// 로드 실패 (파일 없음, 디코딩 오류 등). 마젠타 폴백 텍스처로 대체된 상태.
+    Failed(String),
+}
+
 // ─── AssetServer ──────────────────────────────────────────────────────────────
 
 /// 에셋 관리자 — 이미지 로드·캐싱·핫 리로딩.
@@ -112,10 +123,14 @@ pub struct ScriptAsset {
 /// # use engine::App;
 /// let mut app = App::new();
 /// let handle = app.load_image("assets/player.png");
-/// // Sprite::with_handle(handle) 로 사용
+/// // 로드 실패 여부 확인
+/// # use engine::asset::AssetLoadState;
+/// # let assets = app.world.resource::<engine::AssetServer>().unwrap();
+/// // if assets.load_state(&handle) == AssetLoadState::Failed { ... }
 /// ```
 pub struct AssetServer {
     images: HashMap<AssetId, ImageAsset>,
+    image_load_states: HashMap<AssetId, AssetLoadState>,
     path_to_id: HashMap<Arc<str>, AssetId>,
     scripts: HashMap<AssetId, ScriptAsset>,
     script_path_to_id: HashMap<Arc<str>, AssetId>,
@@ -148,6 +163,7 @@ impl AssetServer {
                 Ok(w) => {
                     return Self {
                         images: HashMap::new(),
+                        image_load_states: HashMap::new(),
                         path_to_id: HashMap::new(),
                         scripts: HashMap::new(),
                         script_path_to_id: HashMap::new(),
@@ -164,6 +180,7 @@ impl AssetServer {
         }
         Self {
             images: HashMap::new(),
+            image_load_states: HashMap::new(),
             path_to_id: HashMap::new(),
             scripts: HashMap::new(),
             script_path_to_id: HashMap::new(),
@@ -176,6 +193,8 @@ impl AssetServer {
     }
 
     /// 이미지를 로드해 핸들을 반환한다. 같은 경로를 다시 호출하면 캐시된 핸들을 반환한다.
+    ///
+    /// 로드 실패 시 마젠타(1×1) 폴백 텍스처로 대체되며 `load_state()`로 결과를 확인할 수 있다.
     pub fn load_image(&mut self, path: impl AsRef<Path>) -> Handle<ImageAsset> {
         let key: Arc<str> = path.as_ref().to_string_lossy().as_ref().into();
         if let Some(&id) = self.path_to_id.get(&key) {
@@ -186,8 +205,9 @@ impl AssetServer {
             };
         }
         let id = alloc_id();
-        let asset = decode_image(&key);
+        let (asset, state) = decode_image_with_state(&key);
         self.images.insert(id, asset);
+        self.image_load_states.insert(id, state);
         self.path_to_id.insert(Arc::clone(&key), id);
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(ref mut w) = self._watcher {
@@ -198,6 +218,24 @@ impl AssetServer {
             path: key,
             _marker: PhantomData,
         }
+    }
+
+    /// 핸들의 로드 상태를 반환한다.
+    ///
+    /// 존재하지 않는 핸들이면 `AssetLoadState::Failed`를 반환한다.
+    pub fn load_state(&self, handle: &Handle<ImageAsset>) -> AssetLoadState {
+        self.image_load_states
+            .get(&handle.id)
+            .cloned()
+            .unwrap_or_else(|| AssetLoadState::Failed("unknown handle".into()))
+    }
+
+    /// 로드에 실패한 이미지 핸들 목록을 반환한다 (디버그용).
+    pub fn failed_images(&self) -> Vec<AssetId> {
+        self.image_load_states
+            .iter()
+            .filter_map(|(&id, state)| matches!(state, AssetLoadState::Failed(_)).then_some(id))
+            .collect()
     }
 
     /// 현재 캐시된 이미지 에셋 수를 반환한다.
@@ -324,7 +362,9 @@ impl AssetServer {
         for path_str in &seen {
             let key: Arc<str> = path_str.as_str().into();
             if let Some(&id) = self.path_to_id.get(&key) {
-                self.images.insert(id, decode_image(path_str));
+                let (asset, state) = decode_image_with_state(path_str);
+                self.images.insert(id, asset);
+                self.image_load_states.insert(id, state);
             }
             if let Some(&id) = self.script_path_to_id.get(&key) {
                 self.scripts.insert(id, compile_script_file(path_str));
@@ -342,26 +382,31 @@ impl Default for AssetServer {
 
 // ─── 내부 헬퍼 ────────────────────────────────────────────────────────────────
 
-fn decode_image(path: &str) -> ImageAsset {
+fn decode_image_with_state(path: &str) -> (ImageAsset, AssetLoadState) {
     match std::fs::read(path) {
         Ok(bytes) => match image::load_from_memory(&bytes) {
             Ok(img) => {
                 let rgba = img.to_rgba8();
                 let (w, h) = rgba.dimensions();
-                ImageAsset {
-                    data: Arc::new(rgba.into_raw()),
-                    width: w,
-                    height: h,
-                }
+                (
+                    ImageAsset {
+                        data: Arc::new(rgba.into_raw()),
+                        width: w,
+                        height: h,
+                    },
+                    AssetLoadState::Loaded,
+                )
             }
             Err(e) => {
-                log::error!("이미지 디코딩 실패 '{path}': {e}");
-                magenta_fallback()
+                let msg = format!("이미지 디코딩 실패 '{path}': {e}");
+                log::error!("{msg}");
+                (magenta_fallback(), AssetLoadState::Failed(msg))
             }
         },
         Err(e) => {
-            log::error!("이미지 파일 읽기 실패 '{path}': {e}");
-            magenta_fallback()
+            let msg = format!("이미지 파일 읽기 실패 '{path}': {e}");
+            log::error!("{msg}");
+            (magenta_fallback(), AssetLoadState::Failed(msg))
         }
     }
 }

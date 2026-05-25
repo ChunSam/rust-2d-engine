@@ -25,6 +25,7 @@
 //!             parent: None,
 //!         },
 //!     ],
+//!     ..SceneDef::default()
 //! };
 //!
 //! // 파일 저장 후 로드
@@ -105,6 +106,9 @@ pub struct EntityDef {
 
 // ─── SceneDef ─────────────────────────────────────────────────────────────────
 
+/// 현재 `SceneDef` RON 포맷 버전. 구조 변경 시 증가시킨다.
+pub const SCENE_DEF_VERSION: u32 = 1;
+
 /// 레벨/씬 전체를 기술하는 직렬화 가능 구조체.
 ///
 /// RON 파일 한 장이 하나의 `SceneDef`에 대응한다.
@@ -112,6 +116,7 @@ pub struct EntityDef {
 /// # RON 예시
 /// ```ron
 /// SceneDef(
+///     version: 1,
 ///     entities: [
 ///         EntityDef(
 ///             tag: Some("ground"),
@@ -129,20 +134,47 @@ pub struct EntityDef {
 ///     ],
 /// )
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SceneDef {
+    /// 파일 포맷 버전. 버전 없는 구 형식 파일은 0으로 역직렬화된다.
+    #[serde(default)]
+    pub version: u32,
     pub entities: Vec<EntityDef>,
+}
+
+impl Default for SceneDef {
+    fn default() -> Self {
+        Self {
+            version: SCENE_DEF_VERSION,
+            entities: Vec::new(),
+        }
+    }
 }
 
 impl SceneDef {
     /// RON 파일에서 씬 정의를 로드한다.
+    ///
+    /// 파일 버전이 현재 버전과 다르면 경고를 출력하지만 로드는 계속한다.
     pub fn load(path: &Path) -> Result<Self, SaveError> {
-        load(path)
+        let scene: SceneDef = load(path)?;
+        if scene.version != SCENE_DEF_VERSION {
+            log::warn!(
+                "씬 파일 버전 불일치: 파일={}, 현재={} ({})",
+                scene.version,
+                SCENE_DEF_VERSION,
+                path.display()
+            );
+        }
+        Ok(scene)
     }
 
-    /// 씬 정의를 RON 파일에 저장한다.
+    /// 씬 정의를 RON 파일에 저장한다. 항상 현재 버전으로 기록된다.
     pub fn save(&self, path: &Path) -> Result<(), SaveError> {
-        save(path, self)
+        let versioned = SceneDef {
+            version: SCENE_DEF_VERSION,
+            ..self.clone()
+        };
+        save(path, &versioned)
     }
 
     /// 씬 정의에 엔티티를 추가하고 빌더 패턴으로 반환한다.
@@ -354,6 +386,7 @@ mod tests {
                     parent: None,
                 },
             ],
+            ..Default::default()
         };
 
         scene.save(&path).expect("save should succeed");
@@ -413,6 +446,7 @@ mod tests {
                 EntityDef::default(),
                 EntityDef::default(),
             ],
+            ..Default::default()
         };
         let entities = spawn_scene_def(&mut world, &scene);
         assert_eq!(entities.len(), 3);
@@ -440,6 +474,7 @@ mod tests {
                     parent: Some("parent".into()),
                 },
             ],
+            ..Default::default()
         };
 
         scene.save(&path).expect("save should succeed");

@@ -93,6 +93,8 @@ pub struct App {
     editor_save_path: String,
     /// 마지막 씬 저장 결과 메시지.
     editor_save_status: Option<String>,
+    /// 마지막 씬 로드 결과 메시지.
+    editor_load_status: Option<String>,
     /// Inspector 현재 탭 인덱스 (0: Entities, 1: Assets).
     inspector_tab: u8,
 }
@@ -145,6 +147,7 @@ impl App {
             gizmo_drag_offset: glam::Vec2::ZERO,
             editor_save_path: "saved_scene.ron".into(),
             editor_save_status: None,
+            editor_load_status: None,
             inspector_tab: 0,
         }
     }
@@ -658,6 +661,34 @@ impl App {
                                     egui::TextEdit::singleline(&mut self.editor_save_path)
                                         .desired_width(180.0),
                                 );
+                                if ui.button("📂 Load Scene").clicked() {
+                                    let path = std::path::Path::new(&self.editor_save_path);
+                                    match crate::prefab::SceneDef::load(path) {
+                                        Ok(scene_def) => {
+                                            // 기존 에디터 엔티티(Transform 또는 Tag 보유) 제거
+                                            let to_remove: Vec<Entity> = self
+                                                .world
+                                                .query::<crate::components::Transform>()
+                                                .map(|(e, _)| e)
+                                                .collect();
+                                            for e in to_remove {
+                                                self.world.despawn(e);
+                                            }
+                                            self.inspector_selected = None;
+                                            let count = scene_def.entities.len();
+                                            crate::prefab::spawn_scene_def(
+                                                &mut self.world,
+                                                &scene_def,
+                                            );
+                                            self.editor_load_status =
+                                                Some(format!("✓ {count} entities ← {}", self.editor_save_path));
+                                            self.editor_save_status = None;
+                                        }
+                                        Err(e) => {
+                                            self.editor_load_status = Some(format!("✗ {e}"));
+                                        }
+                                    }
+                                }
                                 if ui.button("💾 Save Scene").clicked() {
                                     let mut scene_def = crate::prefab::SceneDef::default();
                                     // 부모가 자식보다 먼저 나오도록 위상 정렬
@@ -711,6 +742,9 @@ impl App {
                                 }
                             });
                             if let Some(msg) = &self.editor_save_status {
+                                ui.small(msg.as_str());
+                            }
+                            if let Some(msg) = &self.editor_load_status {
                                 ui.small(msg.as_str());
                             }
                         }
