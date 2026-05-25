@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 26 갱신: 2026-05-25)  
-엔진 버전: v0.26.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 28 갱신: 2026-05-25)  
+엔진 버전: v0.28.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -50,6 +50,8 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 25-D | 에디터 기즈모 — SelectedEntity 리소스, Inspector 엔티티 생성/삭제, 드래그 이동, DebugRect 강조 | `c19d0b6` |
 | Phase 25-E | rust-survivors 연동 — Sprite 필드 대응, EnemyAiSystem par_query2_map 병렬화 (game repo) | — |
 | Phase 26 | LOD/컬링 — Camera::visible_rect, CullConfig 리소스, 회전 고려 AABB 프러스텀 컬링, min_pixel_size LOD | `8db9bbe` |
+| Phase 27 | 멀티플레이어 데모 — mp_server(릴레이 서버) + mp_client(게임 클라이언트) 예제 | — |
+| Phase 28 | 에디터 씬 저장 — Inspector에 "💾 Save Scene" 버튼, SceneDef RON 직렬화 | — |
 
 ---
 
@@ -151,6 +153,47 @@ src/
 | ECS, Sprite, 애니메이션 | ✅ 동작 |
 | 텍스트 렌더링 | ✅ FontData 리소스 주입 시 동작 (미주입 시 생략) |
 | Physics, Audio, Gamepad | 비활성 — `#[cfg(not(wasm))]` |
+
+---
+
+## 이전 세션에서 한 일 (Phase 27–28)
+
+### Phase 27 — 멀티플레이어 데모
+
+**배경**: Phase 25-A에서 NetworkClient/NetworkSystem을 구현했지만 실제 서버-클라이언트 데모가 없었다. 두 예제 바이너리를 `examples/`에 추가해 엔진의 네트워킹 API 사용 패턴을 보여준다.
+
+**mp_server** (`examples/mp_server.rs`):
+- `TcpListener::bind("127.0.0.1:9001")`으로 WebSocket 수신
+- 클라이언트별 스레드 + `mpsc::Sender<Message>` 브로드캐스트 맵
+- 5 ms read timeout 루프로 발신/수신 논블로킹 처리
+- 프로토콜: 클라이언트 연결 시 `{"type":"hello","id":N}` 전송, 위치 릴레이 `{"type":"pos","id":N,"x":...,"y":...}`, 퇴장 통보 `{"type":"bye","id":N}`
+
+**mp_client** (`examples/mp_client.rs`):
+- `NetworkClient::connect("ws://127.0.0.1:9001")` + `NetworkSystem` 등록
+- `MultiplayerSystem`: 로컬 플레이어(흰 사각형) WASD 이동, 20 Hz 위치 송신
+- 원격 플레이어: ID별 고유 색상 사각형, pos/bye 수신 시 스폰/디스폰
+- HUD: 연결 상태, Player ID, 접속 인원 수 표시
+
+**실행**:
+```
+cargo run --example mp_server   # 터미널 1
+cargo run --example mp_client   # 터미널 2, 3, ...
+```
+
+---
+
+### Phase 28 — 에디터 씬 저장
+
+**배경**: Phase 25-D에서 기즈모로 엔티티를 배치할 수 있게 됐지만, 배치 결과를 파일로 저장하는 수단이 없었다.
+
+**변경 파일**: `src/app.rs` 만 수정.
+
+**추가 기능**:
+- `App` 구조체에 `editor_save_path: String`, `editor_save_status: Option<String>` 필드 추가
+- Inspector 패널 하단에 "Path:" 텍스트 입력 + `💾 Save Scene` 버튼 추가 (`#[cfg(not(target_arch = "wasm32"))]` 게이트)
+- 버튼 클릭 시 현재 월드의 모든 엔티티를 순회해 `Tag`/`Transform`/`Sprite`가 있는 엔티티를 `EntityDef`로 수집 → `SceneDef::save()` 호출
+- 결과 메시지 (예: `✓ 5 entities → saved_scene.ron`) 패널 하단에 표시
+- `reload_scene()` 시 저장 상태 메시지 초기화
 
 ---
 
@@ -1121,8 +1164,8 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 24~~ | ~~WASM 브라우저 실행 — WebGL2 강제, 비동기 GPU init, web-time~~ | — | 완료 |
 | ~~Phase 25~~ | ~~네트워킹 / ECS 병렬 / 셰이더 머티리얼 / 에디터 기즈모 / 연동~~ | — | 완료 |
 | ~~Phase 26~~ | ~~LOD / 컬링 — Camera::visible_rect, CullConfig, AABB 프러스텀 컬링, min_pixel_size LOD~~ | — | 완료 |
-| Phase 27 | 멀티플레이어 데모 — NetworkClient 기반 서버-클라 롤플레잉 예제 | ★★★ | Phase 25-A 완료 위에 구현 |
-| Phase 28 | 에디터 씬 저장 — 기즈모로 배치한 엔티티를 SceneDef RON으로 직렬화 | ★★☆ | Phase 25-D 위에 구현 |
+| ~~Phase 27~~ | ~~멀티플레이어 데모 — NetworkClient 기반 서버-클라 롤플레잉 예제~~ | — | 완료 |
+| ~~Phase 28~~ | ~~에디터 씬 저장 — 기즈모로 배치한 엔티티를 SceneDef RON으로 직렬화~~ | — | 완료 |
 
 ---
 
