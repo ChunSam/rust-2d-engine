@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 37 갱신: 2026-05-25)  
-엔진 버전: v0.37.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 38 갱신: 2026-05-25)  
+엔진 버전: v0.38.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -215,6 +215,58 @@ cargo run --example mp_client   # 터미널 2, 3, ...
 - `sprite.rs render()` 반환 타입 `RenderStats`로 변경, culling/draw call 카운터 수집
 - Engine Stats 패널에 "Systems" / "Render" collapsible 섹션 추가, `resizable(true)`로 변경
 - `ProfilerData`, `RenderStats`, `SystemProfile` re-export (`lib.rs`)
+
+---
+
+### Phase 38a — 씬 그래프 패널
+
+**배경**: Inspector에 엔티티 목록이 단순 평면 리스트로만 표시돼 계층 구조를 파악하기 어려웠고, 엔티티 이름도 편집할 수 없었다.
+
+**변경 파일**: `src/app.rs`
+
+**추가 기능**:
+- Inspector 탭바에 **"Scene"** 탭(탭 인덱스 2) 추가 (네이티브 전용)
+- 계층 구조 TreeView: `Parent` 없는 루트 엔티티를 먼저 나열, `Children` 기준 DFS 스택 순회로 들여쓰기 표시
+- 각 노드: `Tag` 있으면 이름, 없으면 `"Entity {id}"` 표시. 자식 있으면 `▶` 마커
+- 클릭 시 `SelectedEntity` 업데이트 (`selectable_label`)
+- Scene 탭 하단에 Tag 이름 인라인 편집 (`text_edit_singleline`), Tag 없으면 "Add Name" 버튼
+- Entities 탭(탭 0)에도 선택 엔티티 이름 편집 필드 추가
+
+---
+
+### Phase 38d — Rhai 스크립팅 API 확장
+
+**배경**: Rhai 스크립트에서 엔티티 생성/삭제, AI 상태(Blackboard) 읽고 쓰기, 스티어링 행동 설정을 할 방법이 없었다.
+
+**변경 파일**: `src/scripting.rs`, `src/behavior.rs`
+
+**추가 기능**:
+
+*Commands API*
+- `spawn_entity() -> i64` — 스크립트 실행 중 spawn 예약, 실행 후 `world.spawn()` 처리. 임시 핸들(-1,-2,...) 반환
+- `despawn_entity(id: i64)` — 양수 ID를 despawn 큐에 추가, 실행 후 처리
+
+*Blackboard API*
+- 실행 전 `Blackboard` 값을 `Arc<Mutex<HashMap>>` 스냅샷으로 복사 → 스크립트에서 읽기
+- `bb_get_bool(key) / bb_get_float(key) / bb_get_int(key)` — 스냅샷 읽기, 없으면 기본값
+- `bb_set_bool / bb_set_float / bb_set_int` — 변경 버퍼 수집 → 실행 후 `Blackboard` 반영 (없으면 자동 추가)
+- `Blackboard::entries()` 이터레이터 추가 (스냅샷 수집용)
+
+*Steering API*
+- `seek_target(tx, ty, speed)` — `Seek` + `SteeringVelocity` 추가/교체
+- `flee_from(tx, ty, speed, radius)` — `Flee` + `SteeringVelocity` 추가/교체
+- `stop_steering()` — `SteeringVelocity.velocity = Vec2::ZERO`
+
+**Borrow 우회**: World를 Rhai 클로저에 직접 캡처 불가 → 실행 전 스냅샷 + `Arc<Mutex<버퍼>>` 수집 → 실행 후 World 반영
+
+```rhai
+// 스크립트 예시
+let id = spawn_entity();
+despawn_entity(old_id);
+bb_set_bool("chasing", true);
+let speed = bb_get_float("move_speed");
+seek_target(player_x, player_y, speed);
+```
 
 ---
 
@@ -1466,6 +1518,8 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 36~~ | ~~비헤이비어 트리 — BehaviorTree/BehaviorSystem, Sequence/Selector/Inverter~~ | — | 완료 |
 | ~~Phase 37a~~ | ~~Blackboard(독립 ECS 컴포넌트) + Steering Behaviors (Seek/Flee/Arrive/Wander)~~ | — | 완료 |
 | ~~Phase 37d~~ | ~~CommandBuffer — Commands::spawn/despawn/insert/remove + World::apply_commands~~ | — | 완료 |
+| ~~Phase 38a~~ | ~~씬 그래프 패널 — 에디터 TreeView + Tag 이름 편집~~ | — | 완료 |
+| ~~Phase 38d~~ | ~~Rhai 스크립팅 API 확장 — spawn/despawn/Blackboard/Steering~~ | — | 완료 |
 
 ---
 
