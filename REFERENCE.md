@@ -1,6 +1,6 @@
 # rust-2d-engine 레퍼런스
 
-> 버전 v0.44.0 기준. wgpu 기반 2D 게임 엔진.
+> 버전 v0.46.0 기준. wgpu 기반 2D 게임 엔진.
 
 ---
 
@@ -46,6 +46,11 @@
 38. [씬 전환 트랜지션](#씬-전환-트랜지션)
 39. [타임라인/컷씬](#타임라인컷씬)
 40. [좌표 규약](#좌표-규약)
+41. [시스템 실행 순서 (Phase 45)](#시스템-실행-순서-phase-45)
+42. [물리 레이어 / 센서 (Phase 48)](#물리-레이어--센서-phase-48)
+43. [텍스트 완성 + IME (Phase 49)](#텍스트-완성--ime-phase-49)
+44. [로컬라이제이션 (Phase 50)](#로컬라이제이션-phase-50)
+45. [저장 암호화 (Phase 53)](#저장-암호화-phase-53)
 
 ---
 
@@ -2367,3 +2372,474 @@ world.add_component(cam_entity, tl);
 - **카메라 position**: 뷰포트 **좌상단**이 가리키는 월드 좌표.
 - **Transform.z / UiNode.z**: 값이 클수록 **앞에** 그려진다. 타일맵 기본값 `-1.0`.
 - **물리 중력**: `Vec2::new(0.0, 9.8)` → Y 아래 방향이 +.
+
+---
+
+## 시스템 실행 순서 (Phase 45)
+
+`add_system`만 사용하면 등록 순서대로 실행된다. `add_system_labeled`와 `SystemConfig`를 사용하면 라벨 기반 위상정렬로 실행 순서를 명시적으로 지정할 수 있다.
+
+### SystemLabel / SystemConfig
+
+```rust
+pub type SystemLabel = &'static str;
+```
+
+`SystemConfig`는 빌더 패턴. `SystemConfig::new()`로 시작해 원하는 제약을 체인한다.
+
+| 메서드 | 설명 |
+|---|---|
+| `.label(l)` | 이 시스템에 라벨을 붙인다. 다른 시스템이 before/after로 참조 가능 |
+| `.before(l)` | 라벨 `l`의 시스템보다 **앞에** 실행되도록 요청 |
+| `.after(l)` | 라벨 `l`의 시스템보다 **뒤에** 실행되도록 요청 |
+| `.in_set(s)` | SystemSet `s`에 배치. 해당 set이 비활성화되면 실행 건너뜀 |
+
+### App 메서드
+
+```rust
+// 라벨/순서/그룹 설정과 함께 시스템 등록
+app.add_system_labeled(system, config);
+
+// SystemSet 활성/비활성. 비활성 set의 시스템은 매 프레임 실행에서 제외됨
+app.set_enabled(set: SystemLabel, enabled: bool);
+```
+
+### 순서 규칙
+
+- `after("X")` → `"X"` 라벨을 가진 모든 시스템 뒤에 배치
+- `before("Y")` → `"Y"` 라벨을 가진 모든 시스템 앞에 배치
+- 동순위(제약 없는 것들)는 **삽입 순서**로 결정됨 (결정적)
+- 순환 의존성 발생 시 `ScheduleError::Cycle(Vec<usize>)` → 삽입 순서 폴백 + 에러 로그
+
+### 사용 예
+
+```rust
+use engine::ecs::schedule::SystemConfig;
+
+// 시스템 등록 — input → movement → render 순서 보장
+app.add_system_labeled(
+    InputSystem,
+    SystemConfig::new().label("input"),
+);
+app.add_system_labeled(
+    MovementSystem,
+    SystemConfig::new()
+        .label("movement")
+        .after("input")
+        .in_set("gameplay"),
+);
+app.add_system_labeled(
+    RenderSyncSystem,
+    SystemConfig::new()
+        .label("render")
+        .after("movement"),
+);
+
+// 디버그 set 전체 비활성화 (릴리스 빌드 시 등)
+app.add_system_labeled(
+    DebugSystem,
+    SystemConfig::new().in_set("debug"),
+);
+app.set_enabled("debug", false);  // DebugSystem 실행 건너뜀
+
+// 런타임에 set 재활성화
+if show_debug {
+    app.set_enabled("debug", true);
+}
+```
+
+> `add_system`(무라벨)은 그대로 동작한다. `add_system_labeled`와 혼용 가능하며, 무라벨 시스템은 제약이 없으므로 삽입 순서로 배치된다.
+
+---
+
+## 물리 레이어 / 센서 (Phase 48)
+
+### CollisionGroups — 비트마스크 레이어
+
+물리 충돌을 레이어별로 선택 적용한다. `memberships`는 이 콜라이더가 속한 레이어 비트, `filter`는 상호작용을 허용할 상대 레이어 비트다. **두 콜라이더가 모두 서로를 허용**해야 충돌/교차가 발생한다.
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CollisionGroups {
+    pub memberships: u32,
+    pub filter: u32,
+}
+```
+
+| 생성자/상수 | 설명 |
+|---|---|
+| `CollisionGroups::new(memberships, filter)` | 비트마스크 직접 지정 |
+| `CollisionGroups::all()` | 모든 레이어와 상호작용 (기본값) |
+| `CollisionGroups::none()` | 아무것도 충돌하지 않음 |
+| `CollisionGroups::layer(bit_index)` | 비트 `bit_index`의 레이어, filter=ALL |
+| `.with_filter(filter)` | filter 비트마스크만 교체 |
+
+**`PhysicsWorld` 연동 메서드:**
+
+| 메서드 | 설명 |
+|---|---|
+| `add_dynamic_box_with_groups(pos, hw, hh, lock, groups)` | 그룹 지정 동적 박스 |
+| `add_static_box_with_groups(pos, hw, hh, groups)` | 그룹 지정 정적 박스 |
+| `add_dynamic_circle_with_groups(pos, r, lock, groups)` | 그룹 지정 동적 원형 |
+| `add_kinematic_box_with_groups(pos, hw, hh, groups)` | 그룹 지정 키네마틱 박스 |
+| `add_kinematic_circle_with_groups(pos, r, groups)` | 그룹 지정 키네마틱 원형 |
+| `set_collision_groups(col_handle, groups) -> bool` | 기존 콜라이더 그룹 변경 |
+| `collision_groups(col_handle) -> Option<CollisionGroups>` | 현재 그룹 조회 |
+
+### 센서 (Trigger Zone)
+
+물리 충돌 반응 없이 **영역 진입만 감지**하는 콜라이더. `TriggerEvent`로 교차 상태를 수신한다.
+
+```rust
+// 정적 박스 센서 생성 (물리 반응 없음)
+let (_, sensor_col) = physics.add_sensor_box(
+    Vec2::new(200.0, 300.0),
+    50.0,  // half_w
+    50.0,  // half_h
+);
+
+// 원형 센서 (그룹 지정 가능)
+let (_, sensor_col) = physics.add_sensor_circle_with_groups(
+    Vec2::new(400.0, 200.0),
+    40.0,  // radius
+    CollisionGroups::layer(2),
+);
+```
+
+### TriggerEvent
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TriggerEvent {
+    Entered(Entity, Entity),
+    Exited(Entity, Entity),
+}
+
+// run() 전 등록 필수
+app.register_event::<TriggerEvent>();
+
+// 시스템에서 수신
+if let Some(events) = world.resource::<Events<TriggerEvent>>() {
+    for ev in events.read() {
+        match ev {
+            TriggerEvent::Entered(a, b) => { /* 진입 */ }
+            TriggerEvent::Exited(a, b)  => { /* 이탈 */ }
+        }
+    }
+}
+```
+
+### 사용 예 — 플레이어/적 레이어 분리 + 함정 트리거 존
+
+```rust
+const LAYER_PLAYER: u32 = 1 << 0;
+const LAYER_ENEMY:  u32 = 1 << 1;
+const LAYER_TRAP:   u32 = 1 << 2;
+
+// 플레이어 — 적하고만 충돌
+let (player_rb, player_col) = physics.add_dynamic_box_with_groups(
+    player_pos, 16.0, 24.0, true,
+    CollisionGroups::new(LAYER_PLAYER, LAYER_ENEMY),
+);
+
+// 적 — 플레이어하고만 충돌
+let (enemy_rb, _) = physics.add_dynamic_box_with_groups(
+    enemy_pos, 16.0, 24.0, true,
+    CollisionGroups::new(LAYER_ENEMY, LAYER_PLAYER),
+);
+
+// 함정 센서 — 플레이어만 감지
+let (_, trap_col) = physics.add_sensor_box_with_groups(
+    trap_pos, 24.0, 24.0,
+    CollisionGroups::new(LAYER_TRAP, LAYER_PLAYER),
+);
+
+// TriggerEvent 수신
+for ev in world.resource::<Events<TriggerEvent>>().unwrap().read() {
+    if let TriggerEvent::Entered(a, b) = ev {
+        // a 또는 b가 함정 센서 엔티티이면 피해 처리
+    }
+}
+```
+
+---
+
+## 텍스트 완성 + IME (Phase 49)
+
+### DrawText — 멀티라인 + 정렬
+
+`DrawText`의 `align`과 `bounds` 필드를 활용해 멀티라인 정렬 텍스트를 렌더링한다.
+
+```rust
+#[derive(Debug, Clone)]
+pub struct DrawText {
+    pub text: String,
+    pub position: Vec2,       // 좌상단 픽셀 좌표 (스크린 스페이스)
+    pub bounds: Option<Vec2>, // 텍스트 레이아웃 영역. None이면 화면 끝까지
+    pub size: f32,            // 폰트 픽셀 크기
+    pub color: [u8; 4],       // RGBA (0~255)
+    pub align: TextAlign,
+    pub rich: bool,
+}
+```
+
+`DrawText`는 빌더 패턴도 지원한다:
+
+```rust
+DrawText::new(text, position, size, color)
+    .with_bounds(Vec2::new(width, height))  // 레이아웃 박스 지정
+    .with_align(TextAlign::Center)          // 정렬 설정
+    .rich()                                 // 리치 텍스트 활성화
+```
+
+### TextAlign
+
+```rust
+pub enum TextAlign { Left, Center, Right }
+```
+
+`bounds`를 설정해야 `Center`/`Right` 정렬이 의미 있다. `bounds`가 `None`이면 화면 끝까지가 레이아웃 폭으로 사용된다.
+
+### 리치 텍스트 (rich: true)
+
+`DrawText::rich()`를 호출하면 다음 마크업 태그를 해석한다:
+
+| 태그 | 효과 |
+|---|---|
+| `[color=#RRGGBB]...[/color]` | 지정 16진수 색상. `#RRGGBBAA`(8자리)로 알파 지정 가능 |
+| `[b]...[/b]` | 굵게 (Bold) |
+| `[i]...[/i]` | 기울임 (Italic) |
+
+태그는 중첩 가능하다. 인식되지 않는 태그는 그대로 출력된다.
+
+```rust
+tq.push(
+    DrawText::new(
+        "[b]안내[/b]: [color=#ff4444]위험[/color] 구역입니다.",
+        Vec2::new(20.0, 20.0),
+        20.0,
+        [255, 255, 255, 255],
+    )
+    .rich(),
+);
+```
+
+### IME — 한글/일본어/중국어 입력
+
+엔진은 `winit`의 `WindowEvent::Ime` 이벤트를 자동으로 처리한다.
+
+- `Preedit` 이벤트 → `InputState::ime_preedit()` — 조합 중인 문자열 미리보기 반환
+- `Commit` 이벤트 → preedit 초기화 + `text_chars()`에 확정 문자 추가
+
+`TextInput` 위젯은 자동으로 `preedit` 필드를 갱신하며, `text_with_preedit()` 메서드로 커서 위치에 조합 중인 문자를 삽입한 전체 텍스트를 얻는다.
+
+| `TextInput` 관련 | 설명 |
+|---|---|
+| `preedit: String` | 현재 IME 조합 중인 문자열 (커밋 전 미리보기) |
+| `text_with_preedit() -> String` | `text` + 커서 위치에 `preedit` 삽입한 문자열 |
+
+직접 `InputState`에서 preedit를 읽으려면:
+
+```rust
+let input = world.resource::<InputState>().unwrap();
+let preedit = input.ime_preedit();  // &str — 조합 중이면 비어있지 않음
+```
+
+### 사용 예 — 정렬된 멀티라인 라벨 + 한글 입력 필드
+
+```rust
+// 중앙 정렬 멀티라인 텍스트
+if let Some(tq) = world.resource_mut::<TextQueue>() {
+    tq.push(
+        DrawText::new(
+            "1라운드 클리어!\n다음 라운드를 준비하세요.",
+            Vec2::new(640.0, 200.0),
+            28.0,
+            [255, 230, 100, 255],
+        )
+        .with_bounds(Vec2::new(400.0, 100.0))
+        .with_align(TextAlign::Center),
+    );
+}
+
+// 한글 입력 필드 (TextInput이 IME 자동 처리)
+let input_entity = world.spawn();
+world.add_component(input_entity, UiNode { ... });
+world.add_component(input_entity, TextInput::new("닉네임 입력").with_font_size(18.0));
+
+// 렌더 시 preedit 포함 텍스트 표시
+if let Some(ti) = world.get::<TextInput>(input_entity) {
+    let display_text = ti.text_with_preedit();
+    // display_text를 DrawText로 렌더링
+}
+```
+
+---
+
+## 로컬라이제이션 (Phase 50)
+
+### 타입 개요
+
+| 타입 | 설명 |
+|---|---|
+| `LocaleResource` | 런타임 로컬라이제이션 리소스. World에 삽입해 사용 |
+| `LocaleBundle` | RON 직렬화용 번들. `default_locale` + `locales` 맵 |
+| `LocaleData` | 한 로케일의 데이터. `translations`, `font`, `direction` |
+| `TextDirection` | `LeftToRight` / `RightToLeft` |
+
+### LocaleResource API
+
+| 메서드 | 반환 | 설명 |
+|---|---|---|
+| `LocaleResource::new(default_locale)` | `Self` | 빈 리소스 생성 |
+| `LocaleResource::from_ron_str(input)` | `Result<Self, _>` | RON 문자열 파싱 |
+| `LocaleResource::from_bundle(bundle)` | `Self` | `LocaleBundle`에서 변환 |
+| `t(key) -> &str` | `&str` | 현재 로케일 조회 → 기본 로케일 폴백 → 키 자체 폴백 |
+| `set_locale(locale) -> bool` | `bool` | 로케일 전환. 없으면 false (현재 로케일 유지) |
+| `insert_locale(locale, data)` | `()` | 로케일 추가/교체 |
+| `current_locale() -> &str` | `&str` | 현재 로케일 ID |
+| `default_locale() -> &str` | `&str` | 기본 로케일 ID |
+| `font() -> Option<&str>` | `Option<&str>` | 현재 로케일의 폰트 파일 경로 |
+| `direction() -> TextDirection` | `TextDirection` | 현재 로케일의 텍스트 방향 |
+
+### RON 번들 형식
+
+```
+(
+    default_locale: "ko",
+    locales: {
+        "ko": (
+            translations: {
+                "menu.start": "시작",
+                "menu.quit": "종료",
+                "ui.hp": "체력",
+            },
+            font: Some("NotoSansKR.otf"),
+            direction: LeftToRight,
+        ),
+        "en": (
+            translations: {
+                "menu.start": "Start",
+                "menu.quit": "Quit",
+                "ui.hp": "HP",
+            },
+            font: Some("Inter.ttf"),
+            direction: LeftToRight,
+        ),
+    },
+)
+```
+
+> **WASM 주의**: 파일 읽기는 호출자 책임이다. `std::fs::read_to_string`은 WASM에서 작동하지 않는다. `include_str!` 매크로나 fetch API로 문자열을 획득한 뒤 `from_ron_str`에 전달해야 한다.
+
+### 사용 예 — 한/영 번역 등록 + 전환 + t() 조회
+
+```rust
+use engine::{LocaleResource, LocaleData};
+
+// 앱 초기화 시
+let ron_src = include_str!("assets/locale.ron");
+let locale = LocaleResource::from_ron_str(ron_src).expect("RON 파싱 실패");
+app.world.insert_resource(locale);
+
+// 시스템에서 번역 조회
+fn run(&mut self, world: &mut World, _dt: f32) {
+    let locale = world.resource::<LocaleResource>().unwrap();
+    let label = locale.t("menu.start");  // 현재 로케일 번역 반환
+
+    // 텍스트 렌더링
+    world.resource_mut::<TextQueue>().unwrap().push(
+        DrawText::new(label, Vec2::new(100.0, 200.0), 24.0, [255, 255, 255, 255]),
+    );
+}
+
+// 로케일 전환
+if let Some(locale) = world.resource_mut::<LocaleResource>() {
+    let switched = locale.set_locale("en");  // true=성공, false=해당 로케일 없음
+}
+
+// 런타임 번역 추가
+if let Some(locale) = world.resource_mut::<LocaleResource>() {
+    let mut data = LocaleData::default();
+    data.translations.insert("msg.hello".into(), "안녕하세요".into());
+    locale.insert_locale("ko", data);
+}
+```
+
+---
+
+## 저장 암호화 (Phase 53)
+
+`save` / `load` API 시그니처는 **Phase 20과 완전히 동일**하다. 암호화는 내부에서 투명하게 처리된다.
+
+### 암호화 방식
+
+- 알고리즘: **XChaCha20-Poly1305 AEAD** (`chacha20poly1305` 크레이트)
+- 파일 포맷: `[매직 9B] [Nonce 12B] [암호문 + 인증태그]`
+- Nonce는 저장할 때마다 랜덤 생성 → 같은 데이터도 매번 다른 파일이 생성됨
+
+### 변조 감지
+
+복호화 인증 실패(파일 변조 또는 손상)는 `SaveError::Corrupted`를 반환한다.
+
+```rust
+#[derive(Debug)]
+pub enum SaveError {
+    Io(io::Error),      // 파일 읽기/쓰기 실패
+    Ron(String),        // 직렬화/역직렬화 실패
+    Corrupted,          // 복호화 인증 실패 — 변조 또는 손상
+}
+```
+
+### API (Phase 20과 동일)
+
+```rust
+use engine::save::{save, load, load_or_default, exists, delete, save_path};
+
+// OS 표준 데이터 디렉토리 경로 계산
+let path = save_path("MyGame", "settings.ron");
+
+// 저장 (자동 암호화)
+save(&path, &my_data)?;
+
+// 로드 (자동 복호화)
+let data: MySettings = load(&path)?;
+
+// 없으면 default 반환, 변조 등 에러는 그대로 전파
+let data: MySettings = load_or_default(&path)?;
+
+// 파일 존재 여부
+if exists(&path) { ... }
+
+// 파일 삭제 (없어도 Ok)
+delete(&path)?;
+```
+
+### 사용 예
+
+암호화를 위해 기존 코드를 변경할 필요가 없다. `save`/`load`를 그대로 쓰면 자동으로 암호화된 파일이 생성되고 복호화되어 읽힌다.
+
+```rust
+#[derive(Serialize, Deserialize, Default)]
+struct GameProgress {
+    level: u32,
+    score: u64,
+    unlocked_items: Vec<String>,
+}
+
+// 저장
+let progress = GameProgress { level: 5, score: 12345, unlocked_items: vec!["sword".into()] };
+save(&save_path("MyGame", "progress.ron"), &progress)?;
+
+// 로드
+let progress: GameProgress = load_or_default(&save_path("MyGame", "progress.ron"))?;
+
+// 변조된 파일 로드 시
+match load::<GameProgress>(&path) {
+    Err(SaveError::Corrupted) => { /* 세이브 초기화 또는 경고 UI */ }
+    Err(SaveError::Io(e)) => { /* 파일 없음 등 IO 에러 */ }
+    Ok(data) => { /* 정상 */ }
+}
+```
+
+> `save_path`는 네이티브에서 OS 표준 데이터 디렉토리(`~/Library/Application Support/` 등)를 반환한다. WASM에서는 `"{app_name}/{file}"` 상대 경로를 반환하며, 파일 I/O 호출은 호출자가 별도로 처리해야 한다.
