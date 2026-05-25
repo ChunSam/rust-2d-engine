@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 42b/42d 갱신: 2026-05-25)  
-엔진 버전: v0.43.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 43 갱신: 2026-05-25)  
+엔진 버전: v0.44.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -74,6 +74,10 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 42a | 2D 노멀 맵 라이팅 — Sprite.normal_texture, PointLight.light_height, 노멀 버퍼, Lambert diffuse WGSL | `bdcd5c8` |
 | Phase 42b | 카메라 이펙트 — shake(strength,duration), follow_entity/lerp_factor, zoom_to(target,speed) | `b83ff6b` |
 | Phase 42d | 오브젝트 풀 — Pool::new/acquire/release/clear, Pooled 마커 컴포넌트 | `b83ff6b` |
+| Phase 43b | 엔티티 복제 — World::clone_entity, register_clone<T>, Inspector Duplicate 버튼 | `e3717c9` |
+| Phase 43c | Debug Draw API — DebugDraw::rect/line/circle/cross, 매 프레임 자동 초기화 | `a6accb5` |
+| Phase 43d | 타임라인/컷씬 — Timeline, Track<T>, Keyframe, Lerp 트레잇, TimelineSystem | `6fc4007` |
+| Phase 43a | 씬 전환 트랜지션 — FadeTransition::fade_in/out, FadeRenderer (WGSL alpha blend) | `c4a05f6` |
 
 ---
 
@@ -138,6 +142,70 @@ src/
 │       └── post_process.wgsl                                      ← Phase 10
 └── save.rs           RON 세이브/불러오기 (save/load/load_or_default/exists/delete)
 ```
+
+---
+
+## 이번 세션에서 한 일 (Phase 43)
+
+### Phase 43b — 엔티티 복제
+
+**배경**: Inspector에서 엔티티를 복제할 방법이 없었고, 시스템 코드에서도 엔티티를 프로그래밍 방식으로 복사하는 API가 없었다.
+
+**변경 파일**: `src/ecs/world.rs`, `src/app.rs`
+
+**추가 기능**:
+- `World::register_clone<T>()` — TypeId별 clone 클로저 등록
+- `World::clone_entity(src) -> Entity` — 등록된 모든 타입을 복사 (remove→call→reinsert 패턴으로 borrow 충돌 방지)
+- `World::has_component_typeid(entity, TypeId) -> bool` — TypeId로 컴포넌트 존재 확인
+- 기본 등록 타입: `Transform`, `Sprite`, `RenderLayer`, `Tag`, `AnimationPlayer`, `Timer`
+- Inspector "Duplicate" 버튼 — (16,16) 오프셋 적용 후 새 엔티티 선택
+- 단위 테스트 3개
+
+---
+
+### Phase 43c — Debug Draw API
+
+**배경**: 게임 시스템에서 디버그 도형(충돌 박스, 경로, 반경)을 그리려면 ECS 엔티티를 직접 만들거나 기존 `DebugDrawQueue`(Rect만 지원)를 직접 사용해야 했다.
+
+**변경 파일**: `src/resources.rs`, `src/app.rs`, `src/lib.rs`
+
+**추가 기능**:
+- `DebugShape` enum: `Rect`, `Line`, `Circle`, `Cross`
+- `DebugDraw` 리소스: `rect/line/line_thick/circle/cross/clear/shapes` 메서드
+- 렌더링: `DrawRect`/`UiQueue`로 변환 (lines = dot-chain, circles = 24각형)
+- App 자동 등록 + 렌더 후 `std::mem::take`로 자동 초기화
+- 단위 테스트 4개
+
+---
+
+### Phase 43d — 타임라인/컷씬
+
+**배경**: 엔티티 움직임·색상 변화를 시간 기반으로 제어하는 표준 API가 없었다. 커스텀 타이머 시스템으로 각각 구현해야 했다.
+
+**변경 파일**: `src/timeline.rs` (신규), `src/lib.rs`
+
+**추가 기능**:
+- `Lerp` 트레잇: `f32`, `Vec2`, `[f32;4]` 구현
+- `Keyframe<T>` — `time`, `value`, `easing: Easing` (기존 tween.rs 재사용)
+- `Track<T: Clone+Lerp>` — 키프레임 정렬, `sample(t)` 이진탐색 보간, `add/duration/is_empty`
+- `Timeline` ECS 컴포넌트 — `position/rotation/scale/color/alpha` 트랙, `playing/looping`, `play/pause/restart/is_finished`
+- `TimelineSystem` — `take_component` 패턴으로 borrow 없이 Transform/Sprite에 적용
+- 단위 테스트 11개
+
+---
+
+### Phase 43a — 씬 전환 트랜지션
+
+**배경**: 씬 전환 시 순간 교체되어 시각적 연속성이 없었다. Fade in/out 오버레이로 부드러운 전환을 제공한다.
+
+**변경 파일**: `src/renderer/fade.rs` (신규), `src/renderer/mod.rs`, `src/resources.rs`, `src/app.rs`, `src/lib.rs`
+
+**추가 기능**:
+- `FadeTransition` 리소스: `fade_out(duration)`, `fade_in(duration)`, `.with_color(r,g,b)`, `update(dt)`, `finished` 필드
+- `FadeRenderer` (네이티브 전용): 전체 화면 단색 쿼드, `alpha blend`, `LoadOp::Load` (오버레이)
+- WGSL 셰이더: `FadeUniforms { color: vec3, alpha: f32 }` 16바이트 유니폼
+- App 통합: 지연 초기화, 모든 렌더 패스 이후 마지막에 실행, `alpha > 0.001`일 때만 패스 실행
+- 단위 테스트 4개
 
 ---
 

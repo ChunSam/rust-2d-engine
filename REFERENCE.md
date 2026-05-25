@@ -1,6 +1,6 @@
 # rust-2d-engine 레퍼런스
 
-> 버전 v0.43.0 기준. wgpu 기반 2D 게임 엔진.
+> 버전 v0.44.0 기준. wgpu 기반 2D 게임 엔진.
 
 ---
 
@@ -41,7 +41,11 @@
 33. [2D 노멀 맵 라이팅](#2d-노멀-맵-라이팅)
 34. [카메라 이펙트](#카메라-이펙트)
 35. [오브젝트 풀](#오브젝트-풀)
-36. [좌표 규약](#좌표-규약)
+36. [엔티티 복제](#엔티티-복제)
+37. [Debug Draw API](#debug-draw-api)
+38. [씬 전환 트랜지션](#씬-전환-트랜지션)
+39. [타임라인/컷씬](#타임라인컷씬)
+40. [좌표 규약](#좌표-규약)
 
 ---
 
@@ -2114,6 +2118,236 @@ impl System for BulletSystem {
         }
     }
 }
+```
+
+---
+
+## 엔티티 복제
+
+`World::clone_entity(src)` — 등록된 컴포넌트를 복사해 새 엔티티를 생성한다.
+
+### 기본 사용
+
+```rust
+let new_entity = world.clone_entity(original_entity);
+
+// 위치를 약간 오프셋
+if let Some(t) = world.get_mut::<Transform>(new_entity) {
+    t.position += Vec2::new(16.0, 16.0);
+}
+```
+
+### 복제 가능 타입 등록
+
+기본 등록 타입: `Transform`, `Sprite`, `RenderLayer`, `Tag`, `AnimationPlayer`, `Timer`
+
+커스텀 컴포넌트도 등록 가능:
+
+```rust
+// App 초기화 시
+app.world.register_clone::<MyComponent>();
+```
+
+`register_clone<T>()` 는 `T: Clone + Send + Sync + 'static` 을 요구한다. 등록되지 않은 타입은 복제 시 무시된다.
+
+### Inspector Duplicate 버튼
+
+에디터 Inspector 패널에 "Duplicate" 버튼이 추가되었다. 선택된 엔티티를 복제하고 (16, 16) 오프셋 적용 후 새 엔티티를 선택한다.
+
+---
+
+## Debug Draw API
+
+시스템에서 직접 호출해 화면에 디버그 도형을 그린다. App이 렌더링 후 자동으로 초기화하므로 매 프레임 새로 그리면 된다.
+
+### 기본 사용
+
+```rust
+impl System for MySystem {
+    fn run(&mut self, world: &mut World, _dt: f32) {
+        if let Some(dbg) = world.resource_mut::<DebugDraw>() {
+            // AABB 박스
+            dbg.rect(Vec2::new(0., 0.), Vec2::new(64., 64.), [1., 0., 0., 1.]);
+            // 반경 표시
+            dbg.circle(player_pos, attack_radius, [0., 1., 0., 0.5]);
+            // 경로 시각화
+            dbg.line(from, to, [1., 1., 0., 1.]);
+            // 포인트 마커
+            dbg.cross(waypoint, 8., [0., 0., 1., 1.]);
+        }
+    }
+}
+```
+
+### API
+
+| 메서드 | 설명 |
+|---|---|
+| `rect(min, max, color)` | 축 정렬 사각형 외곽선 |
+| `line(start, end, color)` | 직선 (두께 1.5px) |
+| `line_thick(start, end, color, thickness)` | 두께 지정 직선 |
+| `circle(center, radius, color)` | 원 (24각형 근사) |
+| `cross(pos, size, color)` | 십자 마커 |
+| `clear()` | 도형 초기화 (App이 자동 호출) |
+
+모든 도형은 z=999로 렌더링되어 게임 오브젝트 위에 표시된다. 색상은 `[r, g, b, a]` (0.0~1.0).
+
+---
+
+## 씬 전환 트랜지션
+
+`FadeTransition` 리소스를 등록하면 App이 전체 화면 컬러 오버레이를 자동으로 애니메이션한다.
+
+### 페이드 아웃 (화면이 어두워짐)
+
+```rust
+// 0.5초 동안 검정으로 페이드 아웃
+world.insert_resource(FadeTransition::fade_out(0.5));
+
+// 완료 여부 확인
+if let Some(fade) = world.resource::<FadeTransition>() {
+    if fade.finished {
+        // 씬 전환 실행
+        world.resource_mut::<SceneChange>().unwrap().0 =
+            Some(SceneCmd::Replace(Box::new(NextScene)));
+    }
+}
+```
+
+### 페이드 인 (화면이 밝아짐)
+
+```rust
+// 씬 시작 시 0.3초 페이드 인
+world.insert_resource(FadeTransition::fade_in(0.3));
+```
+
+### 커스텀 색상
+
+```rust
+world.insert_resource(
+    FadeTransition::fade_out(0.8).with_color(1.0, 1.0, 1.0) // 흰색 페이드
+);
+```
+
+### API
+
+| 메서드 | 설명 |
+|---|---|
+| `FadeTransition::fade_out(duration)` | 투명 → 불투명 (검정) |
+| `FadeTransition::fade_in(duration)` | 불투명 → 투명 |
+| `.with_color(r, g, b)` | 오버레이 색상 변경 (기본: 검정) |
+| `fade.finished` | 페이드 완료 여부 |
+| `fade.alpha` | 현재 알파값 (0.0~1.0) |
+
+> **플랫폼**: 네이티브 전용. WASM 빌드에서는 비활성화.
+
+### 씬 전환 패턴 (페이드 아웃 → 전환 → 페이드 인)
+
+```rust
+struct GameScene { fade_out_done: bool }
+
+impl Scene for GameScene {
+    fn on_enter(&mut self, world: &mut World, app: &mut App) {
+        // 씬 진입 시 페이드 인
+        world.insert_resource(FadeTransition::fade_in(0.4));
+        self.fade_out_done = false;
+    }
+}
+
+struct GameSystem;
+impl System for GameSystem {
+    fn run(&mut self, world: &mut World, _dt: f32) {
+        // 특정 조건에서 페이드 아웃 → 씬 전환
+        if player_dead && !fade_started {
+            world.insert_resource(FadeTransition::fade_out(0.6));
+        }
+        if let Some(fade) = world.resource::<FadeTransition>() {
+            if fade.finished && fade.alpha > 0.5 {
+                // 페이드 아웃 완료 → 씬 전환
+                world.resource_mut::<SceneChange>().unwrap().0 =
+                    Some(SceneCmd::Replace(Box::new(GameOverScene)));
+            }
+        }
+    }
+}
+```
+
+---
+
+## 타임라인/컷씬
+
+`Timeline` ECS 컴포넌트로 엔티티의 위치·회전·색상을 키프레임 기반으로 애니메이션한다.
+
+### 기본 사용
+
+```rust
+use engine::{Timeline, TimelineSystem, Easing};
+
+// 2초 타임라인 생성
+let mut tl = Timeline::new(2.0);
+
+// 위치 트랙 추가
+tl.position.add(0.0, Vec2::new(0., 0.), Easing::Linear);
+tl.position.add(1.0, Vec2::new(300., 0.), Easing::EaseOut);
+tl.position.add(2.0, Vec2::new(300., 200.), Easing::EaseInOut);
+
+// 색상 페이드
+tl.color.add(0.0, [1., 0., 0., 1.], Easing::Linear);  // 빨강
+tl.color.add(2.0, [0., 0., 1., 1.], Easing::Linear);  // 파랑
+
+world.add_component(entity, tl);
+app.add_system(TimelineSystem);
+```
+
+### 트랙 종류
+
+| 트랙 | 타입 | 적용 대상 |
+|------|------|-----------|
+| `position` | `Track<Vec2>` | `Transform.position` |
+| `rotation` | `Track<f32>` | `Transform.rotation` (라디안) |
+| `scale` | `Track<Vec2>` | `Transform.scale` |
+| `color` | `Track<[f32;4]>` | `Sprite.color` |
+| `alpha` | `Track<f32>` | `Sprite.color[3]` |
+
+### Timeline 제어
+
+```rust
+let tl = world.get_mut::<Timeline>(entity).unwrap();
+tl.pause();    // 일시 정지
+tl.play();     // 재생 재개
+tl.restart();  // 처음부터 재생
+tl.looping = true; // 반복 재생
+
+// 완료 확인
+if tl.is_finished() { ... }
+```
+
+### 반복 재생
+
+```rust
+let mut tl = Timeline::new(1.5).looping(); // builder 패턴
+tl.position.add(0.0, Vec2::new(0., 0.), Easing::EaseIn);
+tl.position.add(1.5, Vec2::new(0., 100.), Easing::EaseOut);
+```
+
+### Easing 종류
+
+`Easing::Linear`, `EaseIn`, `EaseOut`, `EaseInOut`, `EaseInCubic`, `EaseOutBounce` 등 — `src/tween.rs` 참조.
+
+### 카메라 컷씬 예
+
+```rust
+// 카메라 엔티티에 타임라인 추가
+let cam_entity = world.spawn();
+world.add_component(cam_entity, Transform::default());
+
+let mut tl = Timeline::new(4.0);
+tl.position.add(0.0, Vec2::new(0., 0.), Easing::EaseInOut);
+tl.position.add(2.0, Vec2::new(500., 300.), Easing::EaseInOut);
+tl.position.add(4.0, Vec2::new(0., 0.), Easing::EaseInOut);
+world.add_component(cam_entity, tl);
+
+// Camera 리소스를 cam_entity Transform과 동기화하는 별도 시스템 추가
 ```
 
 ---
