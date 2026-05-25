@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 39 갱신: 2026-05-25)  
-엔진 버전: v0.39.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 40 갱신: 2026-05-25)  
+엔진 버전: v0.40.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -215,6 +215,20 @@ cargo run --example mp_client   # 터미널 2, 3, ...
 - `sprite.rs render()` 반환 타입 `RenderStats`로 변경, culling/draw call 카운터 수집
 - Engine Stats 패널에 "Systems" / "Render" collapsible 섹션 추가, `resizable(true)`로 변경
 - `ProfilerData`, `RenderStats`, `SystemProfile` re-export (`lib.rs`)
+
+---
+
+### Phase 40c — Gizmo Grid Snap
+
+**배경**: Gizmo 드래그로 엔티티를 이동할 때 픽셀 단위로만 배치되어 타일맵·격자 기반 레벨 디자인에서 정렬이 불편했다.
+
+**변경 파일**: `src/app.rs`
+
+**추가 기능**:
+- `snap_to_grid(pos: Vec2, snap_size: f32) -> Vec2` 헬퍼 함수 (네이티브 전용)
+- `App` 구조체 필드: `snap_enabled: bool` (기본 `false`), `snap_size: f32` (기본 `16.0`)
+- Inspector Entities 탭 상단에 "Snap" 체크박스 + 격자 크기 `DragValue` (1~128 px, suffix " px")
+- Gizmo 드래그 위치 계산 후 `snap_enabled`이면 `snap_to_grid` 적용
 
 ---
 
@@ -1553,6 +1567,8 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 38d~~ | ~~Rhai 스크립팅 API 확장 — spawn/despawn/Blackboard/Steering~~ | — | 완료 |
 | ~~Phase 39b~~ | ~~Inspector 컴포넌트 추가/제거 UI — 팩토리 패턴 + ComboBox + ✕ 버튼~~ | — | 완료 |
 | ~~Phase 39d~~ | ~~REFERENCE.md v0.38.0 — Steering/Blackboard/Commands/SceneGraph/Rhai 문서화~~ | — | 완료 |
+| ~~Phase 40c~~ | ~~Gizmo Grid Snap — 체크박스 + 격자 크기 DragValue + snap_to_grid 헬퍼~~ | — | 완료 |
+| ~~Phase 40d~~ | ~~REFERENCE.md v0.39.0 — 컴포넌트 추가/제거 UI, register_component 문서화~~ | — | 완료 |
 
 ---
 
