@@ -28,6 +28,7 @@ pub use save::{delete, exists, load, load_or_default, save, save_path, SaveError
 pub mod scene;
 pub mod scripting;
 pub mod tilemap;
+pub mod timeline;
 pub mod timer;
 pub mod tween;
 pub mod steering;
@@ -81,6 +82,7 @@ pub use scene::{Scene, SceneChange, SceneCmd};
 pub use scripting::{ScriptRunner, ScriptingSystem};
 pub use steering::{Arrive, Flee, Seek, SteeringSystem, SteeringVelocity, Wander};
 pub use tilemap::{Tilemap, TilemapAtlas, TilemapSystem};
+pub use timeline::{Keyframe, Lerp, Timeline, TimelineSystem, Track};
 pub use timer::Timer;
 pub use tween::{Easing, Tween};
 pub use ui::{
