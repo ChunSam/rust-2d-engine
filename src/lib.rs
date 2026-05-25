@@ -46,7 +46,7 @@ pub use behavior::{Blackboard, BlackboardValue};
 pub use asset::{AssetLoadState, AssetServer, Handle, ImageAsset, ImageEntry, ScriptAsset};
 pub use atlas::{AtlasSprite, TextureAtlas};
 #[cfg(not(target_arch = "wasm32"))]
-pub use audio::AudioManager;
+pub use audio::{AudioEffect, AudioManager};
 pub use camera::Camera;
 pub use collision::{
     Collider, CollisionDebugSystem, CollisionGridSystem, CollisionLayer, DebugConfig, SpatialGrid,
@@ -61,7 +61,8 @@ pub use pathfinding::{find_path, PathGrid};
 pub use pool::{Pool, Pooled};
 #[cfg(not(target_arch = "wasm32"))]
 pub use physics::{
-    CharacterController, CollisionEvent, PhysicsBody, PhysicsSystem, PhysicsWorld, RaycastHit,
+    CharacterController, CollisionEvent, ImpulseJointHandle, PhysicsBody, PhysicsSystem,
+    PhysicsWorld, RaycastHit,
 };
 pub use prefab::{
     spawn_entity_def, spawn_scene_def, topological_sort_entities, EntityDef, Prefab,
