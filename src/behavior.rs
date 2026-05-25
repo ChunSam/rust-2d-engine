@@ -131,6 +131,11 @@ impl Blackboard {
             _ => None,
         }
     }
+
+    /// 모든 (key, value) 쌍을 반환한다. 스냅샷 용도 (스크립팅 시스템에서 사용).
+    pub fn entries(&self) -> impl Iterator<Item = (&str, &BlackboardValue)> {
+        self.values.iter().map(|(k, v)| (k.as_str(), v))
+    }
 }
 
 impl Default for Blackboard {
