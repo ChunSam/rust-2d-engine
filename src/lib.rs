@@ -70,8 +70,8 @@ pub use physics::{
 };
 pub use pool::{Pool, Pooled};
 pub use prefab::{
-    spawn_entity_def, spawn_scene_def, topological_sort_entities, EntityDef, Prefab, SceneDef, Tag,
-    SCENE_DEF_VERSION,
+    break_prefab_instance, spawn_entity_def, spawn_scene_def, topological_sort_entities, EntityDef,
+    Prefab, PrefabInstance, SceneDef, Tag, SCENE_DEF_VERSION,
 };
 // par_query_for_each / par_query_map / par_query2_for_each / par_query2_map 은
 // World 메서드이므로 World re-export를 통해 자동 접근 가능 (별도 re-export 불필요)

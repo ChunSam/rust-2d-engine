@@ -200,6 +200,19 @@ fn write_crash_log(system_name: &str, message: &str) {
     }
 }
 
+/// 엔티티의 컴포넌트(Tag, Transform, Sprite)를 `EntityDef`로 변환한다 (네이티브 전용).
+///
+/// 복사/붙여넣기에 사용된다.
+#[cfg(not(target_arch = "wasm32"))]
+fn entity_to_def(world: &World, entity: Entity) -> Option<crate::prefab::EntityDef> {
+    Some(crate::prefab::EntityDef {
+        tag: world.get::<crate::prefab::Tag>(entity).map(|t| t.0.clone()),
+        transform: world.get::<crate::components::Transform>(entity).cloned(),
+        sprite: world.get::<crate::components::Sprite>(entity).cloned(),
+        parent: None,
+    })
+}
+
 /// Gizmo 위치를 격자(grid) 단위로 스냅한다 (네이티브 전용).
 #[cfg(not(target_arch = "wasm32"))]
 fn snap_to_grid(pos: glam::Vec2, snap_size: f32) -> glam::Vec2 {
@@ -274,6 +287,12 @@ pub struct App {
     egui_output: Option<(Vec<egui::ClippedPrimitive>, egui::TexturesDelta, f32)>,
     /// Inspector 패널에서 현재 선택된 엔티티.
     inspector_selected: Option<Entity>,
+    /// 멀티 선택된 엔티티 목록 (inspector_selected 포함).
+    #[cfg(not(target_arch = "wasm32"))]
+    selected_entities: Vec<Entity>,
+    /// Ctrl+C로 복사된 EntityDef 클립보드.
+    #[cfg(not(target_arch = "wasm32"))]
+    copy_clipboard: Vec<crate::prefab::EntityDef>,
     /// Gizmo 드래그 중인지 여부.
     gizmo_dragging: bool,
     /// 드래그 시작 시 (엔티티 position - 커서 월드 좌표) 오프셋.
@@ -371,6 +390,8 @@ impl App {
             egui_state: None,
             egui_output: None,
             inspector_selected: None,
+            selected_entities: Vec::new(),
+            copy_clipboard: Vec::new(),
             gizmo_dragging: false,
             gizmo_drag_offset: glam::Vec2::ZERO,
             editor_save_path: "saved_scene.ron".into(),
@@ -657,6 +678,11 @@ impl App {
             .register_clone::<crate::animation::player::AnimationPlayer>();
         self.world.register_clone::<crate::timer::Timer>();
         self.inspector_selected = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.selected_entities.clear();
+            self.copy_clipboard.clear();
+        }
         self.editor_save_status = None;
     }
 
@@ -944,8 +970,13 @@ impl App {
         if let Some(sel) = self.inspector_selected {
             if !self.world.is_alive(sel) {
                 self.inspector_selected = None;
+                #[cfg(not(target_arch = "wasm32"))]
+                self.selected_entities.clear();
             }
         }
+        // 멀티 선택 목록에서 죽은 엔티티 제거 (네이티브 전용)
+        #[cfg(not(target_arch = "wasm32"))]
+        self.selected_entities.retain(|&e| self.world.is_alive(e));
         let entity_list: Vec<Entity> = self.world.entities().to_vec();
         let tag_map: HashMap<Entity, String> = self
             .world
@@ -999,24 +1030,65 @@ impl App {
 
         // 내장 EngineStats 패널 + Inspector
         if let Some(ctx) = &egui_ctx {
-            // ── Undo (Ctrl+Z) / Redo (Ctrl+Shift+Z) ─────────────────────────
+            // ── Undo (Ctrl+Z) / Redo (Ctrl+Shift+Z) / Copy (Ctrl+C) / Paste (Ctrl+V) ─
             #[cfg(not(target_arch = "wasm32"))]
             {
-                let (want_undo, want_redo) = ctx.input(|i| {
+                let (want_undo, want_redo, want_copy, want_paste) = ctx.input(|i| {
                     let ctrl = i.modifiers.ctrl;
                     let z = i.key_pressed(egui::Key::Z);
                     let shift = i.modifiers.shift;
-                    (ctrl && z && !shift, ctrl && z && shift)
+                    let c = i.key_pressed(egui::Key::C);
+                    let v = i.key_pressed(egui::Key::V);
+                    (ctrl && z && !shift, ctrl && z && shift, ctrl && c, ctrl && v)
                 });
                 if want_undo {
                     let mut sel = self.inspector_selected;
                     self.cmd_history.undo(&mut self.world, &mut sel);
                     self.inspector_selected = sel;
+                    if let Some(s) = self.inspector_selected {
+                        if !self.selected_entities.contains(&s) {
+                            self.selected_entities = vec![s];
+                        }
+                    } else {
+                        self.selected_entities.clear();
+                    }
                 }
                 if want_redo {
                     let mut sel = self.inspector_selected;
                     self.cmd_history.redo(&mut self.world, &mut sel);
                     self.inspector_selected = sel;
+                    if let Some(s) = self.inspector_selected {
+                        if !self.selected_entities.contains(&s) {
+                            self.selected_entities = vec![s];
+                        }
+                    } else {
+                        self.selected_entities.clear();
+                    }
+                }
+                // Ctrl+C: 선택된 엔티티를 EntityDef 클립보드에 복사
+                if want_copy && !self.selected_entities.is_empty() {
+                    let to_copy: Vec<Entity> = self.selected_entities.clone();
+                    self.copy_clipboard = to_copy
+                        .iter()
+                        .filter_map(|&e| entity_to_def(&self.world, e))
+                        .collect();
+                }
+                // Ctrl+V: 클립보드에서 엔티티 붙여넣기 (20px 오프셋)
+                if want_paste && !self.copy_clipboard.is_empty() {
+                    let defs: Vec<crate::prefab::EntityDef> = self.copy_clipboard.clone();
+                    let mut pasted: Vec<Entity> = Vec::new();
+                    for mut def in defs {
+                        if let Some(ref mut t) = def.transform {
+                            t.position += glam::Vec2::new(20.0, 20.0);
+                        }
+                        let e = crate::prefab::spawn_entity_def(&mut self.world, &def);
+                        pasted.push(e);
+                    }
+                    // 붙여넣은 첫 번째 엔티티를 주 선택으로 설정
+                    if let Some(&first) = pasted.first() {
+                        self.inspector_selected = Some(first);
+                        self.selected_entities = pasted;
+                    }
                 }
             }
             if self
@@ -1118,6 +1190,7 @@ impl App {
                         if self.inspector_tab == 2 {
                             // 씬 그래프: 루트 → 자식 들여쓰기 트리
                             let mut clicked_entity: Option<Entity> = None;
+                            let mut ctrl_clicked: bool = false;
 
                             egui::ScrollArea::vertical()
                                 .id_salt("scene_graph")
@@ -1134,8 +1207,9 @@ impl App {
                                             .get(&entity)
                                             .cloned()
                                             .unwrap_or_else(|| format!("Entity {}", entity.0));
+                                        // 멀티 선택: selected_entities 기준으로 강조
                                         let is_selected =
-                                            self.inspector_selected == Some(entity);
+                                            self.selected_entities.contains(&entity);
                                         let has_children = children_map
                                             .get(&entity)
                                             .map(|c| !c.is_empty())
@@ -1150,6 +1224,7 @@ impl App {
                                         );
                                         if response.clicked() {
                                             clicked_entity = Some(entity);
+                                            ctrl_clicked = ui.input(|i| i.modifiers.ctrl);
                                         }
 
                                         // 자식을 역순으로 스택에 push (DFS 순서 유지)
@@ -1162,7 +1237,21 @@ impl App {
                                 });
 
                             if let Some(e) = clicked_entity {
-                                self.inspector_selected = Some(e);
+                                if ctrl_clicked {
+                                    // Ctrl+클릭: 멀티 선택 토글
+                                    if let Some(pos) = self.selected_entities.iter().position(|&x| x == e) {
+                                        self.selected_entities.remove(pos);
+                                        // inspector_selected를 마지막 선택 또는 None으로
+                                        self.inspector_selected = self.selected_entities.last().copied();
+                                    } else {
+                                        self.selected_entities.push(e);
+                                        self.inspector_selected = Some(e);
+                                    }
+                                } else {
+                                    // 일반 클릭: 단일 선택
+                                    self.inspector_selected = Some(e);
+                                    self.selected_entities = vec![e];
+                                }
                             }
 
                             // 선택된 엔티티의 Tag 이름 편집
@@ -1251,7 +1340,10 @@ impl App {
                                 );
                                 self.inspector_selected = Some(e);
                                 #[cfg(not(target_arch = "wasm32"))]
-                                self.cmd_history.push(EditorCmd::CreateEntity { entity: e });
+                                {
+                                    self.selected_entities = vec![e];
+                                    self.cmd_history.push(EditorCmd::CreateEntity { entity: e });
+                                }
                             }
                             if let Some(sel) = self.inspector_selected {
                                 if ui
@@ -1267,6 +1359,8 @@ impl App {
                                     }
                                     self.world.despawn(sel);
                                     self.inspector_selected = None;
+                                    #[cfg(not(target_arch = "wasm32"))]
+                                    self.selected_entities.retain(|&x| x != sel);
                                 }
                                 if ui
                                     .add_enabled(true, egui::Button::new("⎘ Duplicate"))
@@ -1277,6 +1371,10 @@ impl App {
                                         t.position += glam::Vec2::new(16.0, 16.0);
                                     }
                                     self.inspector_selected = Some(new_entity);
+                                    #[cfg(not(target_arch = "wasm32"))]
+                                    {
+                                        self.selected_entities = vec![new_entity];
+                                    }
                                 }
                             }
                         });
@@ -1295,14 +1393,33 @@ impl App {
                                                 .get(&e)
                                                 .cloned()
                                                 .unwrap_or_else(|| format!("E{}", e.0));
-                                            if ui
-                                                .selectable_label(
-                                                    self.inspector_selected == Some(e),
-                                                    &label,
-                                                )
-                                                .clicked()
-                                            {
-                                                self.inspector_selected = Some(e);
+                                            // 멀티 선택 강조 (네이티브) 또는 단일 선택 (WASM)
+                                            #[cfg(not(target_arch = "wasm32"))]
+                                            let is_sel = self.selected_entities.contains(&e);
+                                            #[cfg(target_arch = "wasm32")]
+                                            let is_sel = self.inspector_selected == Some(e);
+                                            let resp = ui.selectable_label(is_sel, &label);
+                                            if resp.clicked() {
+                                                #[cfg(not(target_arch = "wasm32"))]
+                                                {
+                                                    if ui.input(|i| i.modifiers.ctrl) {
+                                                        // Ctrl+클릭: 토글
+                                                        if let Some(pos) = self.selected_entities.iter().position(|&x| x == e) {
+                                                            self.selected_entities.remove(pos);
+                                                            self.inspector_selected = self.selected_entities.last().copied();
+                                                        } else {
+                                                            self.selected_entities.push(e);
+                                                            self.inspector_selected = Some(e);
+                                                        }
+                                                    } else {
+                                                        self.inspector_selected = Some(e);
+                                                        self.selected_entities = vec![e];
+                                                    }
+                                                }
+                                                #[cfg(target_arch = "wasm32")]
+                                                {
+                                                    self.inspector_selected = Some(e);
+                                                }
                                             }
                                         }
                                     });
@@ -1468,6 +1585,27 @@ impl App {
                             }
                         }
 
+                        // ── PrefabInstance / Break Prefab (네이티브 전용) ─────────
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if let Some(sel) = self.inspector_selected {
+                            let prefab_path = self
+                                .world
+                                .get::<crate::prefab::PrefabInstance>(sel)
+                                .map(|pi| pi.source_path.clone());
+                            if let Some(path) = prefab_path {
+                                ui.separator();
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("Prefab: {path}"));
+                                    if ui.button("Break Prefab").clicked() {
+                                        crate::prefab::break_prefab_instance(
+                                            &mut self.world,
+                                            sel,
+                                        );
+                                    }
+                                });
+                            }
+                        }
+
                         // ── 선택 엔티티 이름(Tag) 편집 (네이티브 전용) ──────────────
                         #[cfg(not(target_arch = "wasm32"))]
                         if let Some(sel) = self.inspector_selected {
@@ -1517,6 +1655,7 @@ impl App {
                                                 self.world.despawn(e);
                                             }
                                             self.inspector_selected = None;
+                                            self.selected_entities.clear();
                                             let count = scene_def.entities.len();
                                             crate::prefab::spawn_scene_def(
                                                 &mut self.world,
@@ -1681,17 +1820,42 @@ impl App {
                         }
 
                         if self.gizmo_dragging && held {
-                            if let Some(t) = self.world.get_mut::<crate::components::Transform>(sel)
+                            let new_pos = world_pos + self.gizmo_drag_offset;
+                            #[cfg(not(target_arch = "wasm32"))]
+                            let final_pos = if self.snap_enabled {
+                                snap_to_grid(new_pos, self.snap_size)
+                            } else {
+                                new_pos
+                            };
+                            #[cfg(target_arch = "wasm32")]
+                            let final_pos = new_pos;
+
+                            // 드래그 엔티티의 이전 위치를 구해 delta 계산 후 그룹 이동
+                            #[cfg(not(target_arch = "wasm32"))]
                             {
-                                let new_pos = world_pos + self.gizmo_drag_offset;
-                                #[cfg(not(target_arch = "wasm32"))]
-                                let final_pos = if self.snap_enabled {
-                                    snap_to_grid(new_pos, self.snap_size)
-                                } else {
-                                    new_pos
-                                };
-                                #[cfg(target_arch = "wasm32")]
-                                let final_pos = new_pos;
+                                let old_pos = self.world
+                                    .get::<crate::components::Transform>(sel)
+                                    .map(|t| t.position)
+                                    .unwrap_or(final_pos);
+                                let delta = final_pos - old_pos;
+                                // 주 엔티티 이동
+                                if let Some(t) = self.world.get_mut::<crate::components::Transform>(sel) {
+                                    t.position = final_pos;
+                                }
+                                // 나머지 선택 엔티티에 같은 delta 적용
+                                let others: Vec<Entity> = self.selected_entities
+                                    .iter()
+                                    .copied()
+                                    .filter(|&e| e != sel)
+                                    .collect();
+                                for other in others {
+                                    if let Some(t) = self.world.get_mut::<crate::components::Transform>(other) {
+                                        t.position += delta;
+                                    }
+                                }
+                            }
+                            #[cfg(target_arch = "wasm32")]
+                            if let Some(t) = self.world.get_mut::<crate::components::Transform>(sel) {
                                 t.position = final_pos;
                             }
                         }

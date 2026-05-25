@@ -184,6 +184,35 @@ impl SceneDef {
     }
 }
 
+// ─── PrefabInstance ───────────────────────────────────────────────────────────
+
+/// 엔티티가 어떤 프리팹 파일에서 스폰됐는지 추적한다.
+///
+/// Inspector에서 "Break Prefab" 버튼으로 제거할 수 있다.
+///
+/// # 예
+/// ```rust,no_run
+/// use engine::prefab::{Prefab, break_prefab_instance};
+/// use engine::ecs::World;
+/// use std::path::Path;
+///
+/// let mut world = engine::ecs::World::new();
+/// let prefab = Prefab::load(Path::new("prefabs/coin.ron")).unwrap();
+/// let entity = prefab.spawn_with_tracking(&mut world, "prefabs/coin.ron");
+/// // 나중에 링크를 끊으려면:
+/// break_prefab_instance(&mut world, entity);
+/// ```
+#[derive(Clone)]
+pub struct PrefabInstance {
+    /// 소스 프리팹 파일 경로 (정보 표시용)
+    pub source_path: String,
+}
+
+/// 엔티티에서 `PrefabInstance` 마커를 제거해 프리팹 링크를 끊는다.
+pub fn break_prefab_instance(world: &mut World, entity: Entity) {
+    world.remove_component::<PrefabInstance>(entity);
+}
+
 // ─── Prefab ───────────────────────────────────────────────────────────────────
 
 /// 파일 하나에 저장된 단일 엔티티 템플릿.
@@ -219,6 +248,15 @@ impl Prefab {
     /// 프리팹을 월드에 스폰하고 생성된 엔티티를 반환한다.
     pub fn spawn(&self, world: &mut World) -> Entity {
         spawn_entity_def(world, &self.def)
+    }
+
+    /// 프리팹을 월드에 스폰하고 `PrefabInstance` 마커를 붙여 반환한다.
+    ///
+    /// Inspector의 "Break Prefab" 버튼으로 링크를 끊을 수 있다.
+    pub fn spawn_with_tracking(&self, world: &mut World, path: impl Into<String>) -> Entity {
+        let entity = self.spawn(world);
+        world.add_component(entity, PrefabInstance { source_path: path.into() });
+        entity
     }
 }
 
