@@ -164,6 +164,42 @@ impl EditorHistory {
     }
 }
 
+/// 패닉 페이로드에서 사람이 읽을 수 있는 메시지를 추출한다.
+fn format_panic_payload(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        s.to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "알 수 없는 패닉".to_string()
+    }
+}
+
+/// 크래시 정보를 `crash.log`에 추가 기록한다 (네이티브 전용).
+///
+/// `panic = "abort"` 빌드에서는 이 함수가 호출되기 전에 프로세스가 종료되므로
+/// 표준 디버그 빌드(`panic = "unwind"`)에서만 동작한다.
+#[cfg(not(target_arch = "wasm32"))]
+fn write_crash_log(system_name: &str, message: &str) {
+    use std::io::Write;
+    let path = "crash.log";
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let content = format!(
+        "[{}] 시스템 패닉: {}\n오류: {}\n\n",
+        timestamp, system_name, message
+    );
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = file.write_all(content.as_bytes());
+    }
+}
+
 /// Gizmo 위치를 격자(grid) 단위로 스냅한다 (네이티브 전용).
 #[cfg(not(target_arch = "wasm32"))]
 fn snap_to_grid(pos: glam::Vec2, snap_size: f32) -> glam::Vec2 {
@@ -196,6 +232,8 @@ pub struct App {
     schedule_dirty: bool,
     /// 비활성화된 SystemSet 라벨. 해당 set의 시스템은 실행을 건너뛴다.
     disabled_sets: std::collections::HashSet<crate::ecs::schedule::SystemLabel>,
+    /// 패닉으로 비활성화된 시스템 인덱스 집합. 해당 시스템은 이후 프레임에서 건너뛴다.
+    panicked_systems: std::collections::HashSet<usize>,
     /// (씬, 해당 씬이 등록한 시스템 수). Push/Pop 시 시스템 복원에 사용.
     scene_stack: Vec<(Box<dyn Scene>, usize)>,
     window: Option<Arc<Window>>,
@@ -291,6 +329,7 @@ impl App {
         world.insert_resource(SceneChange::default());
         world.insert_resource(AssetServer::new());
         world.insert_resource(LoadProgress::default());
+        world.insert_resource(crate::resources::PanickedSystems::default());
         // 엔진 내장 컴포넌트를 Reflect 레지스트리에 자동 등록 (이름 포함)
         world.register_reflect_named::<crate::components::Transform>("Transform");
         world.register_reflect_named::<crate::components::Sprite>("Sprite");
@@ -311,6 +350,7 @@ impl App {
             exec_order: Vec::new(),
             schedule_dirty: true,
             disabled_sets: std::collections::HashSet::new(),
+            panicked_systems: std::collections::HashSet::new(),
             scene_stack: Vec::new(),
             window: None,
             gpu: None,
@@ -357,6 +397,7 @@ impl App {
             exec_order: Vec::new(),
             schedule_dirty: true,
             disabled_sets: std::collections::HashSet::new(),
+            panicked_systems: std::collections::HashSet::new(),
             scene_stack: Vec::new(),
             window: None,
             gpu: None,
@@ -837,6 +878,10 @@ impl App {
                 if i >= self.systems.len() {
                     continue;
                 }
+                // 패닉으로 비활성화된 시스템 건너뜀
+                if self.panicked_systems.contains(&i) {
+                    continue;
+                }
                 if let Some(set) = self.system_meta.get(i).and_then(|m| m.set) {
                     if self.disabled_sets.contains(set) {
                         continue;
@@ -844,8 +889,28 @@ impl App {
                 }
                 let name = self.systems[i].name();
                 let t0 = Instant::now();
-                self.systems[i].run(&mut self.world, dt);
-                timings.push((i, name, t0.elapsed().as_micros() as u64));
+                // 패닉 격리: 시스템 패닉 시 엔진이 계속 실행되도록 catch_unwind로 감싼다.
+                // AssertUnwindSafe: World는 패닉 후 일관성을 보장하지 않을 수 있으나,
+                // 해당 시스템을 비활성화하면 추가 피해를 막는다.
+                // 주의: panic = "abort" 빌드 또는 FFI 패닉에서는 동작하지 않음.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    self.systems[i].run(&mut self.world, dt);
+                }));
+                match result {
+                    Ok(()) => {
+                        timings.push((i, name, t0.elapsed().as_micros() as u64));
+                    }
+                    Err(panic) => {
+                        let msg = format_panic_payload(&panic);
+                        log::error!("시스템 패닉 [{name}]: {msg}");
+                        self.panicked_systems.insert(i);
+                        if let Some(ps) = self.world.resource_mut::<crate::resources::PanickedSystems>() {
+                            ps.disabled.push(name.to_string());
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        write_crash_log(name, &msg);
+                    }
+                }
             }
             if let Some(prof) = self.world.resource_mut::<crate::resources::ProfilerData>() {
                 if prof.systems.len() != system_count {
