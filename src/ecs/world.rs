@@ -27,6 +27,7 @@ fn get_reflect_mut_impl<T: crate::reflect::Reflect + 'static>(
 struct ReflectEntry {
     get: fn(&ComponentBox) -> Option<&dyn crate::reflect::Reflect>,
     get_mut: fn(&mut ComponentBox) -> Option<&mut dyn crate::reflect::Reflect>,
+    type_name: &'static str,
 }
 
 type ArchetypeId = usize;
@@ -421,8 +422,35 @@ impl World {
             ReflectEntry {
                 get: get_reflect_impl::<T>,
                 get_mut: get_reflect_mut_impl::<T>,
+                type_name: "",
             },
         );
+    }
+
+    /// 타입 T를 Reflect 레지스트리에 표시 이름과 함께 등록한다.
+    ///
+    /// `register_reflect`와 동일하지만 Inspector 컴포넌트 목록에 표시될 이름을 명시한다.
+    /// `reflect_registered_types()`로 조회할 때 이 이름이 반환된다.
+    pub fn register_reflect_named<T: crate::reflect::Reflect + 'static>(
+        &mut self,
+        name: &'static str,
+    ) {
+        self.reflect_registry.insert(
+            TypeId::of::<T>(),
+            ReflectEntry {
+                get: get_reflect_impl::<T>,
+                get_mut: get_reflect_mut_impl::<T>,
+                type_name: name,
+            },
+        );
+    }
+
+    /// Reflect 레지스트리에 등록된 모든 타입의 `(TypeId, type_name)` 목록을 반환한다.
+    pub fn reflect_registered_types(&self) -> Vec<(TypeId, &'static str)> {
+        self.reflect_registry
+            .iter()
+            .map(|(&tid, entry)| (tid, entry.type_name))
+            .collect()
     }
 
     /// 엔티티의 특정 컴포넌트를 `&dyn Reflect`로 가져온다.

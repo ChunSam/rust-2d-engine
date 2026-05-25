@@ -195,6 +195,12 @@ pub struct App {
     /// Gizmo 드래그 시작 시 엔티티 위치 (undo 기록용).
     #[cfg(not(target_arch = "wasm32"))]
     gizmo_drag_start_pos: Option<glam::Vec2>,
+    /// 컴포넌트 추가 팩토리 맵 (네이티브 전용). 타입 이름 → World에 컴포넌트를 추가하는 클로저.
+    #[cfg(not(target_arch = "wasm32"))]
+    component_factories: HashMap<String, Box<dyn Fn(&mut World, Entity) + Send + Sync>>,
+    /// "Add Component" 드롭다운에서 현재 선택된 컴포넌트 이름 (네이티브 전용).
+    #[cfg(not(target_arch = "wasm32"))]
+    add_component_selected: String,
 }
 
 impl App {
@@ -217,11 +223,47 @@ impl App {
         world.insert_resource(crate::resources::ProfilerData::default());
         world.insert_resource(SceneChange::default());
         world.insert_resource(AssetServer::new());
-        // 엔진 내장 컴포넌트를 Reflect 레지스트리에 자동 등록
-        world.register_reflect::<crate::components::Transform>();
-        world.register_reflect::<crate::components::Sprite>();
-        world.register_reflect::<crate::prefab::Tag>();
+        // 엔진 내장 컴포넌트를 Reflect 레지스트리에 자동 등록 (이름 포함)
+        world.register_reflect_named::<crate::components::Transform>("Transform");
+        world.register_reflect_named::<crate::components::Sprite>("Sprite");
+        world.register_reflect_named::<crate::prefab::Tag>("Tag");
 
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut app = Self {
+            world,
+            systems: Vec::new(),
+            scene_stack: Vec::new(),
+            window: None,
+            gpu: None,
+            sprite_renderer: None,
+            text_renderer: None,
+            post_renderer: None,
+            last_frame: None,
+            pending_textures: Vec::new(),
+            event_flushers: Vec::new(),
+            event_initializers: Vec::new(),
+            gilrs,
+            egui_renderer: None,
+            egui_state: None,
+            egui_output: None,
+            inspector_selected: None,
+            gizmo_dragging: false,
+            gizmo_drag_offset: glam::Vec2::ZERO,
+            editor_save_path: "saved_scene.ron".into(),
+            editor_save_status: None,
+            editor_load_status: None,
+            inspector_tab: 0,
+            cmd_history: EditorHistory::new(),
+            gizmo_drag_start_pos: None,
+            component_factories: HashMap::new(),
+            add_component_selected: String::new(),
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        app.register_default_components();
+        #[cfg(not(target_arch = "wasm32"))]
+        return app;
+
+        #[cfg(target_arch = "wasm32")]
         Self {
             world,
             systems: Vec::new(),
@@ -235,8 +277,6 @@ impl App {
             pending_textures: Vec::new(),
             event_flushers: Vec::new(),
             event_initializers: Vec::new(),
-            #[cfg(not(target_arch = "wasm32"))]
-            gilrs,
             egui_renderer: None,
             egui_state: None,
             egui_output: None,
@@ -247,11 +287,42 @@ impl App {
             editor_save_status: None,
             editor_load_status: None,
             inspector_tab: 0,
-            #[cfg(not(target_arch = "wasm32"))]
-            cmd_history: EditorHistory::new(),
-            #[cfg(not(target_arch = "wasm32"))]
-            gizmo_drag_start_pos: None,
         }
+    }
+
+    /// 기본 컴포넌트 팩토리를 등록한다 (네이티브 전용).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn register_default_components(&mut self) {
+        self.register_component("Sprite", |world, e| {
+            world.add_component(e, crate::components::Sprite::default());
+        });
+        self.register_component("RenderLayer", |world, e| {
+            world.add_component(e, crate::components::RenderLayer::default());
+        });
+        self.register_component("ParticleEmitter", |world, e| {
+            world.add_component(e, crate::particle::ParticleEmitter::default());
+        });
+    }
+
+    /// 컴포넌트 팩토리를 등록한다. "Add Component" 드롭다운에 해당 이름이 표시된다.
+    ///
+    /// 클로저는 엔티티에 원하는 컴포넌트(들)를 추가해야 한다.
+    ///
+    /// ```rust,no_run
+    /// # use engine::App;
+    /// # let mut app = App::new();
+    /// app.register_component("MyComp", |world, entity| {
+    ///     // world.add_component(entity, MyComp::default());
+    /// });
+    /// ```
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn register_component(
+        &mut self,
+        name: impl Into<String>,
+        factory: impl Fn(&mut World, Entity) + Send + Sync + 'static,
+    ) {
+        self.component_factories
+            .insert(name.into(), Box::new(factory));
     }
 
     /// 이벤트 타입 `E` 를 등록한다.
@@ -357,9 +428,9 @@ impl App {
         self.event_initializers = inits;
         // Reflect 레지스트리 재등록 (World 재생성으로 초기화되었으므로)
         self.world
-            .register_reflect::<crate::components::Transform>();
-        self.world.register_reflect::<crate::components::Sprite>();
-        self.world.register_reflect::<crate::prefab::Tag>();
+            .register_reflect_named::<crate::components::Transform>("Transform");
+        self.world.register_reflect_named::<crate::components::Sprite>("Sprite");
+        self.world.register_reflect_named::<crate::prefab::Tag>("Tag");
         self.inspector_selected = None;
         self.editor_save_status = None;
     }
@@ -497,6 +568,11 @@ impl App {
                 }
             }
         }
+        // 선택 엔티티가 가진 Reflect 등록 컴포넌트 이름 목록 (네이티브 전용, 컴포넌트 관리 UI용).
+        // comp_fields에서 이름을 추출하면 borrow 충돌 없이 안전하다.
+        #[cfg(not(target_arch = "wasm32"))]
+        let selected_comp_names: Vec<&'static str> =
+            comp_fields.iter().map(|(name, _)| *name).collect();
 
         // ── 씬 그래프 데이터 사전 수집 (네이티브 전용) ──────────────────────────
         // borrow checker 우회: egui 클로저 진입 전에 계층 구조를 모두 복사해 둔다.
@@ -905,6 +981,81 @@ impl App {
                                     });
                             });
                         });
+
+                        // ── 컴포넌트 추가/제거 (네이티브 전용, Phase 39b) ────────────
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if let Some(sel) = self.inspector_selected {
+                            ui.separator();
+                            ui.strong("Component List");
+
+                            // 제거할 컴포넌트 이름 (클로저 밖에서 결정)
+                            let mut to_remove: Option<&'static str> = None;
+                            for &comp_name in &selected_comp_names {
+                                ui.horizontal(|ui| {
+                                    ui.label(comp_name);
+                                    if comp_name != "Transform" {
+                                        if ui.small_button("✕").clicked() {
+                                            to_remove = Some(comp_name);
+                                        }
+                                    }
+                                });
+                            }
+
+                            // 클로저 종료 후 실제 제거
+                            if let Some(name) = to_remove {
+                                match name {
+                                    "Sprite" => {
+                                        self.world.remove_component::<crate::components::Sprite>(sel);
+                                    }
+                                    "Tag" => {
+                                        self.world.remove_component::<crate::prefab::Tag>(sel);
+                                    }
+                                    "RenderLayer" => {
+                                        self.world.remove_component::<crate::components::RenderLayer>(sel);
+                                    }
+                                    "ParticleEmitter" => {
+                                        self.world.remove_component::<crate::particle::ParticleEmitter>(sel);
+                                    }
+                                    _ => {}
+                                }
+                            }
+
+                            ui.separator();
+                            // Add Component 드롭다운
+                            let factory_names: Vec<String> = {
+                                let mut names: Vec<String> =
+                                    self.component_factories.keys().cloned().collect();
+                                names.sort();
+                                names
+                            };
+                            if !factory_names.is_empty() {
+                                if self.add_component_selected.is_empty() {
+                                    self.add_component_selected =
+                                        factory_names[0].clone();
+                                }
+                                let cur = self.add_component_selected.clone();
+                                egui::ComboBox::from_id_salt("add_comp_combo")
+                                    .selected_text(&cur)
+                                    .show_ui(ui, |ui| {
+                                        for name in &factory_names {
+                                            ui.selectable_value(
+                                                &mut self.add_component_selected,
+                                                name.clone(),
+                                                name,
+                                            );
+                                        }
+                                    });
+                                if ui.button("+ Add").clicked() {
+                                    let chosen = self.add_component_selected.clone();
+                                    if let Some(factory) =
+                                        self.component_factories.get(&chosen)
+                                    {
+                                        factory(&mut self.world, sel);
+                                    }
+                                }
+                            }
+                        }
+
                         // ── 선택 엔티티 이름(Tag) 편집 (네이티브 전용) ──────────────
                         #[cfg(not(target_arch = "wasm32"))]
                         if let Some(sel) = self.inspector_selected {
