@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 36 갱신: 2026-05-25)  
-엔진 버전: v0.36.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 37 갱신: 2026-05-25)  
+엔진 버전: v0.37.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -215,6 +215,83 @@ cargo run --example mp_client   # 터미널 2, 3, ...
 - `sprite.rs render()` 반환 타입 `RenderStats`로 변경, culling/draw call 카운터 수집
 - Engine Stats 패널에 "Systems" / "Render" collapsible 섹션 추가, `resizable(true)`로 변경
 - `ProfilerData`, `RenderStats`, `SystemProfile` re-export (`lib.rs`)
+
+---
+
+### Phase 37a — Blackboard + Steering Behaviors
+
+**배경**: 비헤이비어 트리(Phase 36) 노드들이 서로 상태를 공유할 방법이 없었고, 적 AI가 플레이어를 향해 이동하는 표준적인 스티어링 로직이 없었다.
+
+**변경 파일**: `src/behavior.rs`, `src/steering.rs` (신규), `src/lib.rs`
+
+**추가 기능**:
+
+*Blackboard (src/behavior.rs)*
+- `BlackboardValue { Bool / Float / Int / Vec2 / String }` 열거형
+- `Blackboard` 독립 ECS 컴포넌트 — `HashMap<String, BlackboardValue>` 기반 Key-Value 저장소
+- `set_bool / set_float / set_int / set_vec2 / set_string` / `get_bool / get_float / get_int / get_vec2 / get_string` 메서드
+- BehaviorTree와 분리된 컴포넌트로 설계 → `take_component` 패턴으로 BehaviorTree가 꺼내진 상태에서도 `world.get_mut::<Blackboard>(entity)`로 접근 가능
+- 단위 테스트 6개
+
+*Steering Behaviors (src/steering.rs)*
+- `SteeringVelocity { velocity: Vec2, max_speed: f32 }` — 결과 저장 컴포넌트
+- `Seek { target: Vec2, max_speed: f32 }` — 목표 방향으로 직선 이동
+- `Flee { target: Vec2, max_speed: f32, flee_radius: f32 }` — 반경 이내 접근 시 도망
+- `Arrive { target: Vec2, max_speed: f32, slow_radius: f32, stop_radius: f32 }` — 감속 정착
+- `Wander { max_speed: f32, change_interval: f32 }` — 결정론적 의사난수 방향 배회 (rand 크레이트 미사용)
+- `SteeringSystem`: Seek → Flee → Arrive → Wander 순서로 `SteeringVelocity` 계산 후 `Transform.position` 이동 적용
+- 단위 테스트 4개
+
+```rust
+// 스티어링 예
+world.add_component(enemy, Seek { target: player_pos, max_speed: 120.0 });
+world.add_component(enemy, SteeringVelocity::default());
+app.add_system(SteeringSystem);
+
+// Blackboard 예 (BehaviorNode 내부에서)
+if let Some(bb) = world.get_mut::<Blackboard>(entity) {
+    bb.set_bool("player_in_range", dist < 200.0);
+}
+```
+
+---
+
+### Phase 37d — CommandBuffer
+
+**배경**: 시스템 실행 중 엔티티를 생성/삭제하거나 컴포넌트를 추가/제거하면 쿼리 이터레이터와 이중 borrow 충돌이 발생했다. `Commands` 버퍼로 명령을 지연 축적하고 프레임 말에 일괄 적용한다.
+
+**변경 파일**: `src/ecs/commands.rs` (신규), `src/ecs/mod.rs`, `src/ecs/world.rs`, `src/components.rs`
+
+**추가 기능**:
+
+*Commands (src/ecs/commands.rs)*
+- `Vec<Box<dyn FnOnce(&mut World) + Send>>` 기반 지연 실행 버퍼
+- `Commands::new()` / `Commands::default()`
+- `spawn(f: impl FnOnce(&mut World, Entity) + Send)` — 스폰 + 컴포넌트 추가를 클로저 하나로
+- `despawn(entity)` — 삭제 예약 (이미 없으면 noop)
+- `insert::<T>(entity, comp)` — 컴포넌트 추가 예약
+- `remove::<T>(entity)` — 컴포넌트 제거 예약
+- `Commands::apply(self, world)` / `World::apply_commands(cmds)` — 순서 보장 일괄 적용
+- 단위 테스트 8개 (spawn/despawn/insert/remove/ordering/multiple/noop × 2)
+
+```rust
+struct SpawnSystem;
+impl System for SpawnSystem {
+    fn run(&mut self, world: &mut World, _dt: f32) {
+        let mut cmds = Commands::new();
+
+        // 쿼리 루프 안에서 안전하게 스폰 예약
+        for (e, _) in world.query::<Enemy>().map(|(e,c)|(e,c)).collect::<Vec<_>>() {
+            cmds.despawn(e);
+            cmds.spawn(|world, ne| {
+                world.add_component(ne, Respawned);
+            });
+        }
+
+        world.apply_commands(cmds); // 루프 끝난 뒤 일괄 적용
+    }
+}
+```
 
 ---
 
@@ -1387,6 +1464,8 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 34~~ | ~~RenderLayer 컴포넌트 + 스프라이트 배칭 (layer·tex·z 정렬)~~ | — | 완료 |
 | ~~Phase 35~~ | ~~Inspector Undo/Redo (Ctrl+Z/Shift+Z) — 이동·생성·삭제~~ | — | 완료 |
 | ~~Phase 36~~ | ~~비헤이비어 트리 — BehaviorTree/BehaviorSystem, Sequence/Selector/Inverter~~ | — | 완료 |
+| ~~Phase 37a~~ | ~~Blackboard(독립 ECS 컴포넌트) + Steering Behaviors (Seek/Flee/Arrive/Wander)~~ | — | 완료 |
+| ~~Phase 37d~~ | ~~CommandBuffer — Commands::spawn/despawn/insert/remove + World::apply_commands~~ | — | 완료 |
 
 ---
 
