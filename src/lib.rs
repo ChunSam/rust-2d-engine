@@ -12,6 +12,7 @@ pub mod debug_ui;
 pub mod ecs;
 pub mod hierarchy;
 pub mod input;
+pub mod locale;
 pub mod particle;
 pub mod pathfinding;
 #[cfg(not(target_arch = "wasm32"))]
@@ -56,6 +57,7 @@ pub use debug_ui::DebugUi;
 pub use ecs::{Commands, Entity, Events, System, World};
 pub use hierarchy::{attach, detach, Children, GlobalTransform, HierarchySystem, Parent};
 pub use input::{GamepadAxis, GamepadButton, GamepadState, InputMap, InputState};
+pub use locale::{LocaleBundle, LocaleData, LocaleResource, TextDirection};
 pub use particle::{Particle, ParticleEmitter, ParticleSystem};
 pub use pathfinding::{find_path, PathGrid};
 pub use pool::{Pool, Pooled};
