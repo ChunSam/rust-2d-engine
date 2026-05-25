@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 31 갱신: 2026-05-25)  
-엔진 버전: v0.31.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 32 갱신: 2026-05-25)  
+엔진 버전: v0.32.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -215,6 +215,44 @@ cargo run --example mp_client   # 터미널 2, 3, ...
 - `sprite.rs render()` 반환 타입 `RenderStats`로 변경, culling/draw call 카운터 수집
 - Engine Stats 패널에 "Systems" / "Render" collapsible 섹션 추가, `resizable(true)`로 변경
 - `ProfilerData`, `RenderStats`, `SystemProfile` re-export (`lib.rs`)
+
+---
+
+### Phase 32 — 런타임 안정성
+
+**배경**: 이미지 로드 실패 시 마젠타 폴백이 있었지만 어떤 핸들이 실패했는지 알 수 없었다. `SceneDef` RON 포맷에 버전 정보가 없어 향후 구조 변경 시 구 파일을 감지할 수단이 없었다. Inspector에 Save는 있지만 Load가 없어 에디터 워크플로가 불완전했다.
+
+**변경 파일**: `src/asset.rs`, `src/prefab.rs`, `src/app.rs`, `src/lib.rs`
+
+**추가 기능**:
+
+*AssetLoadState (src/asset.rs)*
+- `AssetLoadState { Loaded, Failed(String) }` enum 추가
+- `AssetServer`에 `image_load_states: HashMap<AssetId, AssetLoadState>` 필드 추가
+- `load_image()` 내부에서 `decode_image_with_state()` 호출 — 성공/실패 상태를 함께 기록
+- 핫 리로딩(`poll_reloads`)도 리로드 후 상태 갱신
+- `AssetServer::load_state(&Handle<ImageAsset>) -> AssetLoadState` 공개 API
+- `AssetServer::failed_images() -> Vec<AssetId>` — 실패 핸들 목록 (디버그용)
+- `AssetLoadState` re-export (`lib.rs`)
+
+*SceneDef 스키마 버전 (src/prefab.rs)*
+- `SCENE_DEF_VERSION: u32 = 1` 상수 추가
+- `SceneDef`에 `#[serde(default)] pub version: u32` 필드 추가 — 구 파일(version 없음)은 0으로 역직렬화되어 하위 호환 유지
+- `Default` 구현을 수동으로 변경: `version: SCENE_DEF_VERSION`으로 초기화
+- `SceneDef::load()` — 역직렬화 후 버전 불일치 시 `log::warn` 출력, 로드는 계속
+- `SceneDef::save()` — 항상 `version: SCENE_DEF_VERSION`으로 덮어써서 저장
+- `SCENE_DEF_VERSION` re-export (`lib.rs`)
+
+*Inspector Load Scene (src/app.rs)*
+- `App`에 `editor_load_status: Option<String>` 필드 추가
+- Inspector 씬 저장 행에 `📂 Load Scene` 버튼 추가 (Save 버튼 왼쪽)
+- 클릭 시: RON 로드 → `Transform`을 가진 기존 엔티티 전부 despawn → `spawn_scene_def` 호출
+- 성공/실패 메시지를 `editor_load_status`에 저장해 패널에 표시
+- `inspector_selected` 초기화 (로드 후 선택 상태 리셋)
+
+**아키텍처 결정**:
+- Load Scene 시 `Transform` 보유 엔티티만 제거한다. 물리 바디, 카메라 등 시스템 엔티티는 건드리지 않아 충돌을 피한다.
+- `AssetLoadState::Failed` 내부에 오류 문자열을 포함해 `log::error` 없이도 원인 추적이 가능하다.
 
 ---
 
@@ -1221,6 +1259,7 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 29~~ | ~~씬 계층 직렬화 — EntityDef.parent, 2패스 스폰, topological_sort_entities~~ | — | 완료 |
 | ~~Phase 30~~ | ~~시스템 프로파일러 — System::name(), ProfilerData, RenderStats, Engine Stats 확장~~ | — | 완료 |
 | ~~Phase 31~~ | ~~에셋 브라우저 — ImageEntry, image_list(), Inspector Assets 탭~~ | — | 완료 |
+| ~~Phase 32~~ | ~~런타임 안정성 — AssetLoadState, SceneDef.version, Load Scene 버튼~~ | — | 완료 |
 
 ---
 
