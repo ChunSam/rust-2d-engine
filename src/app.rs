@@ -29,7 +29,7 @@ use crate::{
     debug_ui::DebugUi,
     ecs::{Entity, Events, System, World},
     hierarchy::HierarchySystem,
-    input::{GamepadState, InputState},
+    input::{GamepadState, InputState, TouchState},
     prefab::Tag,
     reflect::ReflectValue,
     renderer::{
@@ -275,6 +275,7 @@ impl App {
         let mut world = World::new();
         world.insert_resource(InputState::default());
         world.insert_resource(GamepadState::default());
+        world.insert_resource(TouchState::default());
         world.insert_resource(GameState::Playing);
         world.insert_resource(ShouldQuit(false));
         world.insert_resource(WindowConfig::default());
@@ -553,6 +554,7 @@ impl App {
         self.world = World::new();
         self.world.insert_resource(InputState::default());
         self.world.insert_resource(GamepadState::default());
+        self.world.insert_resource(TouchState::default());
         self.world.insert_resource(GameState::Playing);
         self.world.insert_resource(ShouldQuit(false));
         self.world.insert_resource(WindowConfig::default());
@@ -1658,6 +1660,9 @@ impl App {
         if let Some(gamepad) = self.world.resource_mut::<GamepadState>() {
             gamepad.flush();
         }
+        if let Some(ts) = self.world.resource_mut::<TouchState>() {
+            ts.flush();
+        }
         // 씬 전환 명령 처리 (이벤트/입력 flush 이후)
         let cmd = self
             .world
@@ -2308,6 +2313,38 @@ impl ApplicationHandler for App {
                         MouseScrollDelta::LineDelta(_, y) => input.add_scroll(y),
                         // 픽셀 단위 휠(트랙패드 등)을 line 단위로 환산: 20px ≈ 1 line (경험적 근사값)
                         MouseScrollDelta::PixelDelta(p) => input.add_scroll(p.y as f32 / 20.0),
+                    }
+                }
+            }
+
+            // ── 터치 입력 ────────────────────────────────────────────────────
+            WindowEvent::Touch(winit::event::Touch {
+                phase,
+                location,
+                id,
+                ..
+            }) => {
+                let pos = Vec2::new(location.x as f32, location.y as f32);
+                if let Some(ts) = self.world.resource_mut::<TouchState>() {
+                    match phase {
+                        winit::event::TouchPhase::Started => ts.on_touch_started(id, pos),
+                        winit::event::TouchPhase::Moved => ts.on_touch_moved(id, pos),
+                        winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {
+                            ts.on_touch_ended(id, pos)
+                        }
+                    }
+                }
+                // 터치를 마우스 왼쪽 버튼으로 에뮬레이션 (기존 UI 시스템 호환)
+                if let Some(input) = self.world.resource_mut::<InputState>() {
+                    match phase {
+                        winit::event::TouchPhase::Started => {
+                            input.set_cursor(pos);
+                            input.press_mouse(winit::event::MouseButton::Left);
+                        }
+                        winit::event::TouchPhase::Moved => input.set_cursor(pos),
+                        winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {
+                            input.release_mouse(winit::event::MouseButton::Left);
+                        }
                     }
                 }
             }

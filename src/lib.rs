@@ -57,7 +57,7 @@ pub use debug_ui::DebugUi;
 pub use ecs::schedule::{ScheduleError, SystemConfig, SystemLabel, SystemMeta};
 pub use ecs::{Commands, Entity, Events, System, World};
 pub use hierarchy::{attach, detach, Children, GlobalTransform, HierarchySystem, Parent};
-pub use input::{GamepadAxis, GamepadButton, GamepadState, InputMap, InputState};
+pub use input::{GamepadAxis, GamepadButton, GamepadState, InputMap, InputState, TouchState};
 pub use locale::{LocaleBundle, LocaleData, LocaleResource, TextDirection};
 pub use material::ShaderMaterial;
 pub use network::{NetworkClient, NetworkEvent, NetworkSystem};
@@ -94,7 +94,7 @@ pub use timer::Timer;
 pub use tween::{Easing, Tween};
 pub use ui::{
     Anchor, Button, ButtonState, CheckBox, Label, LayoutDir, LayoutSystem, Panel, ScrollView,
-    Slider, TextInput, UiEvent, UiNode, UiSystem,
+    Slider, TextInput, UiEvent, UiNode, UiSystem, VirtualJoystick,
 };
 
 // ── WASM 패닉 훅 ─────────────────────────────────────────────────────────────

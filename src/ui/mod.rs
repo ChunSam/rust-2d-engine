@@ -1,5 +1,6 @@
 pub mod button;
 pub mod checkbox;
+pub mod joystick;
 pub mod label;
 pub mod node;
 pub mod panel;
@@ -10,6 +11,7 @@ pub mod text_input;
 
 pub use button::{Button, ButtonState};
 pub use checkbox::CheckBox;
+pub use joystick::VirtualJoystick;
 pub use label::Label;
 pub use node::{Anchor, UiNode};
 pub use panel::{LayoutDir, LayoutSystem, Panel};
