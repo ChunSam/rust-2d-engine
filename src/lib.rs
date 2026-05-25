@@ -63,8 +63,8 @@ pub use particle::{Particle, ParticleEmitter, ParticleSystem};
 pub use pathfinding::{find_path, PathGrid};
 #[cfg(not(target_arch = "wasm32"))]
 pub use physics::{
-    CharacterController, CollisionEvent, ImpulseJointHandle, PhysicsBody, PhysicsSystem,
-    PhysicsWorld, RaycastHit,
+    CharacterController, CollisionEvent, CollisionGroups, ImpulseJointHandle, PhysicsBody,
+    PhysicsSystem, PhysicsWorld, RaycastHit, TriggerEvent,
 };
 pub use pool::{Pool, Pooled};
 pub use prefab::{
