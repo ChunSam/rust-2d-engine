@@ -89,6 +89,10 @@ pub struct App {
     gizmo_dragging: bool,
     /// 드래그 시작 시 (엔티티 position - 커서 월드 좌표) 오프셋.
     gizmo_drag_offset: glam::Vec2,
+    /// Inspector 씬 저장 경로 (네이티브 전용).
+    editor_save_path: String,
+    /// 마지막 씬 저장 결과 메시지.
+    editor_save_status: Option<String>,
 }
 
 impl App {
@@ -136,6 +140,8 @@ impl App {
             inspector_selected: None,
             gizmo_dragging: false,
             gizmo_drag_offset: glam::Vec2::ZERO,
+            editor_save_path: "saved_scene.ron".into(),
+            editor_save_status: None,
         }
     }
 
@@ -245,6 +251,7 @@ impl App {
         self.world.register_reflect::<crate::components::Sprite>();
         self.world.register_reflect::<crate::prefab::Tag>();
         self.inspector_selected = None;
+        self.editor_save_status = None;
     }
 
     /// 씬을 즉시 전환한다. `run()` 호출 전·후 모두 사용 가능하다.
@@ -530,6 +537,60 @@ impl App {
                                     });
                             });
                         });
+                        // ── 씬 저장 (Phase 28) ───────────────────────────────────
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            ui.separator();
+                            ui.horizontal(|ui| {
+                                ui.label("Path:");
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.editor_save_path)
+                                        .desired_width(180.0),
+                                );
+                                if ui.button("💾 Save Scene").clicked() {
+                                    let mut scene_def = crate::prefab::SceneDef::default();
+                                    for &e in &entity_list {
+                                        let tag = self
+                                            .world
+                                            .get::<crate::prefab::Tag>(e)
+                                            .map(|t| t.0.clone());
+                                        let transform = self
+                                            .world
+                                            .get::<crate::components::Transform>(e)
+                                            .cloned();
+                                        let sprite = self
+                                            .world
+                                            .get::<crate::components::Sprite>(e)
+                                            .cloned();
+                                        if tag.is_some()
+                                            || transform.is_some()
+                                            || sprite.is_some()
+                                        {
+                                            scene_def.entities.push(
+                                                crate::prefab::EntityDef {
+                                                    tag,
+                                                    transform,
+                                                    sprite,
+                                                },
+                                            );
+                                        }
+                                    }
+                                    let count = scene_def.entities.len();
+                                    let path = self.editor_save_path.clone();
+                                    self.editor_save_status = match scene_def
+                                        .save(std::path::Path::new(&path))
+                                    {
+                                        Ok(()) => {
+                                            Some(format!("✓ {count} entities → {path}"))
+                                        }
+                                        Err(e) => Some(format!("✗ {e}")),
+                                    };
+                                }
+                            });
+                            if let Some(msg) = &self.editor_save_status {
+                                ui.small(msg.as_str());
+                            }
+                        }
                     });
             }
         }
