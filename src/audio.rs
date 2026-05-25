@@ -74,6 +74,33 @@ impl<S: Source<Item = f32>> Source for PannedSource<S> {
     }
 }
 
+// ─── 오디오 이펙트 ────────────────────────────────────────────────────────────
+
+/// 채널별 오디오 이펙트 설정.
+/// `set_effect()` 후 다음 `play_*` 호출 시 자동 적용된다.
+#[derive(Debug, Clone)]
+pub struct AudioEffect {
+    /// 로우패스 컷오프 주파수 (Hz). `None` = 필터 없음.
+    pub low_pass_hz: Option<u32>,
+    /// 재생 속도 배율 (피치 비례). 1.0 = 원속도.
+    pub pitch: f32,
+    /// 재생 시작 시 페이드인 시간 (초). 0.0 = 즉시.
+    pub attack_secs: f32,
+    /// 볼륨 엔벨로프 지속 시간 (초). 0.0 = 무제한.
+    pub release_secs: f32,
+}
+
+impl Default for AudioEffect {
+    fn default() -> Self {
+        Self {
+            low_pass_hz: None,
+            pitch: 1.0,
+            attack_secs: 0.0,
+            release_secs: 0.0,
+        }
+    }
+}
+
 // ─── 페이드 상태 ──────────────────────────────────────────────────────────────
 
 struct Fade {
@@ -130,6 +157,8 @@ pub struct AudioManager {
     channel_buses: HashMap<String, String>,
     /// 활성 페이드 상태
     fades: HashMap<String, Fade>,
+    /// 채널별 오디오 이펙트
+    effects: HashMap<String, AudioEffect>,
 }
 
 impl AudioManager {
@@ -145,6 +174,7 @@ impl AudioManager {
                 bus_volumes: HashMap::new(),
                 channel_buses: HashMap::new(),
                 fades: HashMap::new(),
+                effects: HashMap::new(),
             }),
             Err(e) => {
                 log::warn!("오디오 초기화 실패 (오디오 없이 실행됩니다): {e}");
@@ -263,6 +293,23 @@ impl AudioManager {
     /// 다음 `play()` 호출부터 적용된다.
     pub fn set_pan(&mut self, channel: &str, pan: f32) {
         self.pans.insert(channel.to_string(), pan.clamp(-1.0, 1.0));
+    }
+
+    // ── 오디오 이펙트 ─────────────────────────────────────────────────────────
+
+    /// 채널에 이펙트를 설정한다. 다음 `play_*` 호출 시 적용된다.
+    pub fn set_effect(&mut self, channel: &str, effect: AudioEffect) {
+        self.effects.insert(channel.to_string(), effect);
+    }
+
+    /// 채널의 이펙트를 제거한다.
+    pub fn clear_effect(&mut self, channel: &str) {
+        self.effects.remove(channel);
+    }
+
+    /// 채널의 현재 이펙트를 반환한다.
+    pub fn effect(&self, channel: &str) -> Option<&AudioEffect> {
+        self.effects.get(channel)
     }
 
     // ── 오디오 버스 ───────────────────────────────────────────────────────────
@@ -406,10 +453,48 @@ impl AudioManager {
             }
         };
 
+        // ── 이펙트 적용 ──────────────────────────────────────────────────────
+        // Box<dyn Source<Item=i16> + Send>로 통일해 타입 복잡도를 줄인다.
+        let effect = self.effects.get(channel).cloned();
+        let effected: Box<dyn Source<Item = i16> + Send + 'static> = if let Some(eff) = effect {
+            if (eff.pitch - 1.0).abs() > 0.001 {
+                let s = source.speed(eff.pitch);
+                if let Some(hz) = eff.low_pass_hz {
+                    let s = s.convert_samples::<f32>().low_pass(hz).convert_samples::<i16>();
+                    if eff.attack_secs > 0.001 {
+                        Box::new(s.fade_in(Duration::from_secs_f32(eff.attack_secs)))
+                    } else {
+                        Box::new(s)
+                    }
+                } else if eff.attack_secs > 0.001 {
+                    Box::new(
+                        s.convert_samples::<i16>()
+                            .fade_in(Duration::from_secs_f32(eff.attack_secs)),
+                    )
+                } else {
+                    Box::new(s.convert_samples::<i16>())
+                }
+            } else if let Some(hz) = eff.low_pass_hz {
+                let s = source.convert_samples::<f32>().low_pass(hz).convert_samples::<i16>();
+                if eff.attack_secs > 0.001 {
+                    Box::new(s.fade_in(Duration::from_secs_f32(eff.attack_secs)))
+                } else {
+                    Box::new(s)
+                }
+            } else if eff.attack_secs > 0.001 {
+                Box::new(source.fade_in(Duration::from_secs_f32(eff.attack_secs)))
+            } else {
+                Box::new(source)
+            }
+        } else {
+            Box::new(source)
+        };
+
+        // ── 팬 / 페이드인 / 반복 적용 ────────────────────────────────────────
         // 팬 없고 페이드인 없을 때는 BufReader 경로가 더 효율적이지만,
         // 여기서는 Cursor 경로로 통일 (이미 bytes로 읽었으므로 비용 동일)
         if pan.abs() > 0.001 {
-            let panned = PannedSource::new(source.convert_samples::<f32>(), pan);
+            let panned = PannedSource::new(effected.convert_samples::<f32>(), pan);
             if let Some(fade_dur) = fade_in_secs {
                 let faded = panned.fade_in(Duration::from_secs_f32(fade_dur));
                 if repeat {
@@ -423,16 +508,16 @@ impl AudioManager {
                 sink.append(panned);
             }
         } else if let Some(fade_dur) = fade_in_secs {
-            let faded = source.fade_in(Duration::from_secs_f32(fade_dur));
+            let faded = effected.fade_in(Duration::from_secs_f32(fade_dur));
             if repeat {
                 sink.append(faded.repeat_infinite());
             } else {
                 sink.append(faded);
             }
         } else if repeat {
-            sink.append(source.repeat_infinite());
+            sink.append(effected.repeat_infinite());
         } else {
-            sink.append(source);
+            sink.append(effected);
         }
 
         self.sinks.insert(channel.to_string(), sink);
@@ -526,5 +611,26 @@ mod tests {
     fn spatial_params_left_side_pans_left() {
         let (_, pan) = AudioManager::spatial_params(Vec2::new(-250.0, 0.0), Vec2::ZERO, 500.0);
         assert!(pan < 0.0);
+    }
+
+    #[test]
+    fn audio_effect_default_pitch() {
+        let eff = AudioEffect::default();
+        assert!((eff.pitch - 1.0).abs() < 0.001);
+        assert!(eff.low_pass_hz.is_none());
+    }
+
+    #[test]
+    fn set_and_clear_effect() {
+        // AudioManager는 오디오 장치 없이 None을 반환할 수 있으므로,
+        // AudioEffect 구조체 자체만 테스트한다.
+        let eff = AudioEffect {
+            low_pass_hz: Some(1000),
+            pitch: 0.8,
+            attack_secs: 0.5,
+            release_secs: 0.0,
+        };
+        assert_eq!(eff.low_pass_hz, Some(1000));
+        assert!((eff.pitch - 0.8).abs() < 0.001);
     }
 }
