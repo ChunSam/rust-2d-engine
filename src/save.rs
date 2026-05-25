@@ -16,6 +16,21 @@ const SAVE_KEY_BYTES: [u8; 32] = [
     0x31, 0x9f, 0x6c, 0x21, 0xb8, 0x43, 0xd0, 0x75, 0xe2, 0x0a, 0x5c, 0x99, 0x13, 0xfe, 0x67, 0x2b,
 ];
 
+/// AEAD key used to encrypt and authenticate save files.
+///
+/// A key embedded in a client binary is not a secret against a determined user. Use
+/// [`SaveKey`] to separate saves between builds/users and to detect tampering, not
+/// as a complete secret-protection boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SaveKey(pub [u8; 32]);
+
+impl SaveKey {
+    /// Built-in compatibility key used by [`save`] and [`load`].
+    ///
+    /// This default key is public by construction because it ships in the binary.
+    pub const DEFAULT: Self = Self(SAVE_KEY_BYTES);
+}
+
 /// 저장/로드 에러 타입.
 #[derive(Debug)]
 pub enum SaveError {
@@ -56,23 +71,39 @@ pub fn save_path(app_name: &str, file: &str) -> PathBuf {
 }
 
 /// 디렉토리를 만들고 데이터를 RON 파일로 직렬화해 저장한다.
+///
+/// Uses [`SaveKey::DEFAULT`] for backwards compatibility. Prefer [`save_with_key`]
+/// when the application can provide its own stable key material.
 pub fn save<T: Serialize>(path: &Path, data: &T) -> Result<(), SaveError> {
+    save_with_key(path, data, SaveKey::DEFAULT)
+}
+
+/// 디렉토리를 만들고 데이터를 지정한 키로 AEAD 암호화해 저장한다.
+pub fn save_with_key<T: Serialize>(path: &Path, data: &T, key: SaveKey) -> Result<(), SaveError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let plaintext = ron::ser::to_string_pretty(data, ron::ser::PrettyConfig::default())
         .map_err(|e| SaveError::Ron(e.to_string()))?;
-    let encrypted = encrypt_save_bytes(plaintext.as_bytes())?;
+    let encrypted = encrypt_save_bytes(plaintext.as_bytes(), key)?;
     fs::write(path, encrypted)?;
     Ok(())
 }
 
 /// RON 파일을 읽어 역직렬화한다. 파일 없으면 Err(SaveError::Io(NotFound)).
+///
+/// Uses [`SaveKey::DEFAULT`] for backwards compatibility. Prefer [`load_with_key`]
+/// when loading saves written with [`save_with_key`].
 pub fn load<T: DeserializeOwned>(path: &Path) -> Result<T, SaveError> {
+    load_with_key(path, SaveKey::DEFAULT)
+}
+
+/// 지정한 키로 저장 파일을 복호화한 뒤 RON으로 역직렬화한다.
+pub fn load_with_key<T: DeserializeOwned>(path: &Path, key: SaveKey) -> Result<T, SaveError> {
     let bytes = fs::read(path)?;
-    let plaintext = decrypt_save_bytes(&bytes)?;
+    let plaintext = decrypt_save_bytes(&bytes, key)?;
     let s = std::str::from_utf8(&plaintext).map_err(|_| SaveError::Corrupted)?;
-    ron::from_str(&s).map_err(|e| SaveError::Ron(e.to_string()))
+    ron::from_str(s).map_err(|e| SaveError::Ron(e.to_string()))
 }
 
 /// 파일이 있으면 로드, 없으면 `T::default()` 반환. 파싱 에러는 그대로 전파.
@@ -98,14 +129,14 @@ pub fn delete(path: &Path) -> Result<(), SaveError> {
     }
 }
 
-fn cipher() -> ChaCha20Poly1305 {
-    ChaCha20Poly1305::new(Key::from_slice(&SAVE_KEY_BYTES))
+fn cipher(key: SaveKey) -> ChaCha20Poly1305 {
+    ChaCha20Poly1305::new(Key::from_slice(&key.0))
 }
 
-fn encrypt_save_bytes(plaintext: &[u8]) -> Result<Vec<u8>, SaveError> {
+fn encrypt_save_bytes(plaintext: &[u8], key: SaveKey) -> Result<Vec<u8>, SaveError> {
     let mut nonce_bytes = [0u8; NONCE_LEN];
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
-    let ciphertext = cipher()
+    let ciphertext = cipher(key)
         .encrypt(Nonce::from_slice(&nonce_bytes), plaintext)
         .map_err(|_| SaveError::Corrupted)?;
 
@@ -116,14 +147,14 @@ fn encrypt_save_bytes(plaintext: &[u8]) -> Result<Vec<u8>, SaveError> {
     Ok(out)
 }
 
-fn decrypt_save_bytes(bytes: &[u8]) -> Result<Vec<u8>, SaveError> {
+fn decrypt_save_bytes(bytes: &[u8], key: SaveKey) -> Result<Vec<u8>, SaveError> {
     let header_len = SAVE_MAGIC.len() + NONCE_LEN;
     if bytes.len() <= header_len || !bytes.starts_with(SAVE_MAGIC) {
         return Err(SaveError::Corrupted);
     }
 
     let nonce = Nonce::from_slice(&bytes[SAVE_MAGIC.len()..header_len]);
-    cipher()
+    cipher(key)
         .decrypt(nonce, &bytes[header_len..])
         .map_err(|_| SaveError::Corrupted)
 }
@@ -231,6 +262,32 @@ mod tests {
             matches!(loaded, Err(SaveError::Corrupted)),
             "expected SaveError::Corrupted, got {:?}",
             loaded
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn save_load_with_key_roundtrip_and_wrong_key_fails() {
+        let dir = unique_test_dir();
+        let path = dir.join("keyed-settings.ron");
+        let data = Settings {
+            sfx: 0.2,
+            music: 0.9,
+            hi_score: 123,
+        };
+        let key = SaveKey([7; 32]);
+        let wrong_key = SaveKey([8; 32]);
+
+        save_with_key(&path, &data, key).unwrap();
+        let loaded: Settings = load_with_key(&path, key).unwrap();
+        assert_eq!(loaded, data);
+
+        let wrong: Result<Settings, SaveError> = load_with_key(&path, wrong_key);
+        assert!(
+            matches!(wrong, Err(SaveError::Corrupted)),
+            "expected wrong key to fail authentication, got {:?}",
+            wrong
         );
 
         fs::remove_dir_all(&dir).ok();

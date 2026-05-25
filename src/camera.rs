@@ -288,8 +288,10 @@ mod tests {
 
     #[test]
     fn zoom_tween_partial_progress() {
-        let mut cam = Camera::default();
-        cam.zoom = 1.0;
+        let mut cam = Camera {
+            zoom: 1.0,
+            ..Default::default()
+        };
         cam.zoom_to(3.0, 4.0);  // speed=4/sec, gap=2.0 → needs 0.5s
         cam.update(0.25, None); // half the time → zoom = 1.0 + 4.0*0.25 = 2.0
         assert!((cam.zoom - 2.0).abs() < 1e-5);
@@ -298,9 +300,11 @@ mod tests {
 
     #[test]
     fn smooth_follow_lerps_toward_target() {
-        let mut cam = Camera::default();
-        cam.position = Vec2::ZERO;
-        cam.lerp_factor = 10.0;
+        let mut cam = Camera {
+            position: Vec2::ZERO,
+            lerp_factor: 10.0,
+            ..Default::default()
+        };
         // follow_pos = (100, 0), dt = 0.1s → factor = min(10*0.1, 1.0) = 1.0 → snap
         cam.update(0.1, Some(Vec2::new(100.0, 0.0)));
         assert!((cam.position.x - 100.0).abs() < 1e-5);
@@ -308,8 +312,10 @@ mod tests {
 
     #[test]
     fn smooth_follow_no_pos_does_not_move() {
-        let mut cam = Camera::default();
-        cam.position = Vec2::new(50.0, 50.0);
+        let mut cam = Camera {
+            position: Vec2::new(50.0, 50.0),
+            ..Default::default()
+        };
         cam.update(0.016, None);
         assert_eq!(cam.position, Vec2::new(50.0, 50.0));
     }

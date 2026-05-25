@@ -25,9 +25,28 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
 use tungstenite::{accept, Message};
 
 type BroadcastMap = Arc<Mutex<HashMap<usize, mpsc::Sender<Message>>>>;
+const MAX_JSON_MESSAGE_BYTES: usize = 4096;
+
+#[derive(Debug, Deserialize)]
+struct ClientPosition {
+    x: f32,
+    y: f32,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+enum ServerMessage {
+    #[serde(rename = "hello")]
+    Hello { id: usize },
+    #[serde(rename = "pos")]
+    Position { id: usize, x: f32, y: f32 },
+    #[serde(rename = "bye")]
+    Bye { id: usize },
+}
 
 fn main() {
     let addr = "127.0.0.1:9001";
@@ -79,12 +98,9 @@ fn main() {
             );
 
             // 클라이언트에게 할당 ID 전달
-            if ws
-                .send(Message::Text(format!(
-                    r#"{{"type":"hello","id":{id}}}"#
-                )))
-                .is_err()
-            {
+            let hello = serde_json::to_string(&ServerMessage::Hello { id })
+                .expect("hello message should serialize");
+            if ws.send(Message::Text(hello)).is_err() {
                 cleanup(&clients, id);
                 return;
             }
@@ -106,17 +122,32 @@ fn main() {
                 // WebSocket 수신
                 match ws.read() {
                     Ok(Message::Text(text)) => {
-                        if let (Some(x), Some(y)) =
-                            (extract_f32(&text, "x"), extract_f32(&text, "y"))
-                        {
-                            let relay = Message::Text(format!(
-                                r#"{{"type":"pos","id":{id},"x":{x},"y":{y}}}"#
-                            ));
-                            let guard = clients.lock().unwrap();
-                            for (&cid, sender) in guard.iter() {
-                                if cid != id {
-                                    let _ = sender.send(relay.clone());
-                                }
+                        if text.len() > MAX_JSON_MESSAGE_BYTES {
+                            eprintln!(
+                                "[{id}] dropped oversized message: {} > {} bytes",
+                                text.len(),
+                                MAX_JSON_MESSAGE_BYTES
+                            );
+                            continue;
+                        }
+                        let pos = match serde_json::from_str::<ClientPosition>(&text) {
+                            Ok(pos) => pos,
+                            Err(err) => {
+                                eprintln!("[{id}] invalid JSON message: {err}");
+                                continue;
+                            }
+                        };
+                        let relay = serde_json::to_string(&ServerMessage::Position {
+                            id,
+                            x: pos.x,
+                            y: pos.y,
+                        })
+                        .expect("position message should serialize");
+                        let relay = Message::Text(relay);
+                        let guard = clients.lock().unwrap();
+                        for (&cid, sender) in guard.iter() {
+                            if cid != id {
+                                let _ = sender.send(relay.clone());
                             }
                         }
                     }
@@ -138,7 +169,9 @@ fn main() {
 }
 
 fn cleanup(clients: &BroadcastMap, id: usize) {
-    let bye = Message::Text(format!(r#"{{"type":"bye","id":{id}}}"#));
+    let bye = Message::Text(
+        serde_json::to_string(&ServerMessage::Bye { id }).expect("bye message should serialize"),
+    );
     let mut guard = clients.lock().unwrap();
     guard.remove(&id);
     for sender in guard.values() {
@@ -147,13 +180,31 @@ fn cleanup(clients: &BroadcastMap, id: usize) {
     println!("[{id}] disconnected  (total: {})", guard.len());
 }
 
-/// JSON 텍스트에서 `"<key>":<value>` 패턴을 찾아 f32로 파싱한다.
-fn extract_f32(json: &str, key: &str) -> Option<f32> {
-    let search = format!("\"{}\":", key);
-    let start = json.find(&search)? + search.len();
-    let rest = json[start..].trim_start();
-    let end = rest
-        .find(|c: char| c == ',' || c == '}')
-        .unwrap_or(rest.len());
-    rest[..end].trim().parse().ok()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_client_position_json() {
+        let pos: ClientPosition = serde_json::from_str(r#"{"x":12.5,"y":-3.25}"#).unwrap();
+        assert_eq!(pos.x, 12.5);
+        assert_eq!(pos.y, -3.25);
+    }
+
+    #[test]
+    fn rejects_invalid_client_position_json() {
+        let result = serde_json::from_str::<ClientPosition>(r#"{"x":"bad","y":1.0}"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn serializes_server_messages_with_type_tags() {
+        let text = serde_json::to_string(&ServerMessage::Position {
+            id: 7,
+            x: 1.0,
+            y: 2.0,
+        })
+        .unwrap();
+        assert_eq!(text, r#"{"type":"pos","id":7,"x":1.0,"y":2.0}"#);
+    }
 }

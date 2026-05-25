@@ -109,15 +109,11 @@ impl System for UiSystem {
 
             if !label_text.is_empty() {
                 let text_y = pos.y + (size.y - font_size) / 2.0;
-                texts.push(DrawText {
-                    text: label_text,
-                    position: Vec2::new(pos.x, text_y),
-                    bounds: Some(Vec2::new(size.x, size.y)),
-                    size: font_size,
-                    color: text_color,
-                    align: TextAlign::Center,
-                    rich: false,
-                });
+                texts.push(
+                    DrawText::new(label_text, Vec2::new(pos.x, text_y), font_size, text_color)
+                        .with_bounds(Vec2::new(size.x, size.y))
+                        .with_align(TextAlign::Center),
+                );
             }
         }
 
@@ -170,7 +166,7 @@ impl System for UiSystem {
 
             // 문자 입력 처리 (focused 상태에서만)
             {
-                let focused = world.get::<TextInput>(entity).map_or(false, |t| t.focused);
+                let focused = world.get::<TextInput>(entity).is_some_and(|t| t.focused);
                 if focused {
                     // 커서 깜빡임
                     if let Some(ti) = world.get_mut::<TextInput>(entity) {
@@ -231,15 +227,15 @@ impl System for UiSystem {
             };
 
             rects.push(DrawRect::new(pos.x, pos.y, size.x, size.y, bg_color).with_z(z));
-            texts.push(DrawText {
-                text: display_text,
-                position: Vec2::new(pos.x + 6.0, pos.y + (size.y - font_size) / 2.0),
-                bounds: Some(Vec2::new((size.x - 12.0).max(0.0), size.y)),
-                size: font_size,
-                color: text_color,
-                align: TextAlign::Left,
-                rich: false,
-            });
+            texts.push(
+                DrawText::new(
+                    display_text,
+                    Vec2::new(pos.x + 6.0, pos.y + (size.y - font_size) / 2.0),
+                    font_size,
+                    text_color,
+                )
+                .with_bounds(Vec2::new((size.x - 12.0).max(0.0), size.y)),
+            );
         }
 
         // ── 4. ScrollView 패스 ───────────────────────────────────────────────
@@ -294,15 +290,15 @@ impl System for UiSystem {
                 if y + item_height < pos.y || y > pos.y + size.y {
                     continue;
                 }
-                texts.push(DrawText {
-                    text: sv.items[i].clone(),
-                    position: Vec2::new(pos.x + 4.0, y),
-                    bounds: Some(Vec2::new((size.x - 8.0).max(0.0), item_height)),
-                    size: font_size,
-                    color,
-                    align: TextAlign::Left,
-                    rich: false,
-                });
+                texts.push(
+                    DrawText::new(
+                        sv.items[i].clone(),
+                        Vec2::new(pos.x + 4.0, y),
+                        font_size,
+                        color,
+                    )
+                    .with_bounds(Vec2::new((size.x - 8.0).max(0.0), item_height)),
+                );
             }
         }
 
@@ -319,15 +315,13 @@ impl System for UiSystem {
                 continue;
             }
             if let Some(label) = world.get::<Label>(entity) {
-                texts.push(DrawText {
-                    text: label.text.clone(),
-                    position: pos,
-                    bounds: Some(size),
-                    size: label.font_size,
-                    color: label.color,
-                    align: label.align,
-                    rich: label.rich,
-                });
+                let mut text = DrawText::new(label.text.clone(), pos, label.font_size, label.color)
+                    .with_bounds(size)
+                    .with_align(label.align);
+                if label.rich {
+                    text = text.rich();
+                }
+                texts.push(text);
             }
         }
 
@@ -363,7 +357,7 @@ impl System for UiSystem {
 
             // 드래그 중
             {
-                let dragging = world.get::<Slider>(entity).map_or(false, |s| s.dragging);
+                let dragging = world.get::<Slider>(entity).is_some_and(|s| s.dragging);
                 if dragging {
                     if is_held {
                         if let Some(slider) = world.get_mut::<Slider>(entity) {
@@ -491,15 +485,15 @@ impl System for UiSystem {
             );
             // 레이블 텍스트
             if !label.is_empty() {
-                texts.push(DrawText {
-                    text: label,
-                    position: Vec2::new(pos.x + box_size + 6.0, pos.y + (size.y - font_size) / 2.0),
-                    bounds: Some(Vec2::new((size.x - box_size - 6.0).max(0.0), size.y)),
-                    size: font_size,
-                    color: text_color,
-                    align: TextAlign::Left,
-                    rich: false,
-                });
+                texts.push(
+                    DrawText::new(
+                        label,
+                        Vec2::new(pos.x + box_size + 6.0, pos.y + (size.y - font_size) / 2.0),
+                        font_size,
+                        text_color,
+                    )
+                    .with_bounds(Vec2::new((size.x - box_size - 6.0).max(0.0), size.y)),
+                );
             }
         }
 

@@ -6,6 +6,7 @@ pub struct Entity(pub u32);
 
 /// 컴포넌트 저장 단위. `Send + Sync`를 요구해 병렬 쿼리를 가능하게 한다.
 type ComponentBox = Box<dyn Any + Send + Sync>;
+type CloneComponentFn = Box<dyn Fn(&mut World, Entity, Entity) + Send + Sync>;
 
 // ─── Reflect 레지스트리 헬퍼 ─────────────────────────────────────────────────
 
@@ -75,7 +76,7 @@ pub struct World {
     added_this_tick: HashSet<(Entity, TypeId)>,
     changed_this_tick: HashSet<(Entity, TypeId)>,
     /// clone_entity에서 컴포넌트를 복제할 때 사용하는 함수 레지스트리.
-    clone_registry: HashMap<TypeId, Box<dyn Fn(&mut World, Entity, Entity) + Send + Sync>>,
+    clone_registry: HashMap<TypeId, CloneComponentFn>,
 }
 
 impl World {
@@ -1167,12 +1168,12 @@ mod tests {
 
         let src = world.spawn();
         world.add_component(src, 42u32);
-        world.add_component(src, 3.14f32);
+        world.add_component(src, 3.125f32);
 
         let dst = world.clone_entity(src);
         assert_ne!(src, dst);
         assert_eq!(*world.get::<u32>(dst).unwrap(), 42);
-        assert!((world.get::<f32>(dst).unwrap() - 3.14).abs() < 1e-5);
+        assert!((world.get::<f32>(dst).unwrap() - 3.125).abs() < 1e-5);
         // src still intact
         assert_eq!(*world.get::<u32>(src).unwrap(), 42);
     }
@@ -1180,7 +1181,7 @@ mod tests {
     #[test]
     fn clone_entity_skips_unregistered_types() {
         #[derive(Debug)]
-        struct NotCloneable(u32);
+        struct NotCloneable;
         unsafe impl Send for NotCloneable {}
         unsafe impl Sync for NotCloneable {}
 
@@ -1189,7 +1190,7 @@ mod tests {
 
         let src = world.spawn();
         world.add_component(src, 99u32);
-        world.add_component(src, NotCloneable(7));
+        world.add_component(src, NotCloneable);
 
         let dst = world.clone_entity(src);
         assert_eq!(*world.get::<u32>(dst).unwrap(), 99);

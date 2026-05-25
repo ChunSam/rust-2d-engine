@@ -13,6 +13,9 @@ use crate::ecs::World;
 use crate::resources::DisplayScaleFactor;
 
 /// 한 줄 텍스트 그리기 명령. `position`은 좌상단 픽셀 좌표.
+///
+/// Construct values with [`DrawText::new`] and builder methods instead of struct
+/// literals so future layout fields can be added without breaking call sites.
 #[derive(Debug, Clone)]
 pub struct DrawText {
     pub text: String,
@@ -167,6 +170,7 @@ impl TextRenderer {
     /// - 큐가 비어 있으면 렌더 패스를 열지 않고 즉시 반환한다.
     /// - 스프라이트 pass 이후에 `LoadOp::Load` 로 합성한다.
     /// - 렌더 후 큐를 비운다.
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         device: &Device,
@@ -346,11 +350,10 @@ fn parse_rich_text<'a>(text: &str, default_attrs: Attrs<'a>) -> Vec<(String, Att
                 "i" => italic_depth += 1,
                 "/i" => italic_depth = italic_depth.saturating_sub(1),
                 "color" => color_stack.push(parse_color_tag(rest).and_then(|(c, _)| c)),
-                "/color" => {
-                    if color_stack.len() > 1 {
-                        color_stack.pop();
-                    }
+                "/color" if color_stack.len() > 1 => {
+                    color_stack.pop();
                 }
+                "/color" => {}
                 _ => {}
             }
             i += len;
@@ -422,15 +425,7 @@ mod tests {
     use super::*;
 
     fn make_draw_text(text: &str) -> DrawText {
-        DrawText {
-            text: text.into(),
-            position: Vec2::new(0.0, 0.0),
-            bounds: None,
-            size: 24.0,
-            color: [255, 255, 255, 255],
-            align: TextAlign::Left,
-            rich: false,
-        }
+        DrawText::new(text, Vec2::new(0.0, 0.0), 24.0, [255, 255, 255, 255])
     }
 
     #[test]
@@ -458,15 +453,10 @@ mod tests {
 
     #[test]
     fn drawtext_fields_preserved() {
-        let d = DrawText {
-            text: "안녕".into(),
-            position: Vec2::new(10.0, 20.0),
-            bounds: Some(Vec2::new(120.0, 48.0)),
-            size: 24.0,
-            color: [255, 0, 0, 255],
-            align: TextAlign::Center,
-            rich: true,
-        };
+        let d = DrawText::new("안녕", Vec2::new(10.0, 20.0), 24.0, [255, 0, 0, 255])
+            .with_bounds(Vec2::new(120.0, 48.0))
+            .with_align(TextAlign::Center)
+            .rich();
         assert_eq!(d.text, "안녕");
         assert_eq!(d.position, Vec2::new(10.0, 20.0));
         assert_eq!(d.bounds, Some(Vec2::new(120.0, 48.0)));

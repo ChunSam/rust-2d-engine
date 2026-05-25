@@ -72,17 +72,18 @@ impl<T: Clone + Lerp> Track<T> {
 
     pub fn with_keyframes(keyframes: Vec<Keyframe<T>>) -> Self {
         let mut track = Self { keyframes };
-        track
-            .keyframes
-            .sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+        track.keyframes.sort_by(|a, b| a.time.total_cmp(&b.time));
         track
     }
 
     /// 키프레임을 추가한다. 삽입 후 시간 순으로 재정렬.
     pub fn add(&mut self, time: f32, value: T, easing: Easing) -> &mut Self {
-        self.keyframes.push(Keyframe { time, value, easing });
-        self.keyframes
-            .sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+        self.keyframes.push(Keyframe {
+            time,
+            value,
+            easing,
+        });
+        self.keyframes.sort_by(|a, b| a.time.total_cmp(&b.time));
         self
     }
 
@@ -225,10 +226,7 @@ impl crate::ecs::System for TimelineSystem {
         use crate::components::{Sprite, Transform};
 
         // Collect entities with Timeline first to avoid borrow conflicts
-        let entities: Vec<crate::ecs::Entity> = world
-            .query::<Timeline>()
-            .map(|(e, _)| e)
-            .collect();
+        let entities: Vec<crate::ecs::Entity> = world.query::<Timeline>().map(|(e, _)| e).collect();
 
         for entity in entities {
             // Take the timeline out to avoid double-borrow
@@ -355,12 +353,31 @@ mod tests {
     fn track_with_keyframes_sorted() {
         // Insert keyframes out of order — should still sort correctly
         let kfs = vec![
-            Keyframe { time: 1.0, value: 100.0_f32, easing: Easing::Linear },
-            Keyframe { time: 0.0, value: 0.0_f32, easing: Easing::Linear },
+            Keyframe {
+                time: 1.0,
+                value: 100.0_f32,
+                easing: Easing::Linear,
+            },
+            Keyframe {
+                time: 0.0,
+                value: 0.0_f32,
+                easing: Easing::Linear,
+            },
         ];
         let track = Track::with_keyframes(kfs);
         let v = track.sample(0.5).unwrap();
         assert!((v - 50.0).abs() < 1e-4, "expected ~50, got {v}");
+    }
+
+    #[test]
+    fn track_sorting_accepts_nan_times() {
+        let mut track: Track<f32> = Track::new();
+        track.add(f32::NAN, 1.0, Easing::Linear);
+        track.add(0.0, 2.0, Easing::Linear);
+        track.add(0.0, 3.0, Easing::Linear);
+
+        assert_eq!(track.sample(0.0), Some(2.0));
+        assert!(track.duration().is_nan());
     }
 
     #[test]

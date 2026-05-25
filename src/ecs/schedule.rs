@@ -71,7 +71,7 @@ pub enum ScheduleError {
 ///
 /// - 입력: 각 시스템의 메타데이터 (인덱스 순서 = 삽입 순서)
 /// - 엣지: `after(X)` → "X 라벨을 가진 모든 시스템"이 self보다 먼저.
-///         `before(Y)` → self가 "Y 라벨 시스템"보다 먼저.
+///   `before(Y)` → self가 "Y 라벨 시스템"보다 먼저.
 /// - 동순위 타이브레이커는 삽입 순서(인덱스 오름차순)로 결정적.
 /// - 성공: `Ok(실행할 인덱스 순서)`. 순환: `Err(Cycle(남은 인덱스))`.
 pub fn compute_order(metas: &[SystemMeta]) -> Result<Vec<usize>, ScheduleError> {

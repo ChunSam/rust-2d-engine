@@ -52,7 +52,7 @@ pub use camera::Camera;
 pub use collision::{
     Collider, CollisionDebugSystem, CollisionGridSystem, CollisionLayer, DebugConfig, SpatialGrid,
 };
-pub use components::{PointLight, RenderLayer, Sprite, Transform};
+pub use components::{OffscreenCamera, PointLight, RenderLayer, Sprite, Transform};
 pub use debug_ui::DebugUi;
 pub use ecs::schedule::{ScheduleError, SystemConfig, SystemLabel, SystemMeta};
 pub use ecs::{Commands, Entity, Events, System, World};
@@ -77,7 +77,8 @@ pub use prefab::{
 // World 메서드이므로 World re-export를 통해 자동 접근 가능 (별도 re-export 불필요)
 pub use reflect::{Reflect, ReflectValue};
 pub use renderer::{
-    DrawRect, DrawText, PostProcessConfig, TextAlign, TextQueue, TextRenderer, UiQueue,
+    DrawRect, DrawText, PostProcessConfig, RenderTarget, TextAlign, TextQueue, TextRenderer,
+    UiQueue,
 };
 pub use resources::{
     AmbientLight, CullConfig, DebugDraw, DebugDrawQueue, DebugRect, DebugShape, DisplayScaleFactor,
@@ -165,25 +166,18 @@ pub fn run_demo() {
             }
 
             if let Some(tq) = world.resource_mut::<TextQueue>() {
-                tq.push(DrawText {
-                    text: "rust-2d-engine  —  WASM demo  (wgpu + WebGL2)".to_string(),
-                    position: Vec2::new(20.0, 20.0),
-                    bounds: None,
-                    size: 22.0,
-                    color: [255, 255, 255, 220],
-                    align: TextAlign::Left,
-                    rich: false,
-                });
-                tq.push(DrawText {
-                    text: "ECS  ·  Rendering  ·  Animation  ·  Scripting  ·  Reflect  ·  UI"
-                        .to_string(),
-                    position: Vec2::new(20.0, 52.0),
-                    bounds: None,
-                    size: 16.0,
-                    color: [160, 210, 255, 200],
-                    align: TextAlign::Left,
-                    rich: false,
-                });
+                tq.push(DrawText::new(
+                    "rust-2d-engine  —  WASM demo  (wgpu + WebGL2)",
+                    Vec2::new(20.0, 20.0),
+                    22.0,
+                    [255, 255, 255, 220],
+                ));
+                tq.push(DrawText::new(
+                    "ECS  ·  Rendering  ·  Animation  ·  Scripting  ·  Reflect  ·  UI",
+                    Vec2::new(20.0, 52.0),
+                    16.0,
+                    [160, 210, 255, 200],
+                ));
             }
         }
     }

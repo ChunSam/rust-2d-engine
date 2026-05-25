@@ -1,5 +1,7 @@
 use crate::ecs::{events::Events, system::System, world::World};
 
+pub const DEFAULT_MAX_MESSAGE_BYTES: usize = 64 * 1024;
+
 /// 매 프레임 [`NetworkSystem`]이 생성하는 ECS 이벤트.
 #[derive(Clone, Debug)]
 pub enum NetworkEvent {
@@ -7,14 +9,29 @@ pub enum NetworkEvent {
     Disconnected { reason: String },
     BinaryMessage(Vec<u8>),
     TextMessage(String),
+    MessageTooLarge { len: usize, limit: usize },
+    JsonParseError { message: String },
     Error(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NetworkConfig {
+    pub max_message_bytes: usize,
+}
+
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        Self {
+            max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
+        }
+    }
 }
 
 // ── 네이티브 구현 ────────────────────────────────────────────────────────────
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
-    use super::NetworkEvent;
+    use super::{NetworkConfig, NetworkEvent};
 
     enum OutMsg {
         Binary(Vec<u8>),
@@ -31,9 +48,14 @@ mod native {
         /// 백그라운드 스레드에서 WebSocket 연결을 시작한다.
         /// 연결 성공 시 [`NetworkEvent::Connected`], 실패 시 [`NetworkEvent::Error`]가 발행된다.
         pub fn connect(url: &str) -> Self {
+            Self::connect_with_config(url, NetworkConfig::default())
+        }
+
+        pub fn connect_with_config(url: &str, config: NetworkConfig) -> Self {
             let (event_tx, event_rx) = std::sync::mpsc::channel::<NetworkEvent>();
             let (msg_tx, msg_rx) = std::sync::mpsc::channel::<OutMsg>();
             let url = url.to_string();
+            let max_message_bytes = config.max_message_bytes;
 
             std::thread::spawn(move || {
                 let (mut socket, _) = match tungstenite::connect(&url) {
@@ -45,11 +67,9 @@ mod native {
                 };
 
                 // 5 ms read timeout → loop가 5 ms마다 발신 채널을 확인
-                match socket.get_mut() {
-                    tungstenite::stream::MaybeTlsStream::Plain(tcp) => {
-                        tcp.set_read_timeout(Some(std::time::Duration::from_millis(5))).ok();
-                    }
-                    _ => {}
+                if let tungstenite::stream::MaybeTlsStream::Plain(tcp) = socket.get_mut() {
+                    tcp.set_read_timeout(Some(std::time::Duration::from_millis(5)))
+                        .ok();
                 }
 
                 let _ = event_tx.send(NetworkEvent::Connected);
@@ -83,18 +103,31 @@ mod native {
                     // 수신 메시지 처리 (timeout 시 WouldBlock / TimedOut)
                     match socket.read() {
                         Ok(tungstenite::Message::Binary(data)) => {
+                            if data.len() > max_message_bytes {
+                                let _ = event_tx.send(NetworkEvent::MessageTooLarge {
+                                    len: data.len(),
+                                    limit: max_message_bytes,
+                                });
+                                continue;
+                            }
                             if event_tx.send(NetworkEvent::BinaryMessage(data)).is_err() {
                                 return;
                             }
                         }
                         Ok(tungstenite::Message::Text(text)) => {
+                            if text.len() > max_message_bytes {
+                                let _ = event_tx.send(NetworkEvent::MessageTooLarge {
+                                    len: text.len(),
+                                    limit: max_message_bytes,
+                                });
+                                continue;
+                            }
                             if event_tx.send(NetworkEvent::TextMessage(text)).is_err() {
                                 return;
                             }
                         }
                         Ok(tungstenite::Message::Close(frame)) => {
-                            let reason =
-                                frame.map(|f| f.reason.into_owned()).unwrap_or_default();
+                            let reason = frame.map(|f| f.reason.into_owned()).unwrap_or_default();
                             let _ = event_tx.send(NetworkEvent::Disconnected { reason });
                             return;
                         }
@@ -145,7 +178,7 @@ mod native {
 
 #[cfg(target_arch = "wasm32")]
 mod wasm_impl {
-    use super::NetworkEvent;
+    use super::{NetworkConfig, NetworkEvent};
     use std::{cell::RefCell, rc::Rc};
     use wasm_bindgen::prelude::*;
     use wasm_bindgen::JsCast;
@@ -162,10 +195,14 @@ mod wasm_impl {
 
     impl NetworkClient {
         pub fn connect(url: &str) -> Self {
-            let buffer: Rc<RefCell<Vec<NetworkEvent>>> = Rc::new(RefCell::new(Vec::new()));
+            Self::connect_with_config(url, NetworkConfig::default())
+        }
 
-            let ws =
-                web_sys::WebSocket::new(url).expect("WebSocket::new failed");
+        pub fn connect_with_config(url: &str, config: NetworkConfig) -> Self {
+            let buffer: Rc<RefCell<Vec<NetworkEvent>>> = Rc::new(RefCell::new(Vec::new()));
+            let max_message_bytes = config.max_message_bytes;
+
+            let ws = web_sys::WebSocket::new(url).expect("WebSocket::new failed");
             ws.set_binary_type(web_sys::BinaryType::Arraybuffer);
 
             let buf = buffer.clone();
@@ -175,30 +212,47 @@ mod wasm_impl {
             ws.set_onopen(Some(on_open.as_ref().unchecked_ref()));
 
             let buf = buffer.clone();
-            let on_message =
-                Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
+            let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(
+                move |ev: web_sys::MessageEvent| {
                     let data = ev.data();
                     if let Some(text) = data.as_string() {
-                        buf.borrow_mut().push(NetworkEvent::TextMessage(text));
+                        if text.len() > max_message_bytes {
+                            buf.borrow_mut().push(NetworkEvent::MessageTooLarge {
+                                len: text.len(),
+                                limit: max_message_bytes,
+                            });
+                        } else {
+                            buf.borrow_mut().push(NetworkEvent::TextMessage(text));
+                        }
                     } else {
                         let array = js_sys::Uint8Array::new(&data);
-                        buf.borrow_mut().push(NetworkEvent::BinaryMessage(array.to_vec()));
+                        let bytes = array.to_vec();
+                        if bytes.len() > max_message_bytes {
+                            buf.borrow_mut().push(NetworkEvent::MessageTooLarge {
+                                len: bytes.len(),
+                                limit: max_message_bytes,
+                            });
+                        } else {
+                            buf.borrow_mut().push(NetworkEvent::BinaryMessage(bytes));
+                        }
                     }
-                });
+                },
+            );
             ws.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
 
             let buf = buffer.clone();
-            let on_error =
-                Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev: web_sys::Event| {
-                    buf.borrow_mut().push(NetworkEvent::Error("WebSocket error".into()));
-                });
+            let on_error = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev: web_sys::Event| {
+                buf.borrow_mut()
+                    .push(NetworkEvent::Error("WebSocket error".into()));
+            });
             ws.set_onerror(Some(on_error.as_ref().unchecked_ref()));
 
             let buf = buffer.clone();
             let on_close =
                 Closure::<dyn FnMut(web_sys::CloseEvent)>::new(move |ev: web_sys::CloseEvent| {
-                    buf.borrow_mut()
-                        .push(NetworkEvent::Disconnected { reason: ev.reason() });
+                    buf.borrow_mut().push(NetworkEvent::Disconnected {
+                        reason: ev.reason(),
+                    });
                 });
             ws.set_onclose(Some(on_close.as_ref().unchecked_ref()));
 

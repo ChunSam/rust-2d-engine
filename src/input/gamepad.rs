@@ -71,20 +71,11 @@ impl Slot {
 ///     let lx = gs.axis(0, GamepadAxis::LeftStickX);
 /// }
 /// ```
+#[derive(Default)]
 pub struct GamepadState {
     slots: [Option<Slot>; 4],
     #[cfg(not(target_arch = "wasm32"))]
     id_map: HashMap<gilrs::GamepadId, usize>,
-}
-
-impl Default for GamepadState {
-    fn default() -> Self {
-        Self {
-            slots: [None, None, None, None],
-            #[cfg(not(target_arch = "wasm32"))]
-            id_map: HashMap::new(),
-        }
-    }
 }
 
 impl GamepadState {
@@ -107,20 +98,19 @@ impl GamepadState {
 
     /// `pad` 슬롯에서 `button`이 눌려 있으면 true.
     pub fn is_pressed(&self, pad: usize, button: GamepadButton) -> bool {
-        self.slot(pad)
-            .map_or(false, |s| s.pressed.contains(&button))
+        self.slot(pad).is_some_and(|s| s.pressed.contains(&button))
     }
 
     /// `pad` 슬롯에서 `button`이 이번 프레임에 눌렸으면 true.
     pub fn just_pressed(&self, pad: usize, button: GamepadButton) -> bool {
         self.slot(pad)
-            .map_or(false, |s| s.just_pressed.contains(&button))
+            .is_some_and(|s| s.just_pressed.contains(&button))
     }
 
     /// `pad` 슬롯에서 `button`이 이번 프레임에 떼어졌으면 true.
     pub fn just_released(&self, pad: usize, button: GamepadButton) -> bool {
         self.slot(pad)
-            .map_or(false, |s| s.just_released.contains(&button))
+            .is_some_and(|s| s.just_released.contains(&button))
     }
 
     /// `pad` 슬롯의 `axis` 값 (−1.0 ~ 1.0, 데드존 미적용).
@@ -143,14 +133,13 @@ impl GamepadState {
         let gid = event.id;
 
         match event.event {
-            EventType::Connected => {
-                if !self.id_map.contains_key(&gid) {
-                    if let Some(idx) = self.slots.iter().position(|s| s.is_none()) {
-                        self.slots[idx] = Some(Slot::new());
-                        self.id_map.insert(gid, idx);
-                    }
+            EventType::Connected if !self.id_map.contains_key(&gid) => {
+                if let Some(idx) = self.slots.iter().position(|s| s.is_none()) {
+                    self.slots[idx] = Some(Slot::new());
+                    self.id_map.insert(gid, idx);
                 }
             }
+            EventType::Connected => {}
             EventType::Disconnected => {
                 if let Some(idx) = self.id_map.remove(&gid) {
                     self.slots[idx] = None;

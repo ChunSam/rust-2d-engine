@@ -487,9 +487,9 @@ mod tests {
     fn blackboard_float() {
         let mut bb = Blackboard::new();
         assert_eq!(bb.get_float("speed"), None);
-        bb.set_float("speed", 3.14);
+        bb.set_float("speed", 3.125);
         let v = bb.get_float("speed").unwrap();
-        assert!((v - 3.14).abs() < 1e-5);
+        assert!((v - 3.125).abs() < 1e-5);
     }
 
     #[test]

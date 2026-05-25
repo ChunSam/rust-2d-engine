@@ -154,9 +154,15 @@ pub struct SpriteRenderer {
     mat_instance_capacity: usize,
     custom_pipelines: HashMap<u64, wgpu::RenderPipeline>,
     params_buffers: HashMap<u32, (wgpu::Buffer, wgpu::BindGroup)>,
+    /// RenderTarget bind_group 캐시 (키 = RenderTarget 이름)
+    rt_cache: HashMap<String, Arc<wgpu::BindGroup>>,
 }
 
 impl SpriteRenderer {
+    pub fn texture_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.texture_layout
+    }
+
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         // ── 셰이더 로드 (컴파일 타임 임베딩) ───────────────────────────────────
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -334,6 +340,7 @@ impl SpriteRenderer {
             mat_instance_capacity: mat_capacity,
             custom_pipelines: HashMap::new(),
             params_buffers: HashMap::new(),
+            rt_cache: HashMap::new(),
         }
     }
 
@@ -355,11 +362,19 @@ impl SpriteRenderer {
         log::info!("텍스처 핫 리로드: {path}");
     }
 
+    /// RenderTarget bind_group을 스프라이트 렌더러에 등록한다.
+    ///
+    /// `Sprite::texture`에 `key` 문자열을 지정하면 해당 RT 텍스처로 렌더링된다.
+    pub fn register_render_target(&mut self, key: &str, bg: Arc<wgpu::BindGroup>) {
+        self.rt_cache.insert(key.to_string(), bg);
+    }
+
     /// 매 프레임: ECS World에서 스프라이트를 수집해 렌더링한다.
     ///
     /// # z-order
     /// 모든 스프라이트를 z 오름차순으로 전역 정렬한 뒤, 연속으로 같은 텍스처를 쓰는
     /// 구간마다 draw call을 한 번씩 발행한다. 텍스처가 섞이더라도 z 값이 정확히 반영된다.
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         device: &wgpu::Device,
@@ -586,6 +601,8 @@ impl SpriteRenderer {
 
                 let bind_group = if run_key.is_empty() {
                     &self.white_texture.bind_group
+                } else if let Some(rt_bg) = self.rt_cache.get(run_key.as_str()) {
+                    rt_bg.as_ref()
                 } else {
                     self.texture_cache
                         .get(run_key.as_str())
@@ -669,6 +686,7 @@ impl SpriteRenderer {
     ///
     /// 일반 스프라이트 패스 **이후**, UI 패스 **이전**에 호출된다.
     /// z-sort는 머티리얼 엔티티끼리만 적용된다 (일반 스프라이트와 인터리브 없음).
+    #[allow(clippy::too_many_arguments)]
     fn render_materials(
         &mut self,
         device: &wgpu::Device,
@@ -816,8 +834,12 @@ impl SpriteRenderer {
             let tex_bg = entry
                 .tex_key
                 .as_ref()
-                .and_then(|k| self.texture_cache.get(k))
-                .map(|t| &t.bind_group)
+                .and_then(|k| {
+                    self.rt_cache
+                        .get(k)
+                        .map(|bg| bg.as_ref())
+                        .or_else(|| self.texture_cache.get(k).map(|t| &t.bind_group))
+                })
                 .unwrap_or(&self.white_texture.bind_group);
             pass.set_bind_group(1, tex_bg, &[]);
 
@@ -835,6 +857,7 @@ impl SpriteRenderer {
     ///
     /// 스프라이트 패스 직후, 텍스트 패스 직전에 호출한다.
     /// `rects`는 `UiQueue`에서 drain한 슬라이스를 전달한다.
+    #[allow(clippy::too_many_arguments)]
     pub fn render_ui_rects_from_slice(
         &mut self,
         device: &wgpu::Device,

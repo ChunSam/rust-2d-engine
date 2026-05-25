@@ -43,10 +43,22 @@ use crate::{
     scene::{Scene, SceneChange, SceneCmd},
 };
 
+type EventHook = Box<dyn Fn(&mut World)>;
+type ComponentFactory = Box<dyn Fn(&mut World, Entity) + Send + Sync>;
+type OffscreenRenderInfo = (
+    String,
+    crate::camera::Camera,
+    u32,
+    u32,
+    *const wgpu::TextureView,
+    Arc<wgpu::BindGroup>,
+);
+
 // ─── 에디터 Undo/Redo ────────────────────────────────────────────────────────
 
 /// Inspector에서 실행 취소 가능한 작업 목록.
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 enum EditorCmd {
     MoveEntity {
@@ -205,10 +217,14 @@ pub struct App {
     last_frame: Option<Instant>,
     /// GPU 초기화 전에 등록된 텍스처 경로를 보관한다. resumed()에서 실제로 로드한다.
     pending_textures: Vec<String>,
+    /// 등록된 오프스크린 렌더 타겟 맵 (이름 → RenderTarget).
+    render_targets: HashMap<String, crate::renderer::render_target::RenderTarget>,
+    /// GPU 초기화 전에 등록된 렌더 타겟 정보. finish_init()에서 실제 생성한다.
+    pending_render_targets: Vec<(String, u32, u32)>,
     /// 매 프레임 종료 시 이벤트 큐를 비우는 클로저 목록.
-    event_flushers: Vec<Box<dyn Fn(&mut World)>>,
+    event_flushers: Vec<EventHook>,
     /// reload_scene 시 이벤트 리소스를 재삽입하는 클로저 목록.
-    event_initializers: Vec<Box<dyn Fn(&mut World)>>,
+    event_initializers: Vec<EventHook>,
     /// gilrs 게임패드 컨텍스트. 초기화 실패 시 None (게임패드 없이 동작).
     #[cfg(not(target_arch = "wasm32"))]
     gilrs: Option<gilrs::Gilrs>,
@@ -240,7 +256,7 @@ pub struct App {
     gizmo_drag_start_pos: Option<glam::Vec2>,
     /// 컴포넌트 추가 팩토리 맵 (네이티브 전용). 타입 이름 → World에 컴포넌트를 추가하는 클로저.
     #[cfg(not(target_arch = "wasm32"))]
-    component_factories: HashMap<String, Box<dyn Fn(&mut World, Entity) + Send + Sync>>,
+    component_factories: HashMap<String, ComponentFactory>,
     /// "Add Component" 드롭다운에서 현재 선택된 컴포넌트 이름 (네이티브 전용).
     #[cfg(not(target_arch = "wasm32"))]
     add_component_selected: String,
@@ -304,6 +320,8 @@ impl App {
             scene_texture_for_lighting: None,
             last_frame: None,
             pending_textures: Vec::new(),
+            render_targets: HashMap::new(),
+            pending_render_targets: Vec::new(),
             event_flushers: Vec::new(),
             event_initializers: Vec::new(),
             gilrs,
@@ -345,6 +363,8 @@ impl App {
             post_renderer: None,
             last_frame: None,
             pending_textures: Vec::new(),
+            render_targets: HashMap::new(),
+            pending_render_targets: Vec::new(),
             event_flushers: Vec::new(),
             event_initializers: Vec::new(),
             egui_renderer: None,
@@ -441,6 +461,35 @@ impl App {
             self.disabled_sets.remove(set);
         } else {
             self.disabled_sets.insert(set);
+        }
+    }
+
+    /// 오프스크린 렌더 타겟을 등록한다.
+    ///
+    /// GPU 초기화 전에 호출해도 안전하다. 실제 GPU 텍스처 생성은 `finish_init()` 시점에 처리된다.
+    ///
+    /// `name`은 `Sprite::texture` 필드에 지정해 해당 RT를 스프라이트 텍스처로 사용할 수 있다.
+    ///
+    /// ```rust,no_run
+    /// # use engine::App;
+    /// # let mut app = App::new();
+    /// app.create_render_target("minimap", 256, 256);
+    /// ```
+    pub fn create_render_target(&mut self, name: impl Into<String>, width: u32, height: u32) {
+        let name = name.into();
+        if let (Some(gpu), Some(sr)) = (&self.gpu, &self.sprite_renderer) {
+            // GPU가 이미 초기화된 경우 즉시 생성
+            let rt = crate::renderer::render_target::RenderTarget::new(
+                &gpu.device,
+                width,
+                height,
+                gpu.config.format,
+                sr.texture_layout(),
+            );
+            self.render_targets.insert(name, rt);
+        } else {
+            // GPU 초기화 전이면 pending에 보관
+            self.pending_render_targets.push((name, width, height));
         }
     }
 
@@ -1269,10 +1318,8 @@ impl App {
                             for &comp_name in &selected_comp_names {
                                 ui.horizontal(|ui| {
                                     ui.label(comp_name);
-                                    if comp_name != "Transform" {
-                                        if ui.small_button("✕").clicked() {
-                                            to_remove = Some(comp_name);
-                                        }
+                                    if comp_name != "Transform" && ui.small_button("✕").clicked() {
+                                        to_remove = Some(comp_name);
                                     }
                                 });
                             }
@@ -1743,6 +1790,92 @@ impl App {
                 label: Some("frame encoder"),
             });
 
+        // ── 오프스크린 패스: OffscreenCamera 엔티티마다 RT에 렌더 ─────────────
+        {
+            // 1단계: (target_name, camera, rt_width, rt_height, view_ptr, bind_group_clone) 수집
+            // render_targets와 sprite_renderer를 동시에 borrow할 수 없으므로
+            // raw pointer로 view 참조를 보관한다.
+            // Safety: render_targets HashMap은 이 루프 안에서 수정되지 않는다.
+            let offscreen_cams: Vec<(String, crate::camera::Camera)> = self
+                .world
+                .query::<crate::components::OffscreenCamera>()
+                .map(|(_, oc)| (oc.target.clone(), oc.camera))
+                .collect();
+
+            let rt_info: Vec<OffscreenRenderInfo> = offscreen_cams
+                .into_iter()
+                .filter_map(|(name, cam)| {
+                    self.render_targets.get(&name).map(|rt| {
+                        (
+                            name,
+                            cam,
+                            rt.width,
+                            rt.height,
+                            &rt.view as *const wgpu::TextureView,
+                            std::sync::Arc::clone(&rt.bind_group),
+                        )
+                    })
+                })
+                .collect();
+
+            for (target_name, cam, rt_w, rt_h, view_ptr, bg) in rt_info {
+                // ① 카메라 교체
+                let saved_cam = self
+                    .world
+                    .resource::<crate::camera::Camera>()
+                    .copied()
+                    .unwrap_or_default();
+                self.world.insert_resource(cam);
+
+                // ② Safety: render_targets는 이 루프에서 수정되지 않는다.
+                let rt_view = unsafe { &*view_ptr };
+
+                // ③ RT clear
+                {
+                    let _pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("offscreen clear"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: rt_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color {
+                                    r: 0.0,
+                                    g: 0.0,
+                                    b: 0.0,
+                                    a: 1.0,
+                                }),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        occlusion_query_set: None,
+                        timestamp_writes: None,
+                    });
+                }
+
+                // ④ 스프라이트 렌더 → RT
+                if let Some(sr) = &mut self.sprite_renderer {
+                    sr.render(
+                        &gpu.device,
+                        &gpu.queue,
+                        rt_view,
+                        &mut enc,
+                        &self.world,
+                        rt_w,
+                        rt_h,
+                    );
+                }
+
+                // ⑤ 카메라 복원
+                self.world.insert_resource(saved_cam);
+
+                // ⑥ RT bind_group을 스프라이트 렌더러에 등록 (Sprite.texture 키로 샘플 가능)
+                if let Some(sr) = &mut self.sprite_renderer {
+                    sr.register_render_target(&target_name, bg);
+                }
+            }
+        }
+
         // 렌더 타겟 선택:
         //   라이팅 있고 포스트 없음 → 중간 씬 텍스처
         //   포스트 있음 (라이팅 여부 무관) → post_renderer.target_view
@@ -1750,14 +1883,28 @@ impl App {
         let render_view: &wgpu::TextureView = if use_lighting && !use_post {
             #[cfg(not(target_arch = "wasm32"))]
             {
-                &self.scene_texture_for_lighting.as_ref().unwrap().1
+                if let Some((_, view)) = self.scene_texture_for_lighting.as_ref() {
+                    view
+                } else {
+                    log::warn!(
+                        "lighting requested but scene texture is missing; rendering to final view"
+                    );
+                    &final_view
+                }
             }
             #[cfg(target_arch = "wasm32")]
             {
                 &final_view
             }
         } else if use_post {
-            &self.post_renderer.as_ref().unwrap().target_view
+            if let Some(pr) = self.post_renderer.as_ref() {
+                &pr.target_view
+            } else {
+                log::warn!(
+                    "post process requested but renderer is missing; rendering to final view"
+                );
+                &final_view
+            }
         } else {
             &final_view
         };
@@ -1920,12 +2067,18 @@ impl App {
                 lr.clear_normal_buffer(&mut enc);
 
                 // scene input: post가 있으면 post.target_view, 없으면 씬 중간 텍스처
-                let scene_input: &wgpu::TextureView = if use_post {
-                    &self.post_renderer.as_ref().unwrap().target_view
+                let scene_input: Option<&wgpu::TextureView> = if use_post {
+                    self.post_renderer.as_ref().map(|pr| &pr.target_view)
                 } else {
-                    &self.scene_texture_for_lighting.as_ref().unwrap().1
+                    self.scene_texture_for_lighting
+                        .as_ref()
+                        .map(|(_, view)| view)
                 };
-                lr.run_pass(&gpu.device, &mut enc, scene_input, &final_view);
+                if let Some(scene_input) = scene_input {
+                    lr.run_pass(&gpu.device, &mut enc, scene_input, &final_view);
+                } else {
+                    log::warn!("lighting pass skipped because scene input texture is missing");
+                }
             }
         }
 
@@ -2241,6 +2394,17 @@ impl App {
         let mut sprite_renderer = SpriteRenderer::new(&gpu.device, &gpu.queue, gpu.config.format);
         for path in self.pending_textures.drain(..) {
             sprite_renderer.load_texture(&gpu.device, &gpu.queue, &path);
+        }
+        // pending_render_targets: GPU 초기화 전에 등록된 RT를 여기서 실제 생성
+        for (name, w, h) in self.pending_render_targets.drain(..) {
+            let rt = crate::renderer::render_target::RenderTarget::new(
+                &gpu.device,
+                w,
+                h,
+                gpu.config.format,
+                sprite_renderer.texture_layout(),
+            );
+            self.render_targets.insert(name, rt);
         }
         let font_bytes = self
             .world

@@ -17,13 +17,33 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
+    use engine::ecs::{System, World};
+    use engine::scene::Scene;
     use engine::{
         App, DrawText, Events, NetworkClient, NetworkEvent, NetworkSystem, Sprite, TextQueue,
         Transform, WindowConfig,
     };
-    use engine::ecs::{System, World};
-    use engine::scene::Scene;
     use glam::Vec2;
+    use serde::{Deserialize, Serialize};
+
+    const MAX_JSON_MESSAGE_BYTES: usize = 4096;
+
+    #[derive(Debug, Deserialize)]
+    #[serde(tag = "type")]
+    enum ServerMessage {
+        #[serde(rename = "hello")]
+        Hello { id: usize },
+        #[serde(rename = "pos")]
+        Position { id: usize, x: f32, y: f32 },
+        #[serde(rename = "bye")]
+        Bye { id: usize },
+    }
+
+    #[derive(Debug, Serialize)]
+    struct ClientPosition {
+        x: f32,
+        y: f32,
+    }
 
     // ── 씬 ──────────────────────────────────────────────────────────────────────
 
@@ -76,8 +96,14 @@ fn main() {
                     NetworkEvent::TextMessage(ref text) => {
                         self.handle_message(world, text);
                     }
+                    NetworkEvent::MessageTooLarge { len, limit } => {
+                        self.status = format!("Dropped oversized message: {len} > {limit} bytes");
+                    }
                     NetworkEvent::Disconnected { reason } => {
                         self.status = format!("Disconnected: {reason}");
+                    }
+                    NetworkEvent::JsonParseError { message } => {
+                        self.status = format!("Protocol error: {message}");
                     }
                     NetworkEvent::Error(e) => {
                         self.status = format!("Error: {e}");
@@ -107,13 +133,16 @@ fn main() {
                 use winit::keyboard::KeyCode;
                 if let Some(input) = world.resource::<engine::InputState>() {
                     let right = (input.is_pressed(KeyCode::KeyD)
-                        || input.is_pressed(KeyCode::ArrowRight)) as i32;
+                        || input.is_pressed(KeyCode::ArrowRight))
+                        as i32;
                     let left = (input.is_pressed(KeyCode::KeyA)
-                        || input.is_pressed(KeyCode::ArrowLeft)) as i32;
+                        || input.is_pressed(KeyCode::ArrowLeft))
+                        as i32;
                     let down = (input.is_pressed(KeyCode::KeyS)
-                        || input.is_pressed(KeyCode::ArrowDown)) as i32;
-                    let up = (input.is_pressed(KeyCode::KeyW)
-                        || input.is_pressed(KeyCode::ArrowUp)) as i32;
+                        || input.is_pressed(KeyCode::ArrowDown))
+                        as i32;
+                    let up = (input.is_pressed(KeyCode::KeyW) || input.is_pressed(KeyCode::ArrowUp))
+                        as i32;
                     ((right - left) as f32, (down - up) as f32)
                 } else {
                     (0.0, 0.0)
@@ -137,7 +166,12 @@ fn main() {
                     .and_then(|e| world.get::<Transform>(e).map(|t| t.position));
                 if let Some(pos) = pos {
                     if let Some(client) = world.resource::<NetworkClient>() {
-                        client.send_text(format!("{{\"x\":{:.2},\"y\":{:.2}}}", pos.x, pos.y));
+                        if let Ok(text) = serde_json::to_string(&ClientPosition {
+                            x: (pos.x * 100.0).round() / 100.0,
+                            y: (pos.y * 100.0).round() / 100.0,
+                        }) {
+                            client.send_text(text);
+                        }
                     }
                 }
             }
@@ -148,44 +182,50 @@ fn main() {
                 .map(|id| format!("Player #{id}"))
                 .unwrap_or_else(|| "...".into());
             let peers = self.remote_players.len();
-            let hud = format!(
-                "{id_label}  |  peers: {peers}  |  {}",
-                self.status
-            );
+            let hud = format!("{id_label}  |  peers: {peers}  |  {}", self.status);
 
             if let Some(tq) = world.resource_mut::<TextQueue>() {
-                tq.push(DrawText {
-                    text: hud,
-                    position: Vec2::new(10.0, 10.0),
-                    size: 18.0,
-                    color: [255, 255, 255, 210],
-                });
-                tq.push(DrawText {
-                    text: "WASD / Arrow keys to move".into(),
-                    position: Vec2::new(10.0, 36.0),
-                    size: 14.0,
-                    color: [160, 160, 160, 180],
-                });
+                tq.push(DrawText::new(
+                    hud,
+                    Vec2::new(10.0, 10.0),
+                    18.0,
+                    [255, 255, 255, 210],
+                ));
+                tq.push(DrawText::new(
+                    "WASD / Arrow keys to move",
+                    Vec2::new(10.0, 36.0),
+                    14.0,
+                    [160, 160, 160, 180],
+                ));
             }
         }
     }
 
     impl MultiplayerSystem {
         fn handle_message(&mut self, world: &mut World, text: &str) {
-            let msg_type = extract_str(text, "type");
+            if text.len() > MAX_JSON_MESSAGE_BYTES {
+                self.status = format!(
+                    "Dropped oversized protocol message: {} > {} bytes",
+                    text.len(),
+                    MAX_JSON_MESSAGE_BYTES
+                );
+                return;
+            }
 
-            match msg_type.as_deref() {
-                Some("hello") => {
-                    if let Some(id) = extract_usize(text, "id") {
-                        self.local_id = Some(id);
-                        self.status = format!("Connected as Player #{id}");
-                    }
+            let message = match serde_json::from_str::<ServerMessage>(text) {
+                Ok(message) => message,
+                Err(err) => {
+                    self.status = format!("Protocol error: {err}");
+                    return;
                 }
-                Some("pos") => {
-                    let Some(id) = extract_usize(text, "id") else { return };
-                    let Some(x) = extract_f32(text, "x") else { return };
-                    let Some(y) = extract_f32(text, "y") else { return };
+            };
 
+            match message {
+                ServerMessage::Hello { id } => {
+                    self.local_id = Some(id);
+                    self.status = format!("Connected as Player #{id}");
+                }
+                ServerMessage::Position { id, x, y } => {
                     if let Some(&entity) = self.remote_players.get(&id) {
                         if let Some(tr) = world.get_mut::<Transform>(entity) {
                             tr.position = Vec2::new(x, y);
@@ -207,14 +247,11 @@ fn main() {
                         self.remote_players.insert(id, e);
                     }
                 }
-                Some("bye") => {
-                    if let Some(id) = extract_usize(text, "id") {
-                        if let Some(entity) = self.remote_players.remove(&id) {
-                            world.despawn(entity);
-                        }
+                ServerMessage::Bye { id } => {
+                    if let Some(entity) = self.remote_players.remove(&id) {
+                        world.despawn(entity);
                     }
                 }
-                _ => {}
             }
         }
     }
@@ -235,35 +272,6 @@ fn main() {
 
 #[cfg(target_arch = "wasm32")]
 fn main() {}
-
-// ── JSON 파싱 헬퍼 ────────────────────────────────────────────────────────────
-
-fn extract_f32(json: &str, key: &str) -> Option<f32> {
-    let search = format!("\"{}\":", key);
-    let start = json.find(&search)? + search.len();
-    let rest = json[start..].trim_start();
-    let end = rest
-        .find(|c: char| c == ',' || c == '}')
-        .unwrap_or(rest.len());
-    rest[..end].trim().parse().ok()
-}
-
-fn extract_usize(json: &str, key: &str) -> Option<usize> {
-    let search = format!("\"{}\":", key);
-    let start = json.find(&search)? + search.len();
-    let rest = json[start..].trim_start();
-    let end = rest
-        .find(|c: char| c == ',' || c == '}')
-        .unwrap_or(rest.len());
-    rest[..end].trim().parse().ok()
-}
-
-fn extract_str<'a>(json: &'a str, key: &str) -> Option<String> {
-    let search = format!("\"{}\":\"", key);
-    let start = json.find(&search)? + search.len();
-    let end = json[start..].find('"')?;
-    Some(json[start..start + end].to_string())
-}
 
 /// ID를 6색 팔레트로 매핑한다.
 fn remote_color(id: usize) -> [f32; 3] {

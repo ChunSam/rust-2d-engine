@@ -241,6 +241,18 @@ impl Default for PointLight {
     }
 }
 
+// ─── OffscreenCamera ──────────────────────────────────────────────────────────
+
+/// 엔티티에 이 컴포넌트를 붙이면 매 프레임 지정된 `RenderTarget`에
+/// `camera` 시점으로 오프스크린 렌더링을 수행한다.
+#[derive(Clone)]
+pub struct OffscreenCamera {
+    /// `App::create_render_target`에 등록한 이름 (RenderTarget 키)
+    pub target: String,
+    /// 이 시점 전용 카메라 (메인 카메라와 독립적으로 동작)
+    pub camera: crate::camera::Camera,
+}
+
 // ─── 하위 호환 재수출 ─────────────────────────────────────────────────────────
 // resources.rs로 이동한 타입들을 engine::components::* 경로로도 접근할 수 있도록 유지.
 pub use crate::animation::player::{AnimationClip, AnimationPlayer, UvRect};
@@ -260,8 +272,10 @@ mod tests {
 
     #[test]
     fn transform_z_assignable() {
-        let mut t = Transform::default();
-        t.z = 5.0;
+        let t = Transform {
+            z: 5.0,
+            ..Default::default()
+        };
         assert_eq!(t.z, 5.0);
     }
 }

@@ -94,11 +94,33 @@ pub struct ScriptingSystem {
     engine: Engine,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScriptingLimits {
+    pub max_operations: u64,
+}
+
+impl Default for ScriptingLimits {
+    fn default() -> Self {
+        Self {
+            max_operations: 1_000_000,
+        }
+    }
+}
+
 impl ScriptingSystem {
+    /// Creates a scripting system for trusted local script assets.
+    ///
+    /// Rhai operation limits reduce accidental runaway scripts, but engine script
+    /// assets are still treated as trusted local game code rather than hostile
+    /// sandboxed input.
     pub fn new() -> Self {
+        Self::with_limits(ScriptingLimits::default())
+    }
+
+    pub fn with_limits(limits: ScriptingLimits) -> Self {
         let mut engine = Engine::new();
         engine.register_fn("log", |msg: &str| println!("[Script] {msg}"));
-        engine.set_max_operations(1_000_000);
+        engine.set_max_operations(limits.max_operations);
         Self { engine }
     }
 }
@@ -168,8 +190,17 @@ impl System for ScriptingSystem {
             // ── Steering 변경 버퍼 ────────────────────────────────────────────
             #[derive(Clone)]
             enum SteeringCmd {
-                Seek { tx: f32, ty: f32, speed: f32 },
-                Flee { tx: f32, ty: f32, speed: f32, radius: f32 },
+                Seek {
+                    tx: f32,
+                    ty: f32,
+                    speed: f32,
+                },
+                Flee {
+                    tx: f32,
+                    ty: f32,
+                    speed: f32,
+                    radius: f32,
+                },
                 Stop,
             }
             let steer_buf: Arc<Mutex<Option<SteeringCmd>>> = Arc::new(Mutex::new(None));
@@ -227,9 +258,7 @@ impl System for ScriptingSystem {
                 let buf = Arc::clone(&bb_buf);
                 self.engine
                     .register_fn("bb_set_int", move |key: &str, val: i64| {
-                        buf.lock()
-                            .unwrap()
-                            .push(BbEntry::Int(key.to_string(), val));
+                        buf.lock().unwrap().push(BbEntry::Int(key.to_string(), val));
                     });
             }
 
@@ -250,9 +279,7 @@ impl System for ScriptingSystem {
                     for (key, val) in bb.entries() {
                         let entry = match val {
                             BlackboardValue::Bool(v) => BbEntry::Bool(key.to_string(), *v),
-                            BlackboardValue::Float(v) => {
-                                BbEntry::Float(key.to_string(), *v as f64)
-                            }
+                            BlackboardValue::Float(v) => BbEntry::Float(key.to_string(), *v as f64),
                             BlackboardValue::Int(v) => BbEntry::Int(key.to_string(), *v as i64),
                             // Vec2 / String은 bb_get_* API에서 지원하지 않으므로 건너뜀
                             _ => continue,
@@ -304,16 +331,14 @@ impl System for ScriptingSystem {
             // --- seek_target ---
             {
                 let buf = Arc::clone(&steer_buf);
-                self.engine.register_fn(
-                    "seek_target",
-                    move |tx: f64, ty: f64, speed: f64| {
+                self.engine
+                    .register_fn("seek_target", move |tx: f64, ty: f64, speed: f64| {
                         *buf.lock().unwrap() = Some(SteeringCmd::Seek {
                             tx: tx as f32,
                             ty: ty as f32,
                             speed: speed as f32,
                         });
-                    },
-                );
+                    });
             }
 
             // --- flee_from ---

@@ -61,15 +61,15 @@ impl InputState {
     }
 
     pub fn is_mouse_pressed(&self, btn: MouseButton) -> bool {
-        mouse_button_index(btn).map_or(false, |i| self.mouse_pressed[i])
+        mouse_button_index(btn).is_some_and(|i| self.mouse_pressed[i])
     }
 
     pub fn mouse_just_pressed(&self, btn: MouseButton) -> bool {
-        mouse_button_index(btn).map_or(false, |i| self.mouse_just_pressed[i])
+        mouse_button_index(btn).is_some_and(|i| self.mouse_just_pressed[i])
     }
 
     pub fn mouse_just_released(&self, btn: MouseButton) -> bool {
-        mouse_button_index(btn).map_or(false, |i| self.mouse_just_released[i])
+        mouse_button_index(btn).is_some_and(|i| self.mouse_just_released[i])
     }
 
     pub fn scroll(&self) -> f32 {

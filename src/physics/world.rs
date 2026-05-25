@@ -36,8 +36,20 @@ impl CollisionGroups {
     }
 
     pub const fn layer(bit_index: u8) -> Self {
+        assert!(
+            bit_index < u32::BITS as u8,
+            "collision layer bit index must be < 32"
+        );
         let bit = 1u32 << bit_index;
         Self::new(bit, Self::ALL_BITS)
+    }
+
+    pub const fn try_layer(bit_index: u8) -> Option<Self> {
+        if bit_index < u32::BITS as u8 {
+            Some(Self::new(1u32 << bit_index, Self::ALL_BITS))
+        } else {
+            None
+        }
     }
 
     pub const fn with_filter(mut self, filter: u32) -> Self {
@@ -658,6 +670,15 @@ mod tests {
 
         assert!(pw.set_collision_groups(col, groups));
         assert_eq!(pw.collision_groups(col), Some(groups));
+    }
+
+    #[test]
+    fn collision_groups_layer_bounds_are_checked() {
+        assert_eq!(
+            CollisionGroups::try_layer(31),
+            Some(CollisionGroups::new(1 << 31, CollisionGroups::ALL_BITS))
+        );
+        assert_eq!(CollisionGroups::try_layer(32), None);
     }
 
     #[test]

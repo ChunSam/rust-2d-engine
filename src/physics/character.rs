@@ -28,18 +28,20 @@ pub struct CharacterController {
 
 impl Default for CharacterController {
     fn default() -> Self {
-        let mut inner = KinematicCharacterController::default();
         // 엔진은 화면 좌표(Y+는 아래)를 사용하므로 up = -Y
-        inner.up = na::Unit::new_normalize(na::Vector2::new(0.0, -1.0));
-        inner.max_slope_climb_angle = std::f32::consts::FRAC_PI_4;
-        inner.min_slope_slide_angle = std::f32::consts::FRAC_PI_4;
-        inner.snap_to_ground = Some(CharacterLength::Absolute(0.1));
-        inner.autostep = Some(CharacterAutostep {
-            max_height: CharacterLength::Absolute(0.3),
-            min_width: CharacterLength::Absolute(0.1),
-            include_dynamic_bodies: false,
-        });
-        inner.slide = true;
+        let inner = KinematicCharacterController {
+            up: na::Unit::new_normalize(na::Vector2::new(0.0, -1.0)),
+            max_slope_climb_angle: std::f32::consts::FRAC_PI_4,
+            min_slope_slide_angle: std::f32::consts::FRAC_PI_4,
+            snap_to_ground: Some(CharacterLength::Absolute(0.1)),
+            autostep: Some(CharacterAutostep {
+                max_height: CharacterLength::Absolute(0.3),
+                min_width: CharacterLength::Absolute(0.1),
+                include_dynamic_bodies: false,
+            }),
+            slide: true,
+            ..Default::default()
+        };
 
         Self {
             max_slope_angle: std::f32::consts::FRAC_PI_4,

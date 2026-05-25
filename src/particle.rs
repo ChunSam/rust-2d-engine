@@ -4,6 +4,21 @@ use rand::Rng;
 use crate::components::{Sprite, Transform};
 use crate::ecs::{Entity, System, World};
 
+type ParticleUpdate = (Entity, f32, f32, Vec2, [f32; 4], [f32; 4]);
+type EmitterSnapshot = (
+    Entity,
+    Vec2,
+    bool,
+    f32,
+    f32,
+    Vec2,
+    Vec2,
+    [f32; 4],
+    [f32; 4],
+    Vec2,
+    Option<String>,
+);
+
 // ─── 컴포넌트 ─────────────────────────────────────────────────────────────────
 
 /// 파티클을 방출하는 이미터 컴포넌트.
@@ -65,7 +80,7 @@ pub struct ParticleSystem;
 impl System for ParticleSystem {
     fn run(&mut self, world: &mut World, dt: f32) {
         // 1. 기존 파티클 이동·색상 업데이트, 만료된 것은 수집
-        let updates: Vec<(Entity, f32, f32, Vec2, [f32; 4], [f32; 4])> = world
+        let updates: Vec<ParticleUpdate> = world
             .query::<Particle>()
             .map(|(e, p)| (e, p.age, p.lifetime, p.velocity, p.color_start, p.color_end))
             .collect();
@@ -99,19 +114,7 @@ impl System for ParticleSystem {
         }
 
         // 2. 이미터에서 새 파티클 방출
-        let emitter_data: Vec<(
-            Entity,
-            Vec2,
-            bool,
-            f32,
-            f32,
-            Vec2,
-            Vec2,
-            [f32; 4],
-            [f32; 4],
-            Vec2,
-            Option<String>,
-        )> = world
+        let emitter_data: Vec<EmitterSnapshot> = world
             .query2::<Transform, ParticleEmitter>()
             .map(|(e, tr, em)| {
                 (

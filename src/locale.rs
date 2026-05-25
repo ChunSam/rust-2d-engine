@@ -3,16 +3,11 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 /// Locale text direction metadata.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum TextDirection {
+    #[default]
     LeftToRight,
     RightToLeft,
-}
-
-impl Default for TextDirection {
-    fn default() -> Self {
-        Self::LeftToRight
-    }
 }
 
 /// Per-locale translation data and rendering metadata.
