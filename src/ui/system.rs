@@ -3,7 +3,7 @@ use winit::event::MouseButton;
 
 use crate::ecs::{Entity, Events, System, World};
 use crate::input::InputState;
-use crate::renderer::{DrawRect, DrawText, TextQueue, UiQueue};
+use crate::renderer::{DrawRect, DrawText, TextAlign, TextQueue, UiQueue};
 use crate::resources::ViewportSize;
 
 use super::button::{Button, ButtonState};
@@ -29,7 +29,7 @@ pub struct UiSystem;
 impl System for UiSystem {
     fn run(&mut self, world: &mut World, dt: f32) {
         // ── 1. 입력 스냅샷 ───────────────────────────────────────────────────
-        let (cursor, just_pressed, just_released, is_held, scroll_delta, chars) =
+        let (cursor, just_pressed, just_released, is_held, scroll_delta, chars, ime_preedit) =
             match world.resource::<InputState>() {
                 Some(input) => (
                     input.cursor(),
@@ -38,6 +38,7 @@ impl System for UiSystem {
                     input.is_mouse_pressed(MouseButton::Left),
                     input.scroll(),
                     input.text_chars().to_vec(),
+                    input.ime_preedit().to_string(),
                 ),
                 None => return,
             };
@@ -107,13 +108,15 @@ impl System for UiSystem {
             rects.push(DrawRect::new(pos.x, pos.y, size.x, size.y, color).with_z(z));
 
             if !label_text.is_empty() {
-                let text_x = pos.x + size.x / 2.0;
                 let text_y = pos.y + (size.y - font_size) / 2.0;
                 texts.push(DrawText {
                     text: label_text,
-                    position: Vec2::new(text_x, text_y),
+                    position: Vec2::new(pos.x, text_y),
+                    bounds: Some(Vec2::new(size.x, size.y)),
                     size: font_size,
                     color: text_color,
+                    align: TextAlign::Center,
+                    rich: false,
                 });
             }
         }
@@ -205,6 +208,9 @@ impl System for UiSystem {
                             }
                         }
                     }
+                    if let Some(ti) = world.get_mut::<TextInput>(entity) {
+                        ti.preedit = ime_preedit.clone();
+                    }
                 }
             }
 
@@ -217,9 +223,9 @@ impl System for UiSystem {
                 let display = if ti.text.is_empty() && !ti.focused {
                     ti.placeholder.clone()
                 } else if ti.focused && ti.cursor_visible {
-                    format!("{}|", ti.text)
+                    format!("{}|", ti.text_with_preedit())
                 } else {
-                    ti.text.clone()
+                    ti.text_with_preedit()
                 };
                 (ti.current_color(), display, ti.text_color, ti.font_size)
             };
@@ -228,8 +234,11 @@ impl System for UiSystem {
             texts.push(DrawText {
                 text: display_text,
                 position: Vec2::new(pos.x + 6.0, pos.y + (size.y - font_size) / 2.0),
+                bounds: Some(Vec2::new((size.x - 12.0).max(0.0), size.y)),
                 size: font_size,
                 color: text_color,
+                align: TextAlign::Left,
+                rich: false,
             });
         }
 
@@ -288,8 +297,11 @@ impl System for UiSystem {
                 texts.push(DrawText {
                     text: sv.items[i].clone(),
                     position: Vec2::new(pos.x + 4.0, y),
+                    bounds: Some(Vec2::new((size.x - 8.0).max(0.0), item_height)),
                     size: font_size,
                     color,
+                    align: TextAlign::Left,
+                    rich: false,
                 });
             }
         }
@@ -299,8 +311,8 @@ impl System for UiSystem {
             world.query2::<UiNode, Label>().map(|(e, _, _)| e).collect();
 
         for entity in label_entities {
-            let (pos, visible) = match world.get::<UiNode>(entity) {
-                Some(node) => (node.screen_pos(&viewport), node.visible),
+            let (pos, size, visible) = match world.get::<UiNode>(entity) {
+                Some(node) => (node.screen_pos(&viewport), node.size, node.visible),
                 None => continue,
             };
             if !visible {
@@ -310,8 +322,11 @@ impl System for UiSystem {
                 texts.push(DrawText {
                     text: label.text.clone(),
                     position: pos,
+                    bounds: Some(size),
                     size: label.font_size,
                     color: label.color,
+                    align: label.align,
+                    rich: label.rich,
                 });
             }
         }
@@ -479,8 +494,11 @@ impl System for UiSystem {
                 texts.push(DrawText {
                     text: label,
                     position: Vec2::new(pos.x + box_size + 6.0, pos.y + (size.y - font_size) / 2.0),
+                    bounds: Some(Vec2::new((size.x - box_size - 6.0).max(0.0), size.y)),
                     size: font_size,
                     color: text_color,
+                    align: TextAlign::Left,
+                    rich: false,
                 });
             }
         }

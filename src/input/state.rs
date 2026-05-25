@@ -19,6 +19,7 @@ pub struct InputState {
     mouse_just_released: [bool; 3],
     scroll: f32,
     text_input_chars: Vec<char>,
+    ime_preedit: String,
 }
 
 impl Default for InputState {
@@ -33,6 +34,7 @@ impl Default for InputState {
             mouse_just_released: [false; 3],
             scroll: 0.0,
             text_input_chars: Vec::new(),
+            ime_preedit: String::new(),
         }
     }
 }
@@ -81,6 +83,10 @@ impl InputState {
         &self.text_input_chars
     }
 
+    pub fn ime_preedit(&self) -> &str {
+        &self.ime_preedit
+    }
+
     // ── 내부 업데이트 (App에서만 호출) ───────────────────────────────────────
 
     pub(crate) fn press(&mut self, key: KeyCode) {
@@ -122,12 +128,24 @@ impl InputState {
         self.text_input_chars.push(c);
     }
 
+    pub(crate) fn push_text(&mut self, s: &str) {
+        self.text_input_chars.extend(s.chars());
+    }
+
     pub(crate) fn push_backspace(&mut self) {
         self.text_input_chars.push('\x08');
     }
 
     pub(crate) fn push_enter(&mut self) {
         self.text_input_chars.push('\n');
+    }
+
+    pub(crate) fn set_ime_preedit(&mut self, preedit: String) {
+        self.ime_preedit = preedit;
+    }
+
+    pub(crate) fn clear_ime_preedit(&mut self) {
+        self.ime_preedit.clear();
     }
 
     pub(crate) fn flush(&mut self) {
@@ -201,5 +219,17 @@ mod tests {
         assert!((input.scroll() - 3.5).abs() < f32::EPSILON);
         input.flush();
         assert_eq!(input.scroll(), 0.0);
+    }
+
+    #[test]
+    fn ime_preedit_persists_until_cleared() {
+        let mut input = InputState::default();
+        input.set_ime_preedit("한".to_string());
+        input.push_text("글");
+        input.flush();
+        assert_eq!(input.ime_preedit(), "한");
+        assert!(input.text_chars().is_empty());
+        input.clear_ime_preedit();
+        assert_eq!(input.ime_preedit(), "");
     }
 }

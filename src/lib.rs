@@ -76,7 +76,9 @@ pub use prefab::{
 // par_query_for_each / par_query_map / par_query2_for_each / par_query2_map 은
 // World 메서드이므로 World re-export를 통해 자동 접근 가능 (별도 re-export 불필요)
 pub use reflect::{Reflect, ReflectValue};
-pub use renderer::{DrawRect, DrawText, PostProcessConfig, TextQueue, TextRenderer, UiQueue};
+pub use renderer::{
+    DrawRect, DrawText, PostProcessConfig, TextAlign, TextQueue, TextRenderer, UiQueue,
+};
 pub use resources::{
     AmbientLight, CullConfig, DebugDraw, DebugDrawQueue, DebugRect, DebugShape, DisplayScaleFactor,
     FadeTransition, FontData, GameState, PendingResize, ProfilerData, RenderStats, SelectedEntity,
@@ -166,15 +168,21 @@ pub fn run_demo() {
                 tq.push(DrawText {
                     text: "rust-2d-engine  —  WASM demo  (wgpu + WebGL2)".to_string(),
                     position: Vec2::new(20.0, 20.0),
+                    bounds: None,
                     size: 22.0,
                     color: [255, 255, 255, 220],
+                    align: TextAlign::Left,
+                    rich: false,
                 });
                 tq.push(DrawText {
                     text: "ECS  ·  Rendering  ·  Animation  ·  Scripting  ·  Reflect  ·  UI"
                         .to_string(),
                     position: Vec2::new(20.0, 52.0),
+                    bounds: None,
                     size: 16.0,
                     color: [160, 210, 255, 200],
+                    align: TextAlign::Left,
+                    rich: false,
                 });
             }
         }

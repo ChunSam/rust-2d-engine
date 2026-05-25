@@ -12,6 +12,8 @@ pub struct TextInput {
     /// dt 누적값. 0.5초마다 cursor_visible 토글
     pub cursor_blink: f32,
     pub cursor_visible: bool,
+    /// 현재 IME 조합 중인 문자열. 커밋 전 미리보기로만 렌더링된다.
+    pub preedit: String,
 
     pub color_normal: [f32; 4],
     pub color_focused: [f32; 4],
@@ -29,6 +31,7 @@ impl TextInput {
             max_len: 256,
             cursor_blink: 0.0,
             cursor_visible: true,
+            preedit: String::new(),
             color_normal: [0.15, 0.15, 0.20, 1.0],
             color_focused: [0.20, 0.25, 0.35, 1.0],
             text_color: [220, 220, 220, 255],
@@ -69,9 +72,49 @@ impl TextInput {
 
     /// 커서 위치에 문자를 삽입한다.
     pub fn insert_char(&mut self, c: char) {
-        if self.text.len() < self.max_len {
+        if self.text.len() + c.len_utf8() <= self.max_len {
             self.text.insert(self.cursor, c);
             self.cursor += c.len_utf8();
         }
+    }
+
+    pub fn insert_str(&mut self, s: &str) {
+        for ch in s.chars() {
+            self.insert_char(ch);
+        }
+    }
+
+    pub fn text_with_preedit(&self) -> String {
+        if self.preedit.is_empty() {
+            return self.text.clone();
+        }
+        let mut out = self.text.clone();
+        out.insert_str(self.cursor, &self.preedit);
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_str_respects_utf8_max_len() {
+        let mut input = TextInput::new("").with_max_len("한글".len());
+
+        input.insert_str("한글!");
+
+        assert_eq!(input.text, "한글");
+    }
+
+    #[test]
+    fn text_with_preedit_inserts_preview_at_cursor() {
+        let mut input = TextInput::new("");
+        input.insert_str("글");
+        input.cursor = 0;
+        input.preedit = "한".to_string();
+
+        assert_eq!(input.text_with_preedit(), "한글");
+        assert_eq!(input.text, "글");
     }
 }

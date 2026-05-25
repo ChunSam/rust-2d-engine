@@ -2118,6 +2118,19 @@ impl ApplicationHandler for App {
                 }
             }
 
+            WindowEvent::Ime(winit::event::Ime::Preedit(text, _cursor)) => {
+                if let Some(input) = self.world.resource_mut::<InputState>() {
+                    input.set_ime_preedit(text);
+                }
+            }
+
+            WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
+                if let Some(input) = self.world.resource_mut::<InputState>() {
+                    input.push_text(&text);
+                    input.clear_ime_preedit();
+                }
+            }
+
             // ── 마우스 커서 이동 ─────────────────────────────────────────────
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(input) = self.world.resource_mut::<InputState>() {

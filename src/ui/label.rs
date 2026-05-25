@@ -1,3 +1,5 @@
+use crate::renderer::TextAlign;
+
 /// 텍스트 레이블 컴포넌트.
 ///
 /// `UiNode` 와 함께 사용한다. `UiSystem` 이 매 프레임
@@ -7,6 +9,8 @@ pub struct Label {
     /// RGBA (0~255)
     pub color: [u8; 4],
     pub font_size: f32,
+    pub align: TextAlign,
+    pub rich: bool,
 }
 
 impl Label {
@@ -15,6 +19,8 @@ impl Label {
             text: text.into(),
             color: [220, 220, 220, 255],
             font_size: 16.0,
+            align: TextAlign::Left,
+            rich: false,
         }
     }
 
@@ -25,6 +31,16 @@ impl Label {
 
     pub fn with_font_size(mut self, size: f32) -> Self {
         self.font_size = size;
+        self
+    }
+
+    pub fn with_align(mut self, align: TextAlign) -> Self {
+        self.align = align;
+        self
+    }
+
+    pub fn rich(mut self) -> Self {
+        self.rich = true;
         self
     }
 }
