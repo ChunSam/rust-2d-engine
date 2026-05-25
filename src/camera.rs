@@ -20,6 +20,26 @@ pub struct Camera {
     pub position: Vec2,
     /// 줌 배율. 1.0 = 정상, 2.0 = 2배 확대 (보이는 영역 절반)
     pub zoom: f32,
+
+    // --- Shake ---
+    /// 현재 shake 진폭 (픽셀 단위)
+    shake_strength: f32,
+    /// 남은 shake 지속 시간 (초)
+    shake_duration: f32,
+    /// shake 샘플링용 경과 시간
+    shake_timer: f32,
+
+    // --- Smooth Follow ---
+    /// 따라갈 엔티티 (Entity 타입은 Copy이므로 Option<Entity> 도 Copy)
+    pub follow_entity: Option<crate::ecs::Entity>,
+    /// 초당 lerp 강도. 0.0 = 추적 없음, 1.0 = 즉시 스냅. 기본값 5.0
+    pub lerp_factor: f32,
+
+    // --- Zoom Tween ---
+    /// 목표 줌 값
+    zoom_target: f32,
+    /// 초당 zoom 변화량. 0 = 트윈 비활성
+    zoom_tween_speed: f32,
 }
 
 impl Default for Camera {
@@ -27,13 +47,24 @@ impl Default for Camera {
         Self {
             position: Vec2::ZERO,
             zoom: 1.0,
+            shake_strength: 0.0,
+            shake_duration: 0.0,
+            shake_timer: 0.0,
+            follow_entity: None,
+            lerp_factor: 5.0,
+            zoom_target: 1.0,
+            zoom_tween_speed: 0.0,
         }
     }
 }
 
 impl Camera {
     pub fn new(position: Vec2, zoom: f32) -> Self {
-        Self { position, zoom }
+        Self {
+            position,
+            zoom,
+            ..Self::default()
+        }
     }
 
     /// 화면(픽셀) 좌표를 월드 좌표로 변환한다.
@@ -60,14 +91,84 @@ impl Camera {
 
     /// 뷰포트 크기 `(width, height)` 를 받아 MVP 용 직교 투영 행렬을 반환한다.
     ///
+    /// shake_offset 이 활성화된 경우 position에 더해 화면을 흔든다.
+    ///
     /// left = position.x,  right = position.x + width/zoom
     /// top  = position.y,  bottom = position.y + height/zoom
     pub fn view_proj(&self, width: f32, height: f32) -> Mat4 {
-        let left = self.position.x;
-        let right = self.position.x + width / self.zoom;
-        let top = self.position.y;
-        let bottom = self.position.y + height / self.zoom;
+        let pos = self.position + self.shake_offset();
+        let left = pos.x;
+        let right = pos.x + width / self.zoom;
+        let top = pos.y;
+        let bottom = pos.y + height / self.zoom;
         Mat4::orthographic_rh(left, right, bottom, top, -1.0, 1.0)
+    }
+
+    // ── Camera Effects ────────────────────────────────────────────────────────
+
+    /// 카메라 흔들기.
+    ///
+    /// - `strength`: 최대 진폭 (픽셀 단위)
+    /// - `duration`: 지속 시간 (초)
+    pub fn shake(&mut self, strength: f32, duration: f32) {
+        self.shake_strength = strength;
+        self.shake_duration = duration;
+        self.shake_timer = 0.0;
+    }
+
+    /// target_zoom으로 부드럽게 줌.
+    ///
+    /// - `target_zoom`: 목표 줌 배율
+    /// - `speed`: 초당 zoom 변화량 (양수)
+    pub fn zoom_to(&mut self, target_zoom: f32, speed: f32) {
+        self.zoom_target = target_zoom;
+        self.zoom_tween_speed = speed;
+    }
+
+    /// 현재 프레임의 shake 오프셋을 반환한다 (view_proj 내부에서 자동 적용됨).
+    pub fn shake_offset(&self) -> Vec2 {
+        if self.shake_duration <= 0.0 || self.shake_strength <= 0.0 {
+            return Vec2::ZERO;
+        }
+        // 결정론적 의사 난수 오프셋 — 서로 다른 주파수의 sin/cos로 자연스러운 흔들림 연출
+        let t = self.shake_timer * 30.0; // ~30 Hz shake frequency
+        let ox = (t * 1.7).sin() * self.shake_strength;
+        let oy = (t * 2.3).cos() * self.shake_strength;
+        Vec2::new(ox, oy)
+    }
+
+    /// 카메라 이펙트를 dt 초 진행한다.
+    ///
+    /// `follow_pos`: 이번 프레임에 따라갈 엔티티의 월드 좌표 (없으면 `None`).
+    /// App이 매 프레임 자동 호출한다.
+    pub fn update(&mut self, dt: f32, follow_pos: Option<Vec2>) {
+        // 1. Smooth follow
+        if let Some(pos) = follow_pos {
+            let factor = (self.lerp_factor * dt).min(1.0);
+            self.position = self.position + (pos - self.position) * factor;
+        }
+
+        // 2. Zoom tween
+        if self.zoom_tween_speed > 0.0 {
+            let diff = self.zoom_target - self.zoom;
+            let step = self.zoom_tween_speed * dt;
+            if diff.abs() <= step {
+                self.zoom = self.zoom_target;
+                self.zoom_tween_speed = 0.0;
+            } else {
+                self.zoom += diff.signum() * step;
+            }
+        }
+
+        // 3. Shake decay
+        if self.shake_duration > 0.0 {
+            self.shake_duration -= dt;
+            self.shake_timer += dt;
+            if self.shake_duration < 0.0 {
+                self.shake_duration = 0.0;
+                self.shake_strength = 0.0;
+            }
+        }
     }
 }
 
@@ -156,5 +257,71 @@ mod tests {
         let (min, max) = cam.visible_rect(W, H);
         assert_eq!(min, Vec2::ZERO);
         assert_eq!(max, Vec2::new(W / 2.0, H / 2.0));
+    }
+
+    // ── Camera Effects tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn shake_offset_zero_when_inactive() {
+        let cam = Camera::default();
+        assert_eq!(cam.shake_offset(), Vec2::ZERO);
+    }
+
+    #[test]
+    fn shake_decays_over_time() {
+        let mut cam = Camera::default();
+        cam.shake(10.0, 0.1);
+        assert!(cam.shake_duration > 0.0);
+        cam.update(0.2, None); // dt > duration → shake ends
+        assert_eq!(cam.shake_duration, 0.0);
+        assert_eq!(cam.shake_offset(), Vec2::ZERO);
+    }
+
+    #[test]
+    fn zoom_tween_reaches_target() {
+        let mut cam = Camera::default();
+        cam.zoom_to(2.0, 10.0); // speed=10/sec, gap=1.0 → needs 0.1s
+        cam.update(0.5, None);  // 0.5s well exceeds needed time
+        assert_eq!(cam.zoom, 2.0);
+        assert_eq!(cam.zoom_tween_speed, 0.0); // tween ended
+    }
+
+    #[test]
+    fn zoom_tween_partial_progress() {
+        let mut cam = Camera::default();
+        cam.zoom = 1.0;
+        cam.zoom_to(3.0, 4.0);  // speed=4/sec, gap=2.0 → needs 0.5s
+        cam.update(0.25, None); // half the time → zoom = 1.0 + 4.0*0.25 = 2.0
+        assert!((cam.zoom - 2.0).abs() < 1e-5);
+        assert!(cam.zoom_tween_speed > 0.0); // still tweening
+    }
+
+    #[test]
+    fn smooth_follow_lerps_toward_target() {
+        let mut cam = Camera::default();
+        cam.position = Vec2::ZERO;
+        cam.lerp_factor = 10.0;
+        // follow_pos = (100, 0), dt = 0.1s → factor = min(10*0.1, 1.0) = 1.0 → snap
+        cam.update(0.1, Some(Vec2::new(100.0, 0.0)));
+        assert!((cam.position.x - 100.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn smooth_follow_no_pos_does_not_move() {
+        let mut cam = Camera::default();
+        cam.position = Vec2::new(50.0, 50.0);
+        cam.update(0.016, None);
+        assert_eq!(cam.position, Vec2::new(50.0, 50.0));
+    }
+
+    #[test]
+    fn shake_active_produces_nonzero_offset() {
+        let mut cam = Camera::default();
+        cam.shake(20.0, 1.0);
+        cam.update(0.016, None); // advance timer
+        // After some time shake_timer > 0, offset should be non-zero
+        let offset = cam.shake_offset();
+        // At least one component should be non-zero (sin/cos won't both be 0 at 0.016*30~0.48)
+        assert!(offset.x != 0.0 || offset.y != 0.0);
     }
 }

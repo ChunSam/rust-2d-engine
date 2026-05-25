@@ -574,6 +574,19 @@ impl App {
         // 계층 변환 전파 — 유저 시스템(물리 포함) 이후, 렌더 직전에 실행
         HierarchySystem.run(&mut self.world, dt);
 
+        // 카메라 이펙트 업데이트 (shake decay, zoom tween, smooth follow)
+        {
+            let follow_pos = self
+                .world
+                .resource::<Camera>()
+                .and_then(|cam| cam.follow_entity)
+                .and_then(|e| self.world.get::<crate::components::Transform>(e))
+                .map(|t| t.position);
+            if let Some(cam) = self.world.resource_mut::<Camera>() {
+                cam.update(dt, follow_pos);
+            }
+        }
+
         // Inspector: 선택된 엔티티 유효성 확인 + 필드 스테이징
         if let Some(sel) = self.inspector_selected {
             if !self.world.is_alive(sel) {

@@ -16,6 +16,7 @@ pub mod particle;
 pub mod pathfinding;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod physics;
+pub mod pool;
 pub mod prefab;
 pub mod material;
 pub mod network;
@@ -56,6 +57,7 @@ pub use hierarchy::{attach, detach, Children, GlobalTransform, HierarchySystem, 
 pub use input::{GamepadAxis, GamepadButton, GamepadState, InputMap, InputState};
 pub use particle::{Particle, ParticleEmitter, ParticleSystem};
 pub use pathfinding::{find_path, PathGrid};
+pub use pool::{Pool, Pooled};
 #[cfg(not(target_arch = "wasm32"))]
 pub use physics::{
     CharacterController, CollisionEvent, PhysicsBody, PhysicsSystem, PhysicsWorld, RaycastHit,
