@@ -135,6 +135,15 @@ impl EditorHistory {
     }
 }
 
+/// Gizmo 위치를 격자(grid) 단위로 스냅한다 (네이티브 전용).
+#[cfg(not(target_arch = "wasm32"))]
+fn snap_to_grid(pos: glam::Vec2, snap_size: f32) -> glam::Vec2 {
+    glam::Vec2::new(
+        (pos.x / snap_size).round() * snap_size,
+        (pos.y / snap_size).round() * snap_size,
+    )
+}
+
 /// 엔진 진입점.
 ///
 /// # 사용법
@@ -201,6 +210,12 @@ pub struct App {
     /// "Add Component" 드롭다운에서 현재 선택된 컴포넌트 이름 (네이티브 전용).
     #[cfg(not(target_arch = "wasm32"))]
     add_component_selected: String,
+    /// Gizmo 드래그 Grid Snap 활성화 여부 (네이티브 전용).
+    #[cfg(not(target_arch = "wasm32"))]
+    snap_enabled: bool,
+    /// Gizmo 드래그 Grid Snap 격자 크기 (픽셀, 네이티브 전용).
+    #[cfg(not(target_arch = "wasm32"))]
+    snap_size: f32,
 }
 
 impl App {
@@ -257,6 +272,8 @@ impl App {
             gizmo_drag_start_pos: None,
             component_factories: HashMap::new(),
             add_component_selected: String::new(),
+            snap_enabled: false,
+            snap_size: 16.0,
         };
         #[cfg(not(target_arch = "wasm32"))]
         app.register_default_components();
@@ -708,6 +725,22 @@ impl App {
                             }
                         });
                         ui.separator();
+
+                        // ── Grid Snap 컨트롤 (Entities 탭, 네이티브 전용) ─────────
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if self.inspector_tab == 0 {
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut self.snap_enabled, "Snap");
+                                if self.snap_enabled {
+                                    ui.add(
+                                        egui::DragValue::new(&mut self.snap_size)
+                                            .range(1.0..=128.0)
+                                            .speed(1.0)
+                                            .suffix(" px"),
+                                    );
+                                }
+                            });
+                        }
 
                         // ── 씬 그래프 탭 (네이티브 전용) ─────────────────────────
                         #[cfg(not(target_arch = "wasm32"))]
@@ -1262,7 +1295,16 @@ impl App {
                             if let Some(t) =
                                 self.world.get_mut::<crate::components::Transform>(sel)
                             {
-                                t.position = world_pos + self.gizmo_drag_offset;
+                                let new_pos = world_pos + self.gizmo_drag_offset;
+                                #[cfg(not(target_arch = "wasm32"))]
+                                let final_pos = if self.snap_enabled {
+                                    snap_to_grid(new_pos, self.snap_size)
+                                } else {
+                                    new_pos
+                                };
+                                #[cfg(target_arch = "wasm32")]
+                                let final_pos = new_pos;
+                                t.position = final_pos;
                             }
                         }
 
