@@ -130,6 +130,38 @@ impl Default for CullConfig {
     }
 }
 
+// ─── 라이팅 ─────────────────────────────────────────────────────────────────
+
+/// 씬 전체 환경광 리소스.
+///
+/// `world.insert_resource(AmbientLight::default())` 으로 등록하면
+/// `LightingRenderer`가 활성화된다. `PointLight` 컴포넌트와 함께 사용한다.
+///
+/// ```rust,no_run
+/// # use engine::{App, AmbientLight};
+/// # let mut app = App::new();
+/// app.world.insert_resource(AmbientLight {
+///     color: [0.2, 0.2, 0.3],
+///     intensity: 0.05,
+/// });
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct AmbientLight {
+    /// 환경광 RGB 색상 (0.0~1.0)
+    pub color: [f32; 3],
+    /// 0.0 = 완전 어두움, 1.0 = 원본 밝기
+    pub intensity: f32,
+}
+
+impl Default for AmbientLight {
+    fn default() -> Self {
+        Self {
+            color: [1.0, 1.0, 1.0],
+            intensity: 0.1,
+        }
+    }
+}
+
 /// Inspector에서 현재 선택된 엔티티를 World 리소스로 노출한다.
 ///
 /// `App`이 매 프레임 `inspector_selected`와 동기화한다.

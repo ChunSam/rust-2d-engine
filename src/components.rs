@@ -191,6 +191,42 @@ impl Reflect for Sprite {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct RenderLayer(pub i32);
 
+// ─── PointLight ───────────────────────────────────────────────────────────────
+
+/// 월드 공간 포인트 라이트 컴포넌트.
+///
+/// `AmbientLight` 리소스와 함께 사용한다. `Transform`과 함께 엔티티에 추가하면
+/// `LightingRenderer`가 자동으로 라이팅 패스에 포함한다.
+///
+/// ```rust,no_run
+/// # use engine::{App, PointLight, AmbientLight, components::Transform};
+/// # use glam::Vec2;
+/// # let mut app = App::new();
+/// # let e = app.world.spawn();
+/// app.world.insert_resource(engine::AmbientLight { intensity: 0.05, ..Default::default() });
+/// app.world.add_component(e, Transform { position: Vec2::new(400.0, 300.0), ..Default::default() });
+/// app.world.add_component(e, PointLight { color: [1.0, 0.9, 0.6], radius: 300.0, intensity: 1.5 });
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct PointLight {
+    /// RGB 색상 (0.0~1.0)
+    pub color: [f32; 3],
+    /// 월드 좌표 픽셀 반경
+    pub radius: f32,
+    /// 밝기 배율
+    pub intensity: f32,
+}
+
+impl Default for PointLight {
+    fn default() -> Self {
+        Self {
+            color: [1.0, 1.0, 1.0],
+            radius: 200.0,
+            intensity: 1.0,
+        }
+    }
+}
+
 // ─── 하위 호환 재수출 ─────────────────────────────────────────────────────────
 // resources.rs로 이동한 타입들을 engine::components::* 경로로도 접근할 수 있도록 유지.
 pub use crate::animation::player::{AnimationClip, AnimationPlayer, UvRect};

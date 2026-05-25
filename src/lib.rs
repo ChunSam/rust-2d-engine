@@ -49,7 +49,7 @@ pub use camera::Camera;
 pub use collision::{
     Collider, CollisionDebugSystem, CollisionGridSystem, CollisionLayer, DebugConfig, SpatialGrid,
 };
-pub use components::{RenderLayer, Sprite, Transform};
+pub use components::{PointLight, RenderLayer, Sprite, Transform};
 pub use debug_ui::DebugUi;
 pub use ecs::{Commands, Entity, Events, System, World};
 pub use hierarchy::{attach, detach, Children, GlobalTransform, HierarchySystem, Parent};
@@ -71,9 +71,9 @@ pub use network::{NetworkClient, NetworkEvent, NetworkSystem};
 pub use reflect::{Reflect, ReflectValue};
 pub use renderer::{DrawRect, DrawText, PostProcessConfig, TextQueue, TextRenderer, UiQueue};
 pub use resources::{
-    CullConfig, DebugDrawQueue, DebugRect, DisplayScaleFactor, FontData, GameState, PendingResize,
-    ProfilerData, RenderStats, SelectedEntity, ShouldQuit, SystemProfile, ViewportSize,
-    WindowConfig,
+    AmbientLight, CullConfig, DebugDrawQueue, DebugRect, DisplayScaleFactor, FontData, GameState,
+    PendingResize, ProfilerData, RenderStats, SelectedEntity, ShouldQuit, SystemProfile,
+    ViewportSize, WindowConfig,
 };
 pub use scene::{Scene, SceneChange, SceneCmd};
 pub use scripting::{ScriptRunner, ScriptingSystem};

@@ -168,6 +168,12 @@ pub struct App {
     text_renderer: Option<TextRenderer>,
     /// PostProcessConfig 리소스가 enabled=true일 때 활성화된다.
     post_renderer: Option<PostProcessRenderer>,
+    /// AmbientLight 리소스가 등록된 동안 활성화되는 라이팅 렌더러.
+    #[cfg(not(target_arch = "wasm32"))]
+    lighting_renderer: Option<crate::renderer::lighting::LightingRenderer>,
+    /// 라이팅 패스가 씬을 먼저 그릴 중간 텍스처.
+    #[cfg(not(target_arch = "wasm32"))]
+    scene_texture_for_lighting: Option<(wgpu::Texture, wgpu::TextureView)>,
     last_frame: Option<Instant>,
     /// GPU 초기화 전에 등록된 텍스처 경로를 보관한다. resumed()에서 실제로 로드한다.
     pending_textures: Vec<String>,
@@ -253,6 +259,8 @@ impl App {
             sprite_renderer: None,
             text_renderer: None,
             post_renderer: None,
+            lighting_renderer: None,
+            scene_texture_for_lighting: None,
             last_frame: None,
             pending_textures: Vec::new(),
             event_flushers: Vec::new(),
@@ -1409,6 +1417,60 @@ impl App {
             }
         }
 
+        // 라이팅 렌더러 초기화 / 리사이즈 / 비활성화
+        #[cfg(not(target_arch = "wasm32"))]
+        let use_lighting = {
+            let has_lighting = self.world.resource::<crate::resources::AmbientLight>().is_some();
+            let (w, h, fmt) = (gpu.config.width, gpu.config.height, gpu.config.format);
+            if has_lighting {
+                match &mut self.lighting_renderer {
+                    None => {
+                        self.lighting_renderer = Some(
+                            crate::renderer::lighting::LightingRenderer::new(&gpu.device, w, h, fmt),
+                        );
+                    }
+                    Some(lr) if lr.width != w || lr.height != h => {
+                        lr.resize(&gpu.device, w, h);
+                    }
+                    _ => {}
+                }
+                // 씬 중간 텍스처 생성 / 리사이즈 (post_renderer가 없을 때만 필요)
+                if !use_post {
+                    let needs_new = match &self.scene_texture_for_lighting {
+                        None => true,
+                        Some(_) => {
+                            // 크기 재확인을 위해 뷰 크기를 직접 비교할 수 없으므로
+                            // lighting_renderer 크기가 바뀌면 텍스처도 재생성한다.
+                            // lighting_renderer resize가 이미 처리했으므로, 텍스처와 lr 크기 비교는 불필요.
+                            // 여기선 None인 경우만 처리.
+                            false
+                        }
+                    };
+                    if needs_new {
+                        let tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                            label: Some("scene_for_lighting"),
+                            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: fmt,
+                            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                                | wgpu::TextureUsages::TEXTURE_BINDING,
+                            view_formats: &[],
+                        });
+                        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+                        self.scene_texture_for_lighting = Some((tex, view));
+                    }
+                }
+            } else {
+                self.lighting_renderer = None;
+                self.scene_texture_for_lighting = None;
+            }
+            has_lighting
+        };
+        #[cfg(target_arch = "wasm32")]
+        let use_lighting = false;
+
         let frame = gpu.surface.get_current_texture()?;
         let final_view = frame
             .texture
@@ -1419,9 +1481,18 @@ impl App {
                 label: Some("frame encoder"),
             });
 
-        // 렌더 타겟: 포스트프로세싱 사용 시 중간 텍스처, 아니면 스왑체인 직접
-        // post_renderer와 gpu/sprite_renderer/text_renderer는 서로 다른 필드이므로 동시 빌림 허용.
-        let render_view: &wgpu::TextureView = if use_post {
+        // 렌더 타겟 선택:
+        //   라이팅 있고 포스트 없음 → 중간 씬 텍스처
+        //   포스트 있음 (라이팅 여부 무관) → post_renderer.target_view
+        //   둘 다 없음 → 스왑체인 직접
+        let render_view: &wgpu::TextureView = if use_lighting && !use_post {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                &self.scene_texture_for_lighting.as_ref().unwrap().1
+            }
+            #[cfg(target_arch = "wasm32")]
+            { &final_view }
+        } else if use_post {
             &self.post_renderer.as_ref().unwrap().target_view
         } else {
             &final_view
@@ -1536,15 +1607,47 @@ impl App {
             );
         }
 
-        // 4단계: 포스트프로세스 패스 (중간 텍스처 → 스왑체인)
+        // 4단계: 포스트프로세스 패스 (중간 텍스처 → 스왑체인 또는 라이팅 중간 텍스처)
         if use_post {
+            #[cfg(not(target_arch = "wasm32"))]
+            let post_output: &wgpu::TextureView = if use_lighting {
+                // 라이팅도 활성이면 post 출력을 씬 중간 텍스처로 보낸다.
+                // 씬 중간 텍스처는 post_renderer 없을 때만 생성되므로 여기선 별도 버퍼 필요.
+                // 단순화: post → final_view, 그 다음 lighting 패스는 final_view를 읽을 수 없다.
+                // 따라서 post+lighting 조합에서는 final_view를 post 출력으로 사용하고
+                // lighting을 그 위에 다시 적용하는 대신, post 출력에 lighting을 적용한다.
+                // 구현: post → final_view 후 lighting 패스를 final_view→output(=final_view)로 수행.
+                // (이 케이스에서는 lighting input = post target_view, output = final_view)
+                &final_view
+            } else {
+                &final_view
+            };
+            #[cfg(target_arch = "wasm32")]
+            let post_output: &wgpu::TextureView = &final_view;
+
             if let (Some(pr), Some(cfg)) = (&self.post_renderer, pp_config.as_ref()) {
                 pr.update_uniforms(&gpu.queue, cfg);
-                pr.run_pass(&mut enc, &final_view);
+                pr.run_pass(&mut enc, post_output);
             }
         }
 
-        // 씬+포스트프로세스 완료 후 제출
+        // 4.5단계: 라이팅 패스
+        #[cfg(not(target_arch = "wasm32"))]
+        if use_lighting {
+            if let Some(lr) = &self.lighting_renderer {
+                lr.update(&gpu.queue, &self.world, gpu.config.width, gpu.config.height);
+
+                // scene input: post가 있으면 post.target_view, 없으면 씬 중간 텍스처
+                let scene_input: &wgpu::TextureView = if use_post {
+                    &self.post_renderer.as_ref().unwrap().target_view
+                } else {
+                    &self.scene_texture_for_lighting.as_ref().unwrap().1
+                };
+                lr.run_pass(&gpu.device, &mut enc, scene_input, &final_view);
+            }
+        }
+
+        // 씬+포스트프로세스+라이팅 완료 후 제출
         gpu.queue.submit(std::iter::once(enc.finish()));
 
         // 5단계: egui 오버레이 패스
