@@ -73,7 +73,10 @@ struct EditorHistory {
 #[cfg(not(target_arch = "wasm32"))]
 impl EditorHistory {
     fn new() -> Self {
-        Self { undo: Vec::new(), redo: Vec::new() }
+        Self {
+            undo: Vec::new(),
+            redo: Vec::new(),
+        }
     }
 
     fn push(&mut self, cmd: EditorCmd) {
@@ -84,7 +87,9 @@ impl EditorHistory {
     fn undo(&mut self, world: &mut World, selected: &mut Option<Entity>) {
         let Some(cmd) = self.undo.pop() else { return };
         match &cmd {
-            EditorCmd::MoveEntity { entity, old_pos, .. } => {
+            EditorCmd::MoveEntity {
+                entity, old_pos, ..
+            } => {
                 if let Some(t) = world.get_mut::<crate::components::Transform>(*entity) {
                     t.position = *old_pos;
                 }
@@ -94,11 +99,21 @@ impl EditorHistory {
                 world.despawn(*entity);
                 *selected = None;
             }
-            EditorCmd::DeleteEntity { tag, transform, sprite } => {
+            EditorCmd::DeleteEntity {
+                tag,
+                transform,
+                sprite,
+            } => {
                 let e = world.spawn();
-                if let Some(tr) = transform { world.add_component(e, tr.clone()); }
-                if let Some(sp) = sprite { world.add_component(e, sp.clone()); }
-                if let Some(t) = tag { world.add_component(e, Tag(t.clone())); }
+                if let Some(tr) = transform {
+                    world.add_component(e, tr.clone());
+                }
+                if let Some(sp) = sprite {
+                    world.add_component(e, sp.clone());
+                }
+                if let Some(t) = tag {
+                    world.add_component(e, Tag(t.clone()));
+                }
                 *selected = Some(e);
             }
         }
@@ -108,7 +123,9 @@ impl EditorHistory {
     fn redo(&mut self, world: &mut World, selected: &mut Option<Entity>) {
         let Some(cmd) = self.redo.pop() else { return };
         match &cmd {
-            EditorCmd::MoveEntity { entity, new_pos, .. } => {
+            EditorCmd::MoveEntity {
+                entity, new_pos, ..
+            } => {
                 if let Some(t) = world.get_mut::<crate::components::Transform>(*entity) {
                     t.position = *new_pos;
                 }
@@ -159,6 +176,14 @@ pub struct App {
     pub world: World,
 
     systems: Vec<Box<dyn System>>,
+    /// 시스템별 라벨/순서/그룹 메타데이터. systems와 동일한 인덱스로 평행 보관.
+    system_meta: Vec<crate::ecs::schedule::SystemMeta>,
+    /// compute_order가 계산한 실행 순서 (인덱스 목록).
+    exec_order: Vec<usize>,
+    /// system_meta가 변경됐을 때 true — 다음 프레임에 재계산.
+    schedule_dirty: bool,
+    /// 비활성화된 SystemSet 라벨. 해당 set의 시스템은 실행을 건너뛴다.
+    disabled_sets: std::collections::HashSet<crate::ecs::schedule::SystemLabel>,
     /// (씬, 해당 씬이 등록한 시스템 수). Push/Pop 시 시스템 복원에 사용.
     scene_stack: Vec<(Box<dyn Scene>, usize)>,
     window: Option<Arc<Window>>,
@@ -264,6 +289,10 @@ impl App {
         let mut app = Self {
             world,
             systems: Vec::new(),
+            system_meta: Vec::new(),
+            exec_order: Vec::new(),
+            schedule_dirty: true,
+            disabled_sets: std::collections::HashSet::new(),
             scene_stack: Vec::new(),
             window: None,
             gpu: None,
@@ -304,6 +333,10 @@ impl App {
         Self {
             world,
             systems: Vec::new(),
+            system_meta: Vec::new(),
+            exec_order: Vec::new(),
+            schedule_dirty: true,
+            disabled_sets: std::collections::HashSet::new(),
             scene_stack: Vec::new(),
             window: None,
             gpu: None,
@@ -382,6 +415,33 @@ impl App {
     /// 시스템을 등록한다. 매 프레임 등록 순서대로 실행된다.
     pub fn add_system<S: System + 'static>(&mut self, system: S) {
         self.systems.push(Box::new(system));
+        self.system_meta
+            .push(crate::ecs::schedule::SystemMeta::default());
+        self.schedule_dirty = true;
+    }
+
+    /// 라벨/순서/그룹 설정과 함께 시스템을 등록한다.
+    pub fn add_system_labeled<S: System + 'static>(
+        &mut self,
+        system: S,
+        config: crate::ecs::schedule::SystemConfig,
+    ) {
+        self.systems.push(Box::new(system));
+        self.system_meta.push(config.into());
+        self.schedule_dirty = true;
+    }
+
+    /// SystemSet 활성/비활성. 비활성 set의 시스템은 매 프레임 실행에서 제외된다.
+    pub fn set_enabled(
+        &mut self,
+        set: crate::ecs::schedule::SystemLabel,
+        enabled: bool,
+    ) {
+        if enabled {
+            self.disabled_sets.remove(set);
+        } else {
+            self.disabled_sets.insert(set);
+        }
     }
 
     /// PNG 텍스처를 로드 대기열에 추가한다.
@@ -454,8 +514,10 @@ impl App {
         self.world.insert_resource(UiQueue::default());
         self.world.insert_resource(DebugDrawQueue::default());
         self.world.insert_resource(DebugDraw::new());
-        self.world.insert_resource(crate::resources::SelectedEntity::default());
-        self.world.insert_resource(crate::resources::ProfilerData::default());
+        self.world
+            .insert_resource(crate::resources::SelectedEntity::default());
+        self.world
+            .insert_resource(crate::resources::ProfilerData::default());
         self.world.insert_resource(SceneChange::default());
         self.world.insert_resource(AssetServer::new());
         // 등록된 이벤트 리소스 재삽입
@@ -467,14 +529,18 @@ impl App {
         // Reflect 레지스트리 재등록 (World 재생성으로 초기화되었으므로)
         self.world
             .register_reflect_named::<crate::components::Transform>("Transform");
-        self.world.register_reflect_named::<crate::components::Sprite>("Sprite");
-        self.world.register_reflect_named::<crate::prefab::Tag>("Tag");
+        self.world
+            .register_reflect_named::<crate::components::Sprite>("Sprite");
+        self.world
+            .register_reflect_named::<crate::prefab::Tag>("Tag");
         // clone_entity 복제 레지스트리 재등록
         self.world.register_clone::<crate::components::Transform>();
         self.world.register_clone::<crate::components::Sprite>();
-        self.world.register_clone::<crate::components::RenderLayer>();
+        self.world
+            .register_clone::<crate::components::RenderLayer>();
         self.world.register_clone::<crate::prefab::Tag>();
-        self.world.register_clone::<crate::animation::player::AnimationPlayer>();
+        self.world
+            .register_clone::<crate::animation::player::AnimationPlayer>();
         self.world.register_clone::<crate::timer::Timer>();
         self.inspector_selected = None;
         self.editor_save_status = None;
@@ -495,20 +561,24 @@ impl App {
         const Z: f32 = 999.0;
 
         // 선분 근사 헬퍼: 두 점 사이를 thickness×thickness 점들로 채운다.
-        let mut push_line = |start: glam::Vec2, end: glam::Vec2, color: [f32; 4], thickness: f32| {
-            let delta = end - start;
-            let len = delta.length();
-            if len < 0.001 {
-                return;
-            }
-            let steps = (len / thickness.max(0.5)).ceil() as usize;
-            let half = thickness / 2.0;
-            for i in 0..=steps {
-                let t = i as f32 / steps.max(1) as f32;
-                let pos = start + delta * t;
-                q.push(DrawRect::new(pos.x - half, pos.y - half, thickness, thickness, color).with_z(Z));
-            }
-        };
+        let mut push_line =
+            |start: glam::Vec2, end: glam::Vec2, color: [f32; 4], thickness: f32| {
+                let delta = end - start;
+                let len = delta.length();
+                if len < 0.001 {
+                    return;
+                }
+                let steps = (len / thickness.max(0.5)).ceil() as usize;
+                let half = thickness / 2.0;
+                for i in 0..=steps {
+                    let t = i as f32 / steps.max(1) as f32;
+                    let pos = start + delta * t;
+                    q.push(
+                        DrawRect::new(pos.x - half, pos.y - half, thickness, thickness, color)
+                            .with_z(Z),
+                    );
+                }
+            };
 
         match shape {
             DebugShape::Rect { min, max, color } => {
@@ -524,10 +594,19 @@ impl App {
                 // 오른쪽
                 q.push(DrawRect::new(max.x - t, min.y, t, h, color).with_z(Z));
             }
-            DebugShape::Line { start, end, color, thickness } => {
+            DebugShape::Line {
+                start,
+                end,
+                color,
+                thickness,
+            } => {
                 push_line(start, end, color, thickness);
             }
-            DebugShape::Circle { center, radius, color } => {
+            DebugShape::Circle {
+                center,
+                radius,
+                color,
+            } => {
                 let n = 24u32;
                 for i in 0..n {
                     let a0 = (i as f32 / n as f32) * std::f32::consts::TAU;
@@ -539,13 +618,36 @@ impl App {
             }
             DebugShape::Cross { pos, size, color } => {
                 let half = size / 2.0;
-                push_line(pos - glam::Vec2::X * half, pos + glam::Vec2::X * half, color, 1.5);
-                push_line(pos - glam::Vec2::Y * half, pos + glam::Vec2::Y * half, color, 1.5);
+                push_line(
+                    pos - glam::Vec2::X * half,
+                    pos + glam::Vec2::X * half,
+                    color,
+                    1.5,
+                );
+                push_line(
+                    pos - glam::Vec2::Y * half,
+                    pos + glam::Vec2::Y * half,
+                    color,
+                    1.5,
+                );
             }
         }
     }
 
     // ── 씬 전환 처리 ─────────────────────────────────────────────────────────
+
+    /// systems와 system_meta 길이를 맞추고 schedule_dirty를 표시한다.
+    /// 씬 on_enter 또는 truncate 이후 반드시 호출.
+    fn reconcile_meta(&mut self) {
+        use crate::ecs::schedule::SystemMeta;
+        if self.system_meta.len() < self.systems.len() {
+            self.system_meta
+                .resize(self.systems.len(), SystemMeta::default());
+        } else if self.system_meta.len() > self.systems.len() {
+            self.system_meta.truncate(self.systems.len());
+        }
+        self.schedule_dirty = true;
+    }
 
     fn apply_scene_cmd(&mut self, cmd: SceneCmd) {
         match cmd {
@@ -554,23 +656,27 @@ impl App {
                     scene.on_exit(&mut self.world);
                 }
                 self.systems.clear();
+                self.reconcile_meta(); // systems.clear() 후 meta 동기화
                 self.reload_scene();
                 let before = self.systems.len();
                 new_scene.on_enter(&mut self.world, &mut self.systems);
                 let owned = self.systems.len() - before;
                 self.scene_stack.push((new_scene, owned));
+                self.reconcile_meta(); // on_enter 후 씬이 직접 push한 시스템 흡수
             }
             SceneCmd::Push(mut new_scene) => {
                 let before = self.systems.len();
                 new_scene.on_enter(&mut self.world, &mut self.systems);
                 let owned = self.systems.len() - before;
                 self.scene_stack.push((new_scene, owned));
+                self.reconcile_meta(); // on_enter 후 씬이 직접 push한 시스템 흡수
             }
             SceneCmd::Pop => {
                 if let Some((mut scene, owned)) = self.scene_stack.pop() {
                     scene.on_exit(&mut self.world);
                     let new_len = self.systems.len().saturating_sub(owned);
                     self.systems.truncate(new_len);
+                    self.reconcile_meta(); // truncate 후 meta 동기화
                 }
             }
         }
@@ -627,14 +733,45 @@ impl App {
             }
         };
 
-        // 시스템 실행 + 프로파일러 계측
+        // 스케줄 재계산 (라벨/순서 변경 시)
+        if self.schedule_dirty {
+            // 안전: 씬 직접 push 흡수
+            if self.system_meta.len() != self.systems.len() {
+                self.system_meta.resize(
+                    self.systems.len(),
+                    crate::ecs::schedule::SystemMeta::default(),
+                );
+            }
+            match crate::ecs::schedule::compute_order(&self.system_meta) {
+                Ok(order) => self.exec_order = order,
+                Err(crate::ecs::schedule::ScheduleError::Cycle(remaining)) => {
+                    log::error!(
+                        "시스템 순서 순환 의존성 감지 — 삽입 순서로 폴백 (영향 인덱스: {:?})",
+                        remaining
+                    );
+                    self.exec_order = (0..self.systems.len()).collect();
+                }
+            }
+            self.schedule_dirty = false;
+        }
+
+        // 시스템 실행 + 프로파일러 계측 (exec_order 순회, 비활성 set 스킵)
         {
             let system_count = self.systems.len();
             let mut timings: Vec<(usize, &'static str, u64)> = Vec::with_capacity(system_count);
-            for (i, system) in self.systems.iter_mut().enumerate() {
-                let name = system.name();
+            let order = self.exec_order.clone();
+            for i in order {
+                if i >= self.systems.len() {
+                    continue;
+                }
+                if let Some(set) = self.system_meta.get(i).and_then(|m| m.set) {
+                    if self.disabled_sets.contains(set) {
+                        continue;
+                    }
+                }
+                let name = self.systems[i].name();
                 let t0 = Instant::now();
-                system.run(&mut self.world, dt);
+                self.systems[i].run(&mut self.world, dt);
                 timings.push((i, name, t0.elapsed().as_micros() as u64));
             }
             if let Some(prof) = self.world.resource_mut::<crate::resources::ProfilerData>() {
@@ -699,10 +836,7 @@ impl App {
             entity_list
                 .iter()
                 .map(|&e| {
-                    let parent = self
-                        .world
-                        .get::<crate::hierarchy::Parent>(e)
-                        .map(|p| p.0);
+                    let parent = self.world.get::<crate::hierarchy::Parent>(e).map(|p| p.0);
                     (e, parent)
                 })
                 .collect()
@@ -768,8 +902,7 @@ impl App {
                         ui.label(format!("Ent   {entity_count}"));
                         ui.label(format!("Asset {asset_count}"));
                         ui.separator();
-                        if let Some(prof) =
-                            self.world.resource::<crate::resources::ProfilerData>()
+                        if let Some(prof) = self.world.resource::<crate::resources::ProfilerData>()
                         {
                             ui.collapsing("Systems", |ui| {
                                 egui::Grid::new("sys_prof")
@@ -1341,7 +1474,10 @@ impl App {
         }
 
         // ── SelectedEntity 리소스 동기화 ─────────────────────────────────────────
-        if let Some(res) = self.world.resource_mut::<crate::resources::SelectedEntity>() {
+        if let Some(res) = self
+            .world
+            .resource_mut::<crate::resources::SelectedEntity>()
+        {
             res.0 = self.inspector_selected;
         }
 
@@ -1374,16 +1510,21 @@ impl App {
                     // 마우스 입력 + 카메라 좌표 변환 (짧은 borrow 블록)
                     let cam_default = crate::camera::Camera::default();
                     let gizmo_input = {
-                        let cam = self.world.resource::<crate::camera::Camera>()
+                        let cam = self
+                            .world
+                            .resource::<crate::camera::Camera>()
                             .unwrap_or(&cam_default);
-                        self.world.resource::<crate::input::InputState>().map(|inp| {
-                            let world_pos = cam.screen_to_world(inp.cursor());
-                            let pressed = inp.mouse_just_pressed(winit::event::MouseButton::Left);
-                            let held = inp.is_mouse_pressed(winit::event::MouseButton::Left);
-                            let released =
-                                inp.mouse_just_released(winit::event::MouseButton::Left);
-                            (world_pos, pressed, held, released)
-                        })
+                        self.world
+                            .resource::<crate::input::InputState>()
+                            .map(|inp| {
+                                let world_pos = cam.screen_to_world(inp.cursor());
+                                let pressed =
+                                    inp.mouse_just_pressed(winit::event::MouseButton::Left);
+                                let held = inp.is_mouse_pressed(winit::event::MouseButton::Left);
+                                let released =
+                                    inp.mouse_just_released(winit::event::MouseButton::Left);
+                                (world_pos, pressed, held, released)
+                            })
                     };
 
                     if let Some((world_pos, just_pressed, held, just_released)) = gizmo_input {
@@ -1397,13 +1538,14 @@ impl App {
                                 self.gizmo_dragging = true;
                                 self.gizmo_drag_offset = tr.position - world_pos;
                                 #[cfg(not(target_arch = "wasm32"))]
-                                { self.gizmo_drag_start_pos = Some(tr.position); }
+                                {
+                                    self.gizmo_drag_start_pos = Some(tr.position);
+                                }
                             }
                         }
 
                         if self.gizmo_dragging && held {
-                            if let Some(t) =
-                                self.world.get_mut::<crate::components::Transform>(sel)
+                            if let Some(t) = self.world.get_mut::<crate::components::Transform>(sel)
                             {
                                 let new_pos = world_pos + self.gizmo_drag_offset;
                                 #[cfg(not(target_arch = "wasm32"))]
@@ -1479,7 +1621,10 @@ impl App {
         }
 
         // FadeTransition 알파 진행
-        if let Some(fade) = self.world.resource_mut::<crate::resources::FadeTransition>() {
+        if let Some(fade) = self
+            .world
+            .resource_mut::<crate::resources::FadeTransition>()
+        {
             fade.update(dt);
         }
 
@@ -1526,14 +1671,21 @@ impl App {
         // 라이팅 렌더러 초기화 / 리사이즈 / 비활성화
         #[cfg(not(target_arch = "wasm32"))]
         let use_lighting = {
-            let has_lighting = self.world.resource::<crate::resources::AmbientLight>().is_some();
+            let has_lighting = self
+                .world
+                .resource::<crate::resources::AmbientLight>()
+                .is_some();
             let (w, h, fmt) = (gpu.config.width, gpu.config.height, gpu.config.format);
             if has_lighting {
                 match &mut self.lighting_renderer {
                     None => {
-                        self.lighting_renderer = Some(
-                            crate::renderer::lighting::LightingRenderer::new(&gpu.device, w, h, fmt),
-                        );
+                        self.lighting_renderer =
+                            Some(crate::renderer::lighting::LightingRenderer::new(
+                                &gpu.device,
+                                w,
+                                h,
+                                fmt,
+                            ));
                     }
                     Some(lr) if lr.width != w || lr.height != h => {
                         lr.resize(&gpu.device, w, h);
@@ -1555,7 +1707,11 @@ impl App {
                     if needs_new {
                         let tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
                             label: Some("scene_for_lighting"),
-                            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                            size: wgpu::Extent3d {
+                                width: w,
+                                height: h,
+                                depth_or_array_layers: 1,
+                            },
                             mip_level_count: 1,
                             sample_count: 1,
                             dimension: wgpu::TextureDimension::D2,
@@ -1597,7 +1753,9 @@ impl App {
                 &self.scene_texture_for_lighting.as_ref().unwrap().1
             }
             #[cfg(target_arch = "wasm32")]
-            { &final_view }
+            {
+                &final_view
+            }
         } else if use_post {
             &self.post_renderer.as_ref().unwrap().target_view
         } else {
@@ -1776,9 +1934,10 @@ impl App {
         {
             // 필요 시 lazy init
             if self.fade_renderer.is_none() {
-                self.fade_renderer = Some(
-                    crate::renderer::fade::FadeRenderer::new(&gpu.device, gpu.config.format),
-                );
+                self.fade_renderer = Some(crate::renderer::fade::FadeRenderer::new(
+                    &gpu.device,
+                    gpu.config.format,
+                ));
             }
             if let (Some(fr), Some(fade)) = (
                 &self.fade_renderer,
@@ -1912,7 +2071,9 @@ impl ApplicationHandler for App {
                             .and_then(|w| w.document())
                             .and_then(|d| d.get_element_by_id("game-canvas"))
                             .and_then(|el| el.dyn_into::<web_sys::HtmlCanvasElement>().ok())
-                            .map(|c| winit::dpi::PhysicalSize::new(c.width().max(1), c.height().max(1)))
+                            .map(|c| {
+                                winit::dpi::PhysicalSize::new(c.width().max(1), c.height().max(1))
+                            })
                             .unwrap_or(size)
                     };
                     gpu.resize(size);
@@ -2076,10 +2237,20 @@ impl App {
         // WASM: 시스템 폰트가 없으므로 font_bytes가 비어있으면 텍스트 렌더러를 생성하지 않는다.
         // cosmic-text는 폰트 없이 shape를 시도할 때 패닉한다.
         #[cfg(not(target_arch = "wasm32"))]
-        let text_renderer = Some(TextRenderer::new(&gpu.device, &gpu.queue, gpu.config.format, &font_bytes));
+        let text_renderer = Some(TextRenderer::new(
+            &gpu.device,
+            &gpu.queue,
+            gpu.config.format,
+            &font_bytes,
+        ));
         #[cfg(target_arch = "wasm32")]
         let text_renderer = if !font_bytes.is_empty() {
-            Some(TextRenderer::new(&gpu.device, &gpu.queue, gpu.config.format, &font_bytes))
+            Some(TextRenderer::new(
+                &gpu.device,
+                &gpu.queue,
+                gpu.config.format,
+                &font_bytes,
+            ))
         } else {
             None
         };

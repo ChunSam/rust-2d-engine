@@ -2,9 +2,9 @@ pub mod animation;
 pub mod app;
 pub mod asset;
 pub mod atlas;
-pub mod behavior;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod audio;
+pub mod behavior;
 pub mod camera;
 pub mod collision;
 pub mod components;
@@ -12,14 +12,14 @@ pub mod debug_ui;
 pub mod ecs;
 pub mod hierarchy;
 pub mod input;
+pub mod material;
+pub mod network;
 pub mod particle;
 pub mod pathfinding;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod physics;
 pub mod pool;
 pub mod prefab;
-pub mod material;
-pub mod network;
 pub mod reflect;
 pub mod renderer;
 pub mod resources;
@@ -27,11 +27,11 @@ pub mod save;
 pub use save::{delete, exists, load, load_or_default, save, save_path, SaveError};
 pub mod scene;
 pub mod scripting;
+pub mod steering;
 pub mod tilemap;
 pub mod timeline;
 pub mod timer;
 pub mod tween;
-pub mod steering;
 pub mod ui;
 
 // ── 편의 재수출 ────────────────────────────────────────────────────────────────
@@ -42,42 +42,43 @@ pub use animation::{
     TransitionCond, UvRect,
 };
 pub use app::App;
-pub use behavior::{Blackboard, BlackboardValue};
 pub use asset::{AssetLoadState, AssetServer, Handle, ImageAsset, ImageEntry, ScriptAsset};
 pub use atlas::{AtlasSprite, TextureAtlas};
 #[cfg(not(target_arch = "wasm32"))]
 pub use audio::{AudioEffect, AudioManager};
+pub use behavior::{Blackboard, BlackboardValue};
 pub use camera::Camera;
 pub use collision::{
     Collider, CollisionDebugSystem, CollisionGridSystem, CollisionLayer, DebugConfig, SpatialGrid,
 };
 pub use components::{PointLight, RenderLayer, Sprite, Transform};
 pub use debug_ui::DebugUi;
+pub use ecs::schedule::{ScheduleError, SystemConfig, SystemLabel, SystemMeta};
 pub use ecs::{Commands, Entity, Events, System, World};
 pub use hierarchy::{attach, detach, Children, GlobalTransform, HierarchySystem, Parent};
 pub use input::{GamepadAxis, GamepadButton, GamepadState, InputMap, InputState};
+pub use material::ShaderMaterial;
+pub use network::{NetworkClient, NetworkEvent, NetworkSystem};
 pub use particle::{Particle, ParticleEmitter, ParticleSystem};
 pub use pathfinding::{find_path, PathGrid};
-pub use pool::{Pool, Pooled};
 #[cfg(not(target_arch = "wasm32"))]
 pub use physics::{
     CharacterController, CollisionEvent, ImpulseJointHandle, PhysicsBody, PhysicsSystem,
     PhysicsWorld, RaycastHit,
 };
+pub use pool::{Pool, Pooled};
 pub use prefab::{
-    spawn_entity_def, spawn_scene_def, topological_sort_entities, EntityDef, Prefab,
-    SceneDef, SCENE_DEF_VERSION, Tag,
+    spawn_entity_def, spawn_scene_def, topological_sort_entities, EntityDef, Prefab, SceneDef, Tag,
+    SCENE_DEF_VERSION,
 };
-pub use material::ShaderMaterial;
-pub use network::{NetworkClient, NetworkEvent, NetworkSystem};
 // par_query_for_each / par_query_map / par_query2_for_each / par_query2_map 은
 // World 메서드이므로 World re-export를 통해 자동 접근 가능 (별도 re-export 불필요)
 pub use reflect::{Reflect, ReflectValue};
 pub use renderer::{DrawRect, DrawText, PostProcessConfig, TextQueue, TextRenderer, UiQueue};
 pub use resources::{
-    AmbientLight, CullConfig, DebugDraw, DebugDrawQueue, DebugRect, DebugShape,
-    DisplayScaleFactor, FadeTransition, FontData, GameState, PendingResize, ProfilerData,
-    RenderStats, SelectedEntity, ShouldQuit, SystemProfile, ViewportSize, WindowConfig,
+    AmbientLight, CullConfig, DebugDraw, DebugDrawQueue, DebugRect, DebugShape, DisplayScaleFactor,
+    FadeTransition, FontData, GameState, PendingResize, ProfilerData, RenderStats, SelectedEntity,
+    ShouldQuit, SystemProfile, ViewportSize, WindowConfig,
 };
 pub use scene::{Scene, SceneChange, SceneCmd};
 pub use scripting::{ScriptRunner, ScriptingSystem};
