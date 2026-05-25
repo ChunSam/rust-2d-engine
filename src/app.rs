@@ -43,6 +43,98 @@ use crate::{
     scene::{Scene, SceneChange, SceneCmd},
 };
 
+// ─── 에디터 Undo/Redo ────────────────────────────────────────────────────────
+
+/// Inspector에서 실행 취소 가능한 작업 목록.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+enum EditorCmd {
+    MoveEntity {
+        entity: Entity,
+        old_pos: glam::Vec2,
+        new_pos: glam::Vec2,
+    },
+    CreateEntity {
+        entity: Entity,
+    },
+    DeleteEntity {
+        tag: Option<String>,
+        transform: Option<crate::components::Transform>,
+        sprite: Option<crate::components::Sprite>,
+    },
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct EditorHistory {
+    undo: Vec<EditorCmd>,
+    redo: Vec<EditorCmd>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl EditorHistory {
+    fn new() -> Self {
+        Self { undo: Vec::new(), redo: Vec::new() }
+    }
+
+    fn push(&mut self, cmd: EditorCmd) {
+        self.undo.push(cmd);
+        self.redo.clear();
+    }
+
+    fn undo(&mut self, world: &mut World, selected: &mut Option<Entity>) {
+        let Some(cmd) = self.undo.pop() else { return };
+        match &cmd {
+            EditorCmd::MoveEntity { entity, old_pos, .. } => {
+                if let Some(t) = world.get_mut::<crate::components::Transform>(*entity) {
+                    t.position = *old_pos;
+                }
+                *selected = Some(*entity);
+            }
+            EditorCmd::CreateEntity { entity } => {
+                world.despawn(*entity);
+                *selected = None;
+            }
+            EditorCmd::DeleteEntity { tag, transform, sprite } => {
+                let e = world.spawn();
+                if let Some(tr) = transform { world.add_component(e, tr.clone()); }
+                if let Some(sp) = sprite { world.add_component(e, sp.clone()); }
+                if let Some(t) = tag { world.add_component(e, Tag(t.clone())); }
+                *selected = Some(e);
+            }
+        }
+        self.redo.push(cmd);
+    }
+
+    fn redo(&mut self, world: &mut World, selected: &mut Option<Entity>) {
+        let Some(cmd) = self.redo.pop() else { return };
+        match &cmd {
+            EditorCmd::MoveEntity { entity, new_pos, .. } => {
+                if let Some(t) = world.get_mut::<crate::components::Transform>(*entity) {
+                    t.position = *new_pos;
+                }
+                *selected = Some(*entity);
+            }
+            EditorCmd::CreateEntity { entity } => {
+                // 엔티티가 이미 despawn 됐으므로 새로 스폰 (id가 달라짐 — 허용)
+                let e = world.spawn();
+                world.add_component(e, crate::components::Transform::default());
+                world.add_component(e, Tag("New Entity".into()));
+                *selected = Some(e);
+                // redo stack의 cmd를 업데이트할 수 없으므로 이 분기는 새 entity로 처리
+                drop(cmd);
+                return;
+            }
+            EditorCmd::DeleteEntity { .. } => {
+                if let Some(sel) = *selected {
+                    world.despawn(sel);
+                    *selected = None;
+                }
+            }
+        }
+        self.undo.push(cmd);
+    }
+}
+
 /// 엔진 진입점.
 ///
 /// # 사용법
@@ -97,6 +189,12 @@ pub struct App {
     editor_load_status: Option<String>,
     /// Inspector 현재 탭 인덱스 (0: Entities, 1: Assets).
     inspector_tab: u8,
+    /// 에디터 실행 취소/다시 실행 히스토리.
+    #[cfg(not(target_arch = "wasm32"))]
+    cmd_history: EditorHistory,
+    /// Gizmo 드래그 시작 시 엔티티 위치 (undo 기록용).
+    #[cfg(not(target_arch = "wasm32"))]
+    gizmo_drag_start_pos: Option<glam::Vec2>,
 }
 
 impl App {
@@ -149,6 +247,10 @@ impl App {
             editor_save_status: None,
             editor_load_status: None,
             inspector_tab: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            cmd_history: EditorHistory::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            gizmo_drag_start_pos: None,
         }
     }
 
@@ -398,6 +500,26 @@ impl App {
 
         // 내장 EngineStats 패널 + Inspector
         if let Some(ctx) = &egui_ctx {
+            // ── Undo (Ctrl+Z) / Redo (Ctrl+Shift+Z) ─────────────────────────
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let (want_undo, want_redo) = ctx.input(|i| {
+                    let ctrl = i.modifiers.ctrl;
+                    let z = i.key_pressed(egui::Key::Z);
+                    let shift = i.modifiers.shift;
+                    (ctrl && z && !shift, ctrl && z && shift)
+                });
+                if want_undo {
+                    let mut sel = self.inspector_selected;
+                    self.cmd_history.undo(&mut self.world, &mut sel);
+                    self.inspector_selected = sel;
+                }
+                if want_redo {
+                    let mut sel = self.inspector_selected;
+                    self.cmd_history.redo(&mut self.world, &mut sel);
+                    self.inspector_selected = sel;
+                }
+            }
             if self
                 .world
                 .resource::<DebugUi>()
@@ -525,12 +647,21 @@ impl App {
                                     crate::prefab::Tag("New Entity".into()),
                                 );
                                 self.inspector_selected = Some(e);
+                                #[cfg(not(target_arch = "wasm32"))]
+                                self.cmd_history.push(EditorCmd::CreateEntity { entity: e });
                             }
                             if let Some(sel) = self.inspector_selected {
                                 if ui
                                     .add_enabled(true, egui::Button::new("🗑 Delete"))
                                     .clicked()
                                 {
+                                    #[cfg(not(target_arch = "wasm32"))]
+                                    {
+                                        let tag = self.world.get::<crate::prefab::Tag>(sel).map(|t| t.0.clone());
+                                        let transform = self.world.get::<crate::components::Transform>(sel).cloned();
+                                        let sprite = self.world.get::<crate::components::Sprite>(sel).cloned();
+                                        self.cmd_history.push(EditorCmd::DeleteEntity { tag, transform, sprite });
+                                    }
                                     self.world.despawn(sel);
                                     self.inspector_selected = None;
                                 }
@@ -823,6 +954,8 @@ impl App {
                             if hit {
                                 self.gizmo_dragging = true;
                                 self.gizmo_drag_offset = tr.position - world_pos;
+                                #[cfg(not(target_arch = "wasm32"))]
+                                { self.gizmo_drag_start_pos = Some(tr.position); }
                             }
                         }
 
@@ -835,6 +968,21 @@ impl App {
                         }
 
                         if just_released {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            if let Some(start_pos) = self.gizmo_drag_start_pos.take() {
+                                let new_pos = self
+                                    .world
+                                    .get::<crate::components::Transform>(sel)
+                                    .map(|t| t.position)
+                                    .unwrap_or(start_pos);
+                                if (new_pos - start_pos).length_squared() > 0.01 {
+                                    self.cmd_history.push(EditorCmd::MoveEntity {
+                                        entity: sel,
+                                        old_pos: start_pos,
+                                        new_pos,
+                                    });
+                                }
+                            }
                             self.gizmo_dragging = false;
                         }
                     }
