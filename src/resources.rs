@@ -17,6 +17,137 @@ pub struct DebugDrawQueue {
     pub items: Vec<DebugRect>,
 }
 
+// ─── 범용 디버그 드로우 API ──────────────────────────────────────────────────
+
+/// 단일 디버그 도형.
+#[derive(Debug, Clone)]
+pub enum DebugShape {
+    /// 축 정렬 사각형 (외곽선)
+    Rect { min: Vec2, max: Vec2, color: [f32; 4] },
+    /// 직선 (시작점 → 끝점, 두께 thickness px)
+    Line { start: Vec2, end: Vec2, color: [f32; 4], thickness: f32 },
+    /// 원 (24각형 근사)
+    Circle { center: Vec2, radius: f32, color: [f32; 4] },
+    /// 십자 마커 (두 직선 교차)
+    Cross { pos: Vec2, size: f32, color: [f32; 4] },
+}
+
+/// 매 프레임 디버그 도형을 수집하는 리소스.
+///
+/// App이 렌더링 후 자동으로 `clear()`를 호출하므로 매 프레임 새로 그리면 된다.
+///
+/// # 사용 예
+/// ```rust,ignore
+/// // 시스템 내부에서
+/// if let Some(dbg) = world.resource_mut::<DebugDraw>() {
+///     dbg.rect(Vec2::new(0., 0.), Vec2::new(64., 64.), [1., 0., 0., 1.]);
+///     dbg.circle(player_pos, 32., [0., 1., 0., 0.8]);
+///     dbg.line(from, to, [1., 1., 0., 1.]);
+/// }
+/// ```
+#[derive(Debug, Default)]
+pub struct DebugDraw {
+    pub(crate) shapes: Vec<DebugShape>,
+}
+
+impl DebugDraw {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 축 정렬 사각형 외곽선을 그린다.
+    pub fn rect(&mut self, min: Vec2, max: Vec2, color: [f32; 4]) {
+        self.shapes.push(DebugShape::Rect { min, max, color });
+    }
+
+    /// 직선을 그린다 (기본 두께 1.5px).
+    pub fn line(&mut self, start: Vec2, end: Vec2, color: [f32; 4]) {
+        self.shapes.push(DebugShape::Line {
+            start,
+            end,
+            color,
+            thickness: 1.5,
+        });
+    }
+
+    /// 두께를 지정해 직선을 그린다.
+    pub fn line_thick(&mut self, start: Vec2, end: Vec2, color: [f32; 4], thickness: f32) {
+        self.shapes.push(DebugShape::Line {
+            start,
+            end,
+            color,
+            thickness,
+        });
+    }
+
+    /// 원을 그린다 (24각형 근사).
+    pub fn circle(&mut self, center: Vec2, radius: f32, color: [f32; 4]) {
+        self.shapes.push(DebugShape::Circle {
+            center,
+            radius,
+            color,
+        });
+    }
+
+    /// 십자 마커를 그린다.
+    pub fn cross(&mut self, pos: Vec2, size: f32, color: [f32; 4]) {
+        self.shapes.push(DebugShape::Cross { pos, size, color });
+    }
+
+    /// 이번 프레임의 모든 도형을 지운다. App이 렌더링 후 자동 호출.
+    pub fn clear(&mut self) {
+        self.shapes.clear();
+    }
+
+    /// 수집된 도형 슬라이스.
+    pub fn shapes(&self) -> &[DebugShape] {
+        &self.shapes
+    }
+}
+
+#[cfg(test)]
+mod debug_draw_tests {
+    use super::*;
+    use glam::Vec2;
+
+    #[test]
+    fn debug_draw_accumulates_shapes() {
+        let mut dbg = DebugDraw::new();
+        dbg.rect(Vec2::ZERO, Vec2::ONE * 64., [1., 0., 0., 1.]);
+        dbg.circle(Vec2::new(100., 100.), 32., [0., 1., 0., 1.]);
+        dbg.line(Vec2::ZERO, Vec2::new(50., 50.), [0., 0., 1., 1.]);
+        assert_eq!(dbg.shapes().len(), 3);
+    }
+
+    #[test]
+    fn debug_draw_clear_empties() {
+        let mut dbg = DebugDraw::new();
+        dbg.rect(Vec2::ZERO, Vec2::ONE, [1.; 4]);
+        dbg.clear();
+        assert!(dbg.shapes().is_empty());
+    }
+
+    #[test]
+    fn debug_draw_cross_is_correct_shape() {
+        let mut dbg = DebugDraw::new();
+        dbg.cross(Vec2::new(50., 50.), 20., [1.; 4]);
+        assert_eq!(dbg.shapes().len(), 1);
+        matches!(&dbg.shapes()[0], DebugShape::Cross { .. });
+    }
+
+    #[test]
+    fn debug_draw_line_thick() {
+        let mut dbg = DebugDraw::new();
+        dbg.line_thick(Vec2::ZERO, Vec2::new(100., 0.), [1.; 4], 3.0);
+        assert_eq!(dbg.shapes().len(), 1);
+        if let DebugShape::Line { thickness, .. } = &dbg.shapes()[0] {
+            assert_eq!(*thickness, 3.0);
+        } else {
+            panic!("expected Line shape");
+        }
+    }
+}
+
 // ─── 게임 상태 리소스 ────────────────────────────────────────────────────────
 
 /// 게임 상태 머신 값 (ECS 리소스로 삽입)
