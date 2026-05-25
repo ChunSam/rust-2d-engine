@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 40 갱신: 2026-05-25)  
-엔진 버전: v0.40.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 41 갱신: 2026-05-25)  
+엔진 버전: v0.41.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -55,6 +55,22 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 29 | 씬 계층 직렬화 — EntityDef.parent, spawn_scene_def 2패스, topological_sort_entities | — |
 | Phase 30 | 시스템 프로파일러 — System::name(), ProfilerData/RenderStats 리소스, Engine Stats 패널 확장 | — |
 | Phase 31 | 에셋 브라우저 — ImageEntry, image_list(), Inspector "Assets" 탭 | — |
+| Phase 32 | 런타임 안정성 — AssetLoadState, SceneDef.version, Inspector 📂 Load Scene 버튼 | — |
+| Phase 33 | A* 경로탐색 — PathGrid, find_path + ECS 쿼리 필터 query_with/query_without | — |
+| Phase 34 | RenderLayer + 스프라이트 배칭 — (layer, tex_key, z) 정렬, 동일 텍스처 단일 드로우 | — |
+| Phase 35 | Inspector Undo/Redo — EditorCmd/EditorHistory, Ctrl+Z / Ctrl+Shift+Z | — |
+| Phase 36 | 비헤이비어 트리 — BehaviorNode 트레잇, Sequence/Selector/Inverter/AlwaysSucceed, BehaviorSystem | — |
+| Phase 37a | Blackboard + Steering Behaviors — BlackboardValue, Seek/Flee/Arrive/Wander, SteeringSystem | — |
+| Phase 37d | CommandBuffer — Commands::spawn/despawn/insert/remove + World::apply_commands | — |
+| Phase 38a | 씬 그래프 패널 — Inspector "Scene" 탭 TreeView, Tag 이름 편집, 계층 시각화 | — |
+| Phase 38d | Rhai 스크립팅 API 확장 — spawn_entity, despawn_entity, bb_set/get_*, seek/flee/stop_steering | — |
+| Phase 39b | Inspector 컴포넌트 추가/제거 UI — 팩토리 패턴, register_component, ComboBox, ✕ 버튼 | — |
+| Phase 39d | REFERENCE.md v0.38.0 — Steering/Blackboard/Commands/SceneGraph/Rhai 섹션 추가 | — |
+| Phase 40c | Gizmo Grid Snap — snap_enabled/snap_size, snap_to_grid 헬퍼, Inspector 체크박스+DragValue | — |
+| Phase 40d | REFERENCE.md v0.39.0 — 컴포넌트 추가/제거 UI, register_component API 문서화 | — |
+| Phase 41b | ECS 변경 감지 — query_added<T>/query_changed<T>, clear_change_tracking, HashSet 기반 | `5cf3233` |
+| Phase 41a | 2D 라이팅 — PointLight 컴포넌트, AmbientLight 리소스, LightingRenderer (WGSL, 최대 16 라이트) | `2230e31` |
+| Phase 41d | REFERENCE.md v0.41.0 — 2D 라이팅/ECS 변경 감지 섹션 추가 | — |
 
 ---
 
@@ -119,6 +135,74 @@ src/
 │       └── post_process.wgsl                                      ← Phase 10
 └── save.rs           RON 세이브/불러오기 (save/load/load_or_default/exists/delete)
 ```
+
+---
+
+## 이번 세션에서 한 일 (Phase 41)
+
+### Phase 41b — ECS 변경 감지
+
+**배경**: 컴포넌트가 변경된 엔티티를 추적하려면 수동 dirty-flag 필드를 컴포넌트마다 추가해야 했다. `query_added`/`query_changed`를 통해 이번 프레임에 추가되거나 교체된 컴포넌트만 조회할 수 있게 한다.
+
+**변경 파일**: `src/ecs/world.rs`, `src/app.rs`
+
+**추가 기능**:
+- `World` 구조체에 `added_this_tick: HashSet<(Entity, TypeId)>`, `changed_this_tick: HashSet<(Entity, TypeId)>` 필드 추가
+- `add_component` 수정: 첫 추가 시 `added_this_tick`, 기존 교체 시 `changed_this_tick`에 기록
+- `despawn` / `remove_component` 수정: 해당 엔티티/타입 쌍을 추적 세트에서 제거 (멱등성 보장)
+- `World::clear_change_tracking()` — 매 프레임 `App::update()` 최상단에서 자동 호출
+- `World::query_added::<T>()` / `World::query_changed::<T>()` — 추적 세트 기반 필터 조회
+- 단위 테스트 4개
+
+```rust
+// 이번 프레임에 새로 추가된 Enemy만 초기화
+let new_enemies: Vec<_> = world.query_added::<Enemy>().map(|(e, _)| e).collect();
+for e in new_enemies {
+    world.add_component(e, Blackboard::default());
+}
+
+// 위치가 바뀐 오브젝트만 공간 캐시 갱신
+for (e, t) in world.query_changed::<Transform>() {
+    cache.update(e, t.position);
+}
+```
+
+---
+
+### Phase 41a — 2D 라이팅
+
+**배경**: 엔진에 조명 효과가 없어 모든 씬이 균일한 밝기였다. `AmbientLight` 리소스 등록만으로 라이팅 후처리 패스가 활성화되고, `PointLight` + `Transform` 조합으로 포인트 라이트를 배치할 수 있게 한다.
+
+**변경 파일**: `src/renderer/lighting.rs` (신규), `src/renderer/mod.rs`, `src/components.rs`, `src/resources.rs`, `src/app.rs`, `src/lib.rs`
+
+**추가 기능**:
+
+*컴포넌트 / 리소스*
+- `PointLight { color: [f32;3], radius: f32, intensity: f32 }` — Transform과 함께 엔티티에 추가
+- `AmbientLight { color: [f32;3], intensity: f32 }` (기본: 흰색 10%) — 등록 즉시 라이팅 활성화
+
+*LightingRenderer (src/renderer/lighting.rs)*
+- `GpuLightData` (32 bytes), `LightingUniforms` (544 bytes) — bytemuck `Pod+Zeroable`
+- 최대 16개 `PointLight` 처리, `atten*atten` 이차 감쇠 함수
+- WGSL 인라인 셰이더: scene_tex 샘플 → 환경광 + 포인트 라이트 합산 → min(total, 1.0) 클램핑
+- 월드→NDC 변환: `ndc_x = pos.x / (vp_w / 2)`, `radius_ndc = radius / (vp_w / 2)`
+
+*App 통합 (src/app.rs)*
+- `lighting_renderer: Option<LightingRenderer>` 필드 (네이티브 전용)
+- `AmbientLight` 리소스 존재 시 자동 활성화/비활성화
+- 라이팅 전용 중간 씬 텍스처(`scene_texture_for_lighting`) — 라이팅+포스트 동시 활성 시 post 출력이 lighting 입력
+- `gpu_struct_sizes` 단위 테스트 (GpuLightData=32, LightingUniforms=544 검증)
+
+```rust
+// 라이팅 씬 설정 예
+world.insert_resource(AmbientLight { color: [1.0, 1.0, 1.0], intensity: 0.05 });
+
+let torch = world.spawn();
+world.add_component(torch, Transform { position: Vec2::new(0.0, 0.0), ..Default::default() });
+world.add_component(torch, PointLight { color: [1.0, 0.7, 0.3], radius: 250.0, intensity: 1.5 });
+```
+
+> **플랫폼**: 네이티브 전용 (`#[cfg(not(target_arch = "wasm32"))]`).
 
 ---
 
