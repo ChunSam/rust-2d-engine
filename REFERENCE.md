@@ -1,6 +1,6 @@
 # rust-2d-engine 레퍼런스
 
-> 버전 v0.39.0 기준. wgpu 기반 2D 게임 엔진.
+> 버전 v0.41.0 기준. wgpu 기반 2D 게임 엔진.
 
 ---
 
@@ -36,7 +36,9 @@
 28. [에디터 — 씬 그래프 패널](#에디터--씬-그래프-패널)
 29. [에디터 — 컴포넌트 추가/제거](#에디터--컴포넌트-추가제거)
 30. [Rhai 스크립팅](#rhai-스크립팅)
-31. [좌표 규약](#좌표-규약)
+31. [2D 라이팅](#2d-라이팅)
+32. [ECS 변경 감지](#ecs-변경-감지)
+33. [좌표 규약](#좌표-규약)
 
 ---
 
@@ -1694,6 +1696,171 @@ if in_range {
 } else {
     stop_steering();
     bb_set_float("idle_time", bb_get_float("idle_time") + dt);
+}
+```
+
+---
+
+## 2D 라이팅
+
+씬 전체에 포인트 라이트 효과를 적용하는 후처리 패스. `AmbientLight` 리소스를 등록하면 자동 활성화된다.
+
+### AmbientLight 리소스
+
+```rust
+// 등록만 하면 LightingRenderer가 자동 활성화됨
+world.insert_resource(AmbientLight {
+    color: [1.0, 0.9, 0.8],   // 따뜻한 환경광
+    intensity: 0.05,           // 5% 기본 밝기 (어두운 씬)
+});
+
+// 기본값: 흰색 환경광 10%
+world.insert_resource(AmbientLight::default());
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `color` | `[f32; 3]` | RGB 환경광 색상 (0.0~1.0) |
+| `intensity` | `f32` | 환경광 강도. 0.0 = 완전 어두움, 1.0 = 원본 밝기 |
+
+### PointLight 컴포넌트
+
+`Transform`과 함께 엔티티에 추가한다. 최대 16개까지 동시에 적용된다.
+
+```rust
+let light_entity = world.spawn();
+world.add_component(light_entity, Transform {
+    position: Vec2::new(200.0, 150.0),
+    ..Default::default()
+});
+world.add_component(light_entity, PointLight {
+    color: [1.0, 0.8, 0.4],   // 주황빛
+    radius: 300.0,             // 월드 좌표 픽셀 반경
+    intensity: 2.0,            // 밝기 배율
+});
+```
+
+| 필드 | 타입 | 기본값 | 설명 |
+|------|------|--------|------|
+| `color` | `[f32; 3]` | `[1.0, 1.0, 1.0]` | RGB 라이트 색상 |
+| `radius` | `f32` | `200.0` | 월드 좌표 픽셀 단위 반경 |
+| `intensity` | `f32` | `1.0` | 밝기 배율 (1.0이 기본) |
+
+### PostProcess와 연동 순서
+
+라이팅과 후처리가 모두 활성화된 경우:
+
+```
+스프라이트 렌더링
+    → PostProcessRenderer.target_view (중간 텍스처)
+    → LightingRenderer.run_pass (라이팅 적용)
+    → 스왑체인 (화면 출력)
+```
+
+라이팅만 활성화된 경우:
+
+```
+스프라이트 렌더링
+    → 중간 씬 텍스처 (scene_texture_for_lighting)
+    → LightingRenderer.run_pass (라이팅 적용)
+    → 스왑체인 (화면 출력)
+```
+
+> **플랫폼**: 라이팅은 네이티브(native) 전용. WASM 빌드에서는 비활성화된다.
+
+### 완전한 사용 예
+
+```rust
+struct SetupSystem;
+impl System for SetupSystem {
+    fn run(&mut self, world: &mut World, _dt: f32) {
+        // 환경광 등록 (라이팅 활성화)
+        world.insert_resource(AmbientLight { color: [1.0, 1.0, 1.0], intensity: 0.05 });
+
+        // 플레이어 주변 따뜻한 빛
+        let torch = world.spawn();
+        world.add_component(torch, Transform {
+            position: Vec2::new(0.0, 0.0),
+            ..Default::default()
+        });
+        world.add_component(torch, PointLight {
+            color: [1.0, 0.7, 0.3],
+            radius: 250.0,
+            intensity: 1.5,
+        });
+    }
+}
+```
+
+---
+
+## ECS 변경 감지
+
+이번 프레임에 추가/교체된 컴포넌트만 조회할 수 있다. dirty-flag 패턴을 대체한다.
+
+### API
+
+```rust
+// 이번 프레임에 처음 추가된 컴포넌트를 가진 엔티티
+for (entity, health) in world.query_added::<Health>() {
+    println!("새 엔티티 {:?}: HP={}", entity, health.0);
+}
+
+// 이번 프레임에 교체된 컴포넌트를 가진 엔티티
+for (entity, transform) in world.query_changed::<Transform>() {
+    update_spatial_cache(entity, transform.position);
+}
+
+// 명시적 초기화 (App이 매 프레임 자동 호출 — 직접 호출 불필요)
+world.clear_change_tracking();
+```
+
+### 동작 규칙
+
+| 상황 | `query_added` | `query_changed` |
+|------|---------------|-----------------|
+| 엔티티에 컴포넌트 첫 추가 | ✓ 포함 | ✗ 없음 |
+| 기존 컴포넌트 교체 (`add_component` 재호출) | ✗ 없음 | ✓ 포함 |
+| `despawn` 호출 | 자동 제거 | 자동 제거 |
+| `remove_component` 호출 | 자동 제거 | 자동 제거 |
+| 다음 프레임 (`clear_change_tracking`) | 초기화 | 초기화 |
+
+### 활용 예 — 온보딩 처리
+
+```rust
+struct SpawnSetupSystem;
+impl System for SpawnSetupSystem {
+    fn run(&mut self, world: &mut World, _dt: f32) {
+        // 이번 프레임에 새로 스폰된 Enemy만 초기화
+        let new_enemies: Vec<_> = world
+            .query_added::<Enemy>()
+            .map(|(e, _)| e)
+            .collect();
+        for entity in new_enemies {
+            world.add_component(entity, Blackboard::default());
+            world.add_component(entity, SteeringVelocity::default());
+        }
+    }
+}
+```
+
+### 활용 예 — Transform 변경 추적
+
+```rust
+struct TransformDirtySystem;
+impl System for TransformDirtySystem {
+    fn run(&mut self, world: &mut World, _dt: f32) {
+        // 위치가 바뀐 오브젝트만 공간 캐시 업데이트
+        let changed: Vec<_> = world
+            .query_changed::<Transform>()
+            .map(|(e, t)| (e, t.position))
+            .collect();
+        if let Some(grid) = world.resource_mut::<SpatialGrid>() {
+            for (entity, pos) in changed {
+                grid.update(entity, pos);
+            }
+        }
+    }
 }
 ```
 
