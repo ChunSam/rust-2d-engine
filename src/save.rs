@@ -2,13 +2,26 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use chacha20poly1305::{
+    aead::{Aead, KeyInit},
+    ChaCha20Poly1305, Key, Nonce,
+};
+use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
+
+const SAVE_MAGIC: &[u8; 9] = b"R2DAEAD01";
+const NONCE_LEN: usize = 12;
+const SAVE_KEY_BYTES: [u8; 32] = [
+    0x52, 0x32, 0x44, 0x45, 0x2d, 0x53, 0x41, 0x56, 0x45, 0x2d, 0x41, 0x45, 0x41, 0x44, 0x2d, 0x4b,
+    0x31, 0x9f, 0x6c, 0x21, 0xb8, 0x43, 0xd0, 0x75, 0xe2, 0x0a, 0x5c, 0x99, 0x13, 0xfe, 0x67, 0x2b,
+];
 
 /// 저장/로드 에러 타입.
 #[derive(Debug)]
 pub enum SaveError {
     Io(io::Error),
     Ron(String),
+    Corrupted,
 }
 
 impl std::fmt::Display for SaveError {
@@ -16,6 +29,7 @@ impl std::fmt::Display for SaveError {
         match self {
             SaveError::Io(e) => write!(f, "IO error: {}", e),
             SaveError::Ron(s) => write!(f, "RON error: {}", s),
+            SaveError::Corrupted => write!(f, "Save file is corrupted or has been tampered with"),
         }
     }
 }
@@ -46,15 +60,18 @@ pub fn save<T: Serialize>(path: &Path, data: &T) -> Result<(), SaveError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let s = ron::ser::to_string_pretty(data, ron::ser::PrettyConfig::default())
+    let plaintext = ron::ser::to_string_pretty(data, ron::ser::PrettyConfig::default())
         .map_err(|e| SaveError::Ron(e.to_string()))?;
-    fs::write(path, s)?;
+    let encrypted = encrypt_save_bytes(plaintext.as_bytes())?;
+    fs::write(path, encrypted)?;
     Ok(())
 }
 
 /// RON 파일을 읽어 역직렬화한다. 파일 없으면 Err(SaveError::Io(NotFound)).
 pub fn load<T: DeserializeOwned>(path: &Path) -> Result<T, SaveError> {
-    let s = fs::read_to_string(path)?;
+    let bytes = fs::read(path)?;
+    let plaintext = decrypt_save_bytes(&bytes)?;
+    let s = std::str::from_utf8(&plaintext).map_err(|_| SaveError::Corrupted)?;
     ron::from_str(&s).map_err(|e| SaveError::Ron(e.to_string()))
 }
 
@@ -79,6 +96,36 @@ pub fn delete(path: &Path) -> Result<(), SaveError> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(SaveError::Io(e)),
     }
+}
+
+fn cipher() -> ChaCha20Poly1305 {
+    ChaCha20Poly1305::new(Key::from_slice(&SAVE_KEY_BYTES))
+}
+
+fn encrypt_save_bytes(plaintext: &[u8]) -> Result<Vec<u8>, SaveError> {
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    let ciphertext = cipher()
+        .encrypt(Nonce::from_slice(&nonce_bytes), plaintext)
+        .map_err(|_| SaveError::Corrupted)?;
+
+    let mut out = Vec::with_capacity(SAVE_MAGIC.len() + NONCE_LEN + ciphertext.len());
+    out.extend_from_slice(SAVE_MAGIC);
+    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&ciphertext);
+    Ok(out)
+}
+
+fn decrypt_save_bytes(bytes: &[u8]) -> Result<Vec<u8>, SaveError> {
+    let header_len = SAVE_MAGIC.len() + NONCE_LEN;
+    if bytes.len() <= header_len || !bytes.starts_with(SAVE_MAGIC) {
+        return Err(SaveError::Corrupted);
+    }
+
+    let nonce = Nonce::from_slice(&bytes[SAVE_MAGIC.len()..header_len]);
+    cipher()
+        .decrypt(nonce, &bytes[header_len..])
+        .map_err(|_| SaveError::Corrupted)
 }
 
 #[cfg(test)]
@@ -116,6 +163,12 @@ mod tests {
         };
 
         save(&path, &original).expect("save should succeed");
+        let raw = fs::read(&path).expect("saved file should exist");
+        assert!(
+            !String::from_utf8_lossy(&raw).contains("hi_score"),
+            "saved file should not contain plaintext RON fields"
+        );
+
         let loaded: Settings = load(&path).expect("load should succeed");
 
         assert_eq!(original, loaded);
@@ -154,6 +207,32 @@ mod tests {
         save(&path, &data).unwrap();
         let loaded: Counter = load_or_default(&path).unwrap();
         assert_eq!(loaded, data);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn tampered_file_returns_corrupted() {
+        let dir = unique_test_dir();
+        let path = dir.join("settings.ron");
+        let data = Settings {
+            sfx: 1.0,
+            music: 0.5,
+            hi_score: 7,
+        };
+
+        save(&path, &data).unwrap();
+        let mut raw = fs::read(&path).unwrap();
+        let last = raw.len() - 1;
+        raw[last] ^= 0x01;
+        fs::write(&path, raw).unwrap();
+
+        let loaded: Result<Settings, SaveError> = load(&path);
+        assert!(
+            matches!(loaded, Err(SaveError::Corrupted)),
+            "expected SaveError::Corrupted, got {:?}",
+            loaded
+        );
+
         fs::remove_dir_all(&dir).ok();
     }
 
