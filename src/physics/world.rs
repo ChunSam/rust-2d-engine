@@ -4,6 +4,62 @@ use rapier2d::prelude::*;
 use crate::physics::body::PhysicsBody;
 use crate::physics::character::CharacterController;
 
+// ── 충돌 그룹 ────────────────────────────────────────────────────────────────
+
+/// Rapier `InteractionGroups`를 감싼 엔진용 충돌 레이어/마스크.
+///
+/// `memberships`는 이 콜라이더가 속한 레이어 비트, `filter`는 상호작용을 허용할
+/// 상대 레이어 비트다. 두 콜라이더가 모두 서로를 허용해야 충돌/센서 교차가 발생한다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CollisionGroups {
+    pub memberships: u32,
+    pub filter: u32,
+}
+
+impl CollisionGroups {
+    pub const ALL_BITS: u32 = u32::MAX;
+    pub const NONE_BITS: u32 = 0;
+
+    pub const fn new(memberships: u32, filter: u32) -> Self {
+        Self {
+            memberships,
+            filter,
+        }
+    }
+
+    pub const fn all() -> Self {
+        Self::new(Self::ALL_BITS, Self::ALL_BITS)
+    }
+
+    pub const fn none() -> Self {
+        Self::new(Self::NONE_BITS, Self::NONE_BITS)
+    }
+
+    pub const fn layer(bit_index: u8) -> Self {
+        let bit = 1u32 << bit_index;
+        Self::new(bit, Self::ALL_BITS)
+    }
+
+    pub const fn with_filter(mut self, filter: u32) -> Self {
+        self.filter = filter;
+        self
+    }
+
+    fn to_rapier(self) -> InteractionGroups {
+        InteractionGroups::new(Group::from(self.memberships), Group::from(self.filter))
+    }
+
+    fn from_rapier(groups: InteractionGroups) -> Self {
+        Self::new(groups.memberships.bits(), groups.filter.bits())
+    }
+}
+
+impl Default for CollisionGroups {
+    fn default() -> Self {
+        Self::all()
+    }
+}
+
 // ── 레이캐스트 결과 ──────────────────────────────────────────────────────────
 
 /// 레이캐스트 충돌 결과.
@@ -64,6 +120,24 @@ impl PhysicsWorld {
         half_h: f32,
         lock_rotation: bool,
     ) -> (RigidBodyHandle, ColliderHandle) {
+        self.add_dynamic_box_with_groups(
+            position,
+            half_w,
+            half_h,
+            lock_rotation,
+            CollisionGroups::all(),
+        )
+    }
+
+    /// 충돌 그룹을 지정해 중력에 반응하는 동적 박스 바디를 추가한다.
+    pub fn add_dynamic_box_with_groups(
+        &mut self,
+        position: Vec2,
+        half_w: f32,
+        half_h: f32,
+        lock_rotation: bool,
+        groups: CollisionGroups,
+    ) -> (RigidBodyHandle, ColliderHandle) {
         let mut builder = RigidBodyBuilder::dynamic().translation(vector![position.x, position.y]);
         if lock_rotation {
             builder = builder.lock_rotations();
@@ -72,6 +146,7 @@ impl PhysicsWorld {
         let collider = ColliderBuilder::cuboid(half_w, half_h)
             .friction(0.3)
             .restitution(0.0)
+            .collision_groups(groups.to_rapier())
             .build();
         let col_handle =
             self.collider_set
@@ -86,11 +161,24 @@ impl PhysicsWorld {
         half_w: f32,
         half_h: f32,
     ) -> (RigidBodyHandle, ColliderHandle) {
+        self.add_static_box_with_groups(position, half_w, half_h, CollisionGroups::all())
+    }
+
+    /// 충돌 그룹을 지정해 움직이지 않는 정적 박스 바디를 추가한다.
+    pub fn add_static_box_with_groups(
+        &mut self,
+        position: Vec2,
+        half_w: f32,
+        half_h: f32,
+        groups: CollisionGroups,
+    ) -> (RigidBodyHandle, ColliderHandle) {
         let body = RigidBodyBuilder::fixed()
             .translation(vector![position.x, position.y])
             .build();
         let handle = self.rigid_body_set.insert(body);
-        let collider = ColliderBuilder::cuboid(half_w, half_h).build();
+        let collider = ColliderBuilder::cuboid(half_w, half_h)
+            .collision_groups(groups.to_rapier())
+            .build();
         let col_handle =
             self.collider_set
                 .insert_with_parent(collider, handle, &mut self.rigid_body_set);
@@ -104,6 +192,17 @@ impl PhysicsWorld {
         radius: f32,
         lock_rotation: bool,
     ) -> (RigidBodyHandle, ColliderHandle) {
+        self.add_dynamic_circle_with_groups(position, radius, lock_rotation, CollisionGroups::all())
+    }
+
+    /// 충돌 그룹을 지정해 중력에 반응하는 동적 원형 바디를 추가한다.
+    pub fn add_dynamic_circle_with_groups(
+        &mut self,
+        position: Vec2,
+        radius: f32,
+        lock_rotation: bool,
+        groups: CollisionGroups,
+    ) -> (RigidBodyHandle, ColliderHandle) {
         let mut builder = RigidBodyBuilder::dynamic().translation(vector![position.x, position.y]);
         if lock_rotation {
             builder = builder.lock_rotations();
@@ -112,6 +211,7 @@ impl PhysicsWorld {
         let collider = ColliderBuilder::ball(radius)
             .friction(0.3)
             .restitution(0.0)
+            .collision_groups(groups.to_rapier())
             .build();
         let col_handle =
             self.collider_set
@@ -168,6 +268,26 @@ impl PhysicsWorld {
         self.collider_set.get_mut(handle)
     }
 
+    /// 콜라이더의 충돌 그룹을 변경한다. 핸들이 없으면 `false`를 반환한다.
+    pub fn set_collision_groups(
+        &mut self,
+        handle: ColliderHandle,
+        groups: CollisionGroups,
+    ) -> bool {
+        let Some(collider) = self.collider_set.get_mut(handle) else {
+            return false;
+        };
+        collider.set_collision_groups(groups.to_rapier());
+        true
+    }
+
+    /// 콜라이더의 현재 충돌 그룹을 반환한다.
+    pub fn collision_groups(&self, handle: ColliderHandle) -> Option<CollisionGroups> {
+        self.collider_set
+            .get(handle)
+            .map(|collider| CollisionGroups::from_rapier(collider.collision_groups()))
+    }
+
     /// 키네마틱 박스 바디를 추가한다 (중력 비반응, 수동 위치 제어).
     pub fn add_kinematic_box(
         &mut self,
@@ -175,11 +295,24 @@ impl PhysicsWorld {
         half_w: f32,
         half_h: f32,
     ) -> (RigidBodyHandle, ColliderHandle) {
+        self.add_kinematic_box_with_groups(position, half_w, half_h, CollisionGroups::all())
+    }
+
+    /// 충돌 그룹을 지정해 키네마틱 박스 바디를 추가한다.
+    pub fn add_kinematic_box_with_groups(
+        &mut self,
+        position: Vec2,
+        half_w: f32,
+        half_h: f32,
+        groups: CollisionGroups,
+    ) -> (RigidBodyHandle, ColliderHandle) {
         let body = RigidBodyBuilder::kinematic_position_based()
             .translation(vector![position.x, position.y])
             .build();
         let handle = self.rigid_body_set.insert(body);
-        let collider = ColliderBuilder::cuboid(half_w, half_h).build();
+        let collider = ColliderBuilder::cuboid(half_w, half_h)
+            .collision_groups(groups.to_rapier())
+            .build();
         let col_handle =
             self.collider_set
                 .insert_with_parent(collider, handle, &mut self.rigid_body_set);
@@ -192,11 +325,85 @@ impl PhysicsWorld {
         position: Vec2,
         radius: f32,
     ) -> (RigidBodyHandle, ColliderHandle) {
+        self.add_kinematic_circle_with_groups(position, radius, CollisionGroups::all())
+    }
+
+    /// 충돌 그룹을 지정해 키네마틱 원형 바디를 추가한다.
+    pub fn add_kinematic_circle_with_groups(
+        &mut self,
+        position: Vec2,
+        radius: f32,
+        groups: CollisionGroups,
+    ) -> (RigidBodyHandle, ColliderHandle) {
         let body = RigidBodyBuilder::kinematic_position_based()
             .translation(vector![position.x, position.y])
             .build();
         let handle = self.rigid_body_set.insert(body);
-        let collider = ColliderBuilder::ball(radius).build();
+        let collider = ColliderBuilder::ball(radius)
+            .collision_groups(groups.to_rapier())
+            .build();
+        let col_handle =
+            self.collider_set
+                .insert_with_parent(collider, handle, &mut self.rigid_body_set);
+        (handle, col_handle)
+    }
+
+    /// 물리 반응 없이 교차만 감지하는 정적 박스 센서를 추가한다.
+    pub fn add_sensor_box(
+        &mut self,
+        position: Vec2,
+        half_w: f32,
+        half_h: f32,
+    ) -> (RigidBodyHandle, ColliderHandle) {
+        self.add_sensor_box_with_groups(position, half_w, half_h, CollisionGroups::all())
+    }
+
+    /// 충돌 그룹을 지정해 정적 박스 센서를 추가한다.
+    pub fn add_sensor_box_with_groups(
+        &mut self,
+        position: Vec2,
+        half_w: f32,
+        half_h: f32,
+        groups: CollisionGroups,
+    ) -> (RigidBodyHandle, ColliderHandle) {
+        let body = RigidBodyBuilder::fixed()
+            .translation(vector![position.x, position.y])
+            .build();
+        let handle = self.rigid_body_set.insert(body);
+        let collider = ColliderBuilder::cuboid(half_w, half_h)
+            .sensor(true)
+            .collision_groups(groups.to_rapier())
+            .build();
+        let col_handle =
+            self.collider_set
+                .insert_with_parent(collider, handle, &mut self.rigid_body_set);
+        (handle, col_handle)
+    }
+
+    /// 물리 반응 없이 교차만 감지하는 정적 원형 센서를 추가한다.
+    pub fn add_sensor_circle(
+        &mut self,
+        position: Vec2,
+        radius: f32,
+    ) -> (RigidBodyHandle, ColliderHandle) {
+        self.add_sensor_circle_with_groups(position, radius, CollisionGroups::all())
+    }
+
+    /// 충돌 그룹을 지정해 정적 원형 센서를 추가한다.
+    pub fn add_sensor_circle_with_groups(
+        &mut self,
+        position: Vec2,
+        radius: f32,
+        groups: CollisionGroups,
+    ) -> (RigidBodyHandle, ColliderHandle) {
+        let body = RigidBodyBuilder::fixed()
+            .translation(vector![position.x, position.y])
+            .build();
+        let handle = self.rigid_body_set.insert(body);
+        let collider = ColliderBuilder::ball(radius)
+            .sensor(true)
+            .collision_groups(groups.to_rapier())
+            .build();
         let col_handle =
             self.collider_set
                 .insert_with_parent(collider, handle, &mut self.rigid_body_set);
@@ -404,6 +611,53 @@ mod tests {
 
     fn make_world() -> PhysicsWorld {
         PhysicsWorld::new(Vec2::new(0.0, 9.8))
+    }
+
+    #[test]
+    fn collision_groups_filter_contacts() {
+        let mut pw = PhysicsWorld::new(Vec2::ZERO);
+        let player = 1 << 0;
+        let enemy = 1 << 1;
+        let pickup = 1 << 2;
+
+        let (_, player_col) = pw.add_dynamic_box_with_groups(
+            Vec2::ZERO,
+            0.5,
+            0.5,
+            false,
+            CollisionGroups::new(player, enemy),
+        );
+        let (_, enemy_col) = pw.add_static_box_with_groups(
+            Vec2::ZERO,
+            0.5,
+            0.5,
+            CollisionGroups::new(enemy, player),
+        );
+        let (_, pickup_col) = pw.add_static_box_with_groups(
+            Vec2::ZERO,
+            0.5,
+            0.5,
+            CollisionGroups::new(pickup, pickup),
+        );
+
+        pw.step(1.0 / 60.0);
+
+        assert!(pw.has_contact(player_col));
+        assert!(pw.has_contact(enemy_col));
+        assert!(
+            !pw.has_contact(pickup_col),
+            "pickup layer should be ignored by player/enemy filters"
+        );
+    }
+
+    #[test]
+    fn set_collision_groups_updates_existing_collider() {
+        let mut pw = PhysicsWorld::new(Vec2::ZERO);
+        let (_, col) = pw.add_dynamic_circle(Vec2::ZERO, 0.5, false);
+        let groups = CollisionGroups::new(1 << 3, 1 << 4);
+
+        assert!(pw.set_collision_groups(col, groups));
+        assert_eq!(pw.collision_groups(col), Some(groups));
     }
 
     #[test]

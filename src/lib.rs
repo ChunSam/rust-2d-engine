@@ -61,8 +61,8 @@ pub use pathfinding::{find_path, PathGrid};
 pub use pool::{Pool, Pooled};
 #[cfg(not(target_arch = "wasm32"))]
 pub use physics::{
-    CharacterController, CollisionEvent, ImpulseJointHandle, PhysicsBody, PhysicsSystem,
-    PhysicsWorld, RaycastHit,
+    CharacterController, CollisionEvent, CollisionGroups, ImpulseJointHandle, PhysicsBody,
+    PhysicsSystem, PhysicsWorld, RaycastHit, TriggerEvent,
 };
 pub use prefab::{
     spawn_entity_def, spawn_scene_def, topological_sort_entities, EntityDef, Prefab,

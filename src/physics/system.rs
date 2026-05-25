@@ -6,7 +6,7 @@ use rapier2d::prelude::*;
 use crate::components::Transform;
 use crate::ecs::{Entity, Events, System, World};
 use crate::physics::body::PhysicsBody;
-use crate::physics::events::CollisionEvent;
+use crate::physics::events::{CollisionEvent, TriggerEvent};
 use crate::physics::world::PhysicsWorld;
 
 /// 범용 물리 시스템: 매 프레임 step → Transform 동기화.
@@ -18,6 +18,7 @@ pub struct PhysicsSystem {
     /// 화면 픽셀당 물리 단위 비율. 예: 50.0 → 1 unit = 50px
     pub pixels_per_unit: f32,
     active_contacts: HashSet<(ColliderHandle, ColliderHandle)>,
+    active_intersections: HashSet<(ColliderHandle, ColliderHandle)>,
 }
 
 impl PhysicsSystem {
@@ -26,7 +27,16 @@ impl PhysicsSystem {
             physics,
             pixels_per_unit,
             active_contacts: HashSet::new(),
+            active_intersections: HashSet::new(),
         }
+    }
+}
+
+fn ordered_pair(a: ColliderHandle, b: ColliderHandle) -> (ColliderHandle, ColliderHandle) {
+    if a.into_raw_parts() <= b.into_raw_parts() {
+        (a, b)
+    } else {
+        (b, a)
     }
 }
 
@@ -79,6 +89,45 @@ impl System for PhysicsSystem {
         }
         // ── end 충돌 이벤트 diff ─────────────────────────────────────────────
 
+        // ── 센서 이벤트 diff ──────────────────────────────────────────────────
+        let current_intersections: HashSet<(ColliderHandle, ColliderHandle)> = self
+            .physics
+            .narrow_phase
+            .intersection_pairs()
+            .filter(|(_, _, intersecting)| *intersecting)
+            .filter_map(|(c1, c2, _)| {
+                col_map.get(&c1)?;
+                col_map.get(&c2)?;
+                Some(ordered_pair(c1, c2))
+            })
+            .collect();
+
+        let mut trigger_events: Vec<TriggerEvent> = Vec::new();
+        for &(c1, c2) in &current_intersections {
+            if !self.active_intersections.contains(&(c1, c2)) {
+                if let (Some(&e1), Some(&e2)) = (col_map.get(&c1), col_map.get(&c2)) {
+                    trigger_events.push(TriggerEvent::Entered(e1, e2));
+                }
+            }
+        }
+        for &(c1, c2) in &self.active_intersections {
+            if !current_intersections.contains(&(c1, c2)) {
+                if let (Some(&e1), Some(&e2)) = (col_map.get(&c1), col_map.get(&c2)) {
+                    trigger_events.push(TriggerEvent::Exited(e1, e2));
+                }
+            }
+        }
+        self.active_intersections = current_intersections;
+
+        if !trigger_events.is_empty() {
+            if let Some(bus) = world.resource_mut::<Events<TriggerEvent>>() {
+                for ev in trigger_events {
+                    bus.send(ev);
+                }
+            }
+        }
+        // ── end 센서 이벤트 diff ─────────────────────────────────────────────
+
         // borrow checker: (entity, handle) 를 먼저 수집해야 world를 다시 빌릴 수 있다
         let pairs: Vec<(Entity, RigidBodyHandle)> = world
             .query::<PhysicsBody>()
@@ -94,5 +143,48 @@ impl System for PhysicsSystem {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::components::Transform;
+    use crate::physics::events::TriggerEvent;
+
+    #[test]
+    fn sensor_intersection_emits_trigger_entered() {
+        let mut physics = PhysicsWorld::new(Vec2::ZERO);
+        let (sensor_body, sensor_col) = physics.add_sensor_box(Vec2::ZERO, 1.0, 1.0);
+        let (actor_body, actor_col) = physics.add_dynamic_box(Vec2::ZERO, 0.5, 0.5, false);
+
+        let mut system = PhysicsSystem::new(physics, 1.0);
+        let mut world = World::new();
+        world.insert_resource(Events::<TriggerEvent>::default());
+
+        let sensor = world.spawn();
+        world.add_component(
+            sensor,
+            PhysicsBody {
+                rigid_body_handle: sensor_body,
+                collider_handle: sensor_col,
+            },
+        );
+        world.add_component(sensor, Transform::default());
+
+        let actor = world.spawn();
+        world.add_component(
+            actor,
+            PhysicsBody {
+                rigid_body_handle: actor_body,
+                collider_handle: actor_col,
+            },
+        );
+        world.add_component(actor, Transform::default());
+
+        system.run(&mut world, 1.0 / 60.0);
+
+        let events = world.resource::<Events<TriggerEvent>>().unwrap().read();
+        assert_eq!(events, &[TriggerEvent::Entered(sensor, actor)]);
     }
 }
