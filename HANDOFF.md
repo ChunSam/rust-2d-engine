@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 38 갱신: 2026-05-25)  
-엔진 버전: v0.38.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 39 갱신: 2026-05-25)  
+엔진 버전: v0.39.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -215,6 +215,37 @@ cargo run --example mp_client   # 터미널 2, 3, ...
 - `sprite.rs render()` 반환 타입 `RenderStats`로 변경, culling/draw call 카운터 수집
 - Engine Stats 패널에 "Systems" / "Render" collapsible 섹션 추가, `resizable(true)`로 변경
 - `ProfilerData`, `RenderStats`, `SystemProfile` re-export (`lib.rs`)
+
+---
+
+### Phase 39b — Inspector 컴포넌트 추가/제거 UI
+
+**배경**: Inspector에서 컴포넌트를 편집할 수는 있었지만, 선택 엔티티에 새 컴포넌트를 붙이거나 불필요한 컴포넌트를 떼어낼 방법이 없었다.
+
+**변경 파일**: `src/app.rs`, `src/ecs/world.rs`
+
+**추가 기능**:
+
+*컴포넌트 목록 + 제거 (src/app.rs)*
+- Entities 탭 하단에 선택 엔티티의 컴포넌트 목록 표시
+- 각 컴포넌트 오른쪽 "✕" 버튼으로 즉시 제거 (Transform 제외 — 필수 컴포넌트)
+- borrow 우회: 클릭 결과를 `to_remove: Option<String>`에 저장, egui 클로저 종료 후 실제 제거
+
+*Add Component (src/app.rs)*
+- `component_factories: HashMap<String, Box<dyn Fn(&mut World, Entity) + Send + Sync>>` 필드 추가
+- 기본 등록 컴포넌트: `Sprite`, `RenderLayer`, `ParticleEmitter`, `Blackboard`, `Timer` 등
+- `egui::ComboBox`로 등록된 컴포넌트 목록 선택 → "+ Add" 버튼으로 `Default` 값 추가
+- `App::register_component(name, factory)` 공개 API로 사용자 정의 컴포넌트도 등록 가능
+
+*register_reflect_named (src/ecs/world.rs)*
+- `World::register_reflect_named::<T>(name)` 추가 — Inspector 목록에 표시될 이름을 명시
+
+```rust
+// 커스텀 컴포넌트 등록 예
+app.register_component("Enemy", |world, entity| {
+    world.add_component(entity, Enemy { hp: 100, speed: 80.0 });
+});
+```
 
 ---
 
@@ -1520,6 +1551,8 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 37d~~ | ~~CommandBuffer — Commands::spawn/despawn/insert/remove + World::apply_commands~~ | — | 완료 |
 | ~~Phase 38a~~ | ~~씬 그래프 패널 — 에디터 TreeView + Tag 이름 편집~~ | — | 완료 |
 | ~~Phase 38d~~ | ~~Rhai 스크립팅 API 확장 — spawn/despawn/Blackboard/Steering~~ | — | 완료 |
+| ~~Phase 39b~~ | ~~Inspector 컴포넌트 추가/제거 UI — 팩토리 패턴 + ComboBox + ✕ 버튼~~ | — | 완료 |
+| ~~Phase 39d~~ | ~~REFERENCE.md v0.38.0 — Steering/Blackboard/Commands/SceneGraph/Rhai 문서화~~ | — | 완료 |
 
 ---
 
