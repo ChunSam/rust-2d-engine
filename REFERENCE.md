@@ -1,6 +1,6 @@
 # rust-2d-engine 레퍼런스
 
-> 버전 v0.38.0 기준. wgpu 기반 2D 게임 엔진.
+> 버전 v0.39.0 기준. wgpu 기반 2D 게임 엔진.
 
 ---
 
@@ -34,8 +34,9 @@
 26. [Blackboard](#blackboard)
 27. [CommandBuffer](#commandbuffer)
 28. [에디터 — 씬 그래프 패널](#에디터--씬-그래프-패널)
-29. [Rhai 스크립팅](#rhai-스크립팅)
-30. [좌표 규약](#좌표-규약)
+29. [에디터 — 컴포넌트 추가/제거](#에디터--컴포넌트-추가제거)
+30. [Rhai 스크립팅](#rhai-스크립팅)
+31. [좌표 규약](#좌표-규약)
 
 ---
 
@@ -1590,6 +1591,50 @@ Inspector의 **"Scene"** 탭에서 엔티티 계층 구조를 TreeView로 확인
 - 항목 클릭 → Inspector 선택 엔티티 변경
 - `Tag` 컴포넌트가 있으면 이름 표시, 없으면 `"Entity {id}"`
 - Scene 탭 하단 및 Entities 탭 상단에서 이름(Tag) 인라인 편집 가능
+
+> WASM 빌드에서는 사용 불가 (`#[cfg(not(target_arch = "wasm32"))]`로 컴파일 제외).
+
+---
+
+## 에디터 — 컴포넌트 추가/제거
+
+Inspector의 **Entities** 탭에서 선택된 엔티티의 컴포넌트를 추가하거나 제거할 수 있다 (네이티브 전용).
+
+### 컴포넌트 목록 + 제거
+
+선택 엔티티에 붙어있는 컴포넌트가 목록으로 표시되며, 각 항목 오른쪽의 **✕** 버튼으로 즉시 제거한다. `Transform`은 필수 컴포넌트로 보호되어 제거 불가.
+
+### 컴포넌트 추가
+
+드롭다운(ComboBox)에서 등록된 컴포넌트를 선택하고 **+ Add** 버튼을 클릭하면 해당 타입의 기본값 인스턴스가 엔티티에 추가된다.
+
+기본 등록 컴포넌트: `Sprite`, `RenderLayer`, `ParticleEmitter`, `Blackboard`, `Timer`
+
+### 커스텀 컴포넌트 등록
+
+`App::register_component`로 사용자 정의 컴포넌트를 Inspector에 등록할 수 있다.
+
+```rust
+// App 설정 시 등록
+app.register_component("Enemy", |world, entity| {
+    world.add_component(entity, Enemy { hp: 100, speed: 80.0 });
+});
+
+app.register_component("Coin", |world, entity| {
+    world.add_component(entity, Coin { value: 10 });
+});
+```
+
+등록 후 Inspector Add Component 드롭다운에 "Enemy", "Coin"이 표시된다.
+
+### World::register_reflect_named
+
+```rust
+// Reflect 트레잇을 구현한 타입을 이름과 함께 등록
+world.register_reflect_named::<MyComp>("MyComp");
+
+// 기존 register_reflect와 동일하지만 Inspector 목록 표시 이름 지정 가능
+```
 
 > WASM 빌드에서는 사용 불가 (`#[cfg(not(target_arch = "wasm32"))]`로 컴파일 제외).
 
