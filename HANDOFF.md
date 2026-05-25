@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 43 갱신: 2026-05-25)  
-엔진 버전: v0.44.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 44 갱신: 2026-05-25)  
+엔진 버전: v0.45.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -78,6 +78,8 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 43c | Debug Draw API — DebugDraw::rect/line/circle/cross, 매 프레임 자동 초기화 | `a6accb5` |
 | Phase 43d | 타임라인/컷씬 — Timeline, Track<T>, Keyframe, Lerp 트레잇, TimelineSystem | `6fc4007` |
 | Phase 43a | 씬 전환 트랜지션 — FadeTransition::fade_in/out, FadeRenderer (WGSL alpha blend) | `c4a05f6` |
+| Phase 44b | 물리 조인트 — add_distance_joint/revolute_joint/prismatic_joint, ImpulseJointHandle | `96b35d1` |
+| Phase 44c | 오디오 이펙트 — AudioEffect (low_pass_hz/pitch/attack_secs), set_effect/clear_effect | `7ea4763` |
 
 ---
 
@@ -142,6 +144,41 @@ src/
 │       └── post_process.wgsl                                      ← Phase 10
 └── save.rs           RON 세이브/불러오기 (save/load/load_or_default/exists/delete)
 ```
+
+---
+
+## 이번 세션에서 한 일 (Phase 44)
+
+### Phase 44b — 물리 조인트
+
+**배경**: 플랫포머·퍼즐 장르의 체인, 힌지 문, 슬라이딩 플랫폼 등 조인트 없이는 구현 불가능한 메커니즘이 많았다. Rapier2D `ImpulseJointSet`이 이미 `PhysicsWorld`에 있었지만 공개 API가 없었다.
+
+**변경 파일**: `src/physics/world.rs`, `src/physics/mod.rs`, `src/lib.rs`
+
+**추가 기능**:
+- `add_distance_joint(body1, body2, anchor1, anchor2, rest_length) -> ImpulseJointHandle` — 스프링 기반 거리 조인트 (stiffness=1000, damping=10). Rapier2D 0.22에 `DistanceJointBuilder`가 없으므로 `SpringJointBuilder`로 구현
+- `add_revolute_joint(body1, body2, anchor1, anchor2) -> ImpulseJointHandle` — 힌지(피벗) 조인트
+- `add_prismatic_joint(body1, body2, anchor1, anchor2, axis) -> ImpulseJointHandle` — 슬라이더 조인트, `axis`는 내부에서 `UnitVector`로 정규화
+- `remove_joint(handle: ImpulseJointHandle)` — 조인트 제거
+- `ImpulseJointHandle` — `src/physics/mod.rs`에서 `rapier2d::prelude::ImpulseJointHandle` re-export, `src/lib.rs` 경유 공개
+- 단위 테스트 3개 (distance create/remove, revolute create, prismatic create)
+
+---
+
+### Phase 44c — 오디오 이펙트
+
+**배경**: 기존 AudioManager는 볼륨·팬·페이드만 지원. 로우패스(몬스터 벽 너머 소리), 피치 조작(속도감·감속), 페이드인(어택) 같은 게임 피드백 이펙트가 없었다.
+
+**변경 파일**: `src/audio.rs`, `src/lib.rs`
+
+**추가 기능**:
+- `AudioEffect` 구조체: `low_pass_hz: Option<u32>`, `pitch: f32`, `attack_secs: f32`, `release_secs: f32`. `Default::pitch = 1.0`
+- `AudioManager::effects: HashMap<String, AudioEffect>` 필드
+- `set_effect(channel, effect)` — 이펙트 설정 (다음 play_* 호출 시 적용)
+- `clear_effect(channel)` — 이펙트 초기화
+- `effect(channel) -> Option<&AudioEffect>` — 현재 이펙트 조회
+- `play_internal` 수정: `Box<dyn Source<Item=i16> + Send + 'static>`로 박스화해 pitch(`.speed()`) → low_pass(`.low_pass()`) → attack(`.fade_in()`) 순 체인 적용
+- 단위 테스트 2개 (default_pitch, set_and_clear)
 
 ---
 
