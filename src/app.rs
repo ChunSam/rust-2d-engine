@@ -1637,6 +1637,10 @@ impl App {
             if let Some(lr) = &self.lighting_renderer {
                 lr.update(&gpu.queue, &self.world, gpu.config.width, gpu.config.height);
 
+                // 노멀 버퍼를 평면 노멀(0.5, 0.5, 1.0)으로 초기화한다.
+                // (스프라이트별 노멀 맵 렌더링은 향후 여기서 수행)
+                lr.clear_normal_buffer(&mut enc);
+
                 // scene input: post가 있으면 post.target_view, 없으면 씬 중간 텍스처
                 let scene_input: &wgpu::TextureView = if use_post {
                     &self.post_renderer.as_ref().unwrap().target_view
