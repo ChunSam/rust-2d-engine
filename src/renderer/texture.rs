@@ -24,6 +24,17 @@ impl Texture {
         Self::from_rgba(device, queue, layout, &rgba, w, h, Some(path))
     }
 
+    /// CPU-side `ImageAsset` 데이터를 GPU 텍스처로 업로드한다 (비동기 로딩 완료 시 사용).
+    pub fn from_image_asset(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+        asset: &crate::asset::ImageAsset,
+        label: Option<&str>,
+    ) -> Self {
+        Self::from_rgba(device, queue, layout, &asset.data, asset.width, asset.height, label)
+    }
+
     /// 흰색 1×1 픽셀 기본 텍스처 생성 (색상 스프라이트용)
     pub fn white(
         device: &wgpu::Device,

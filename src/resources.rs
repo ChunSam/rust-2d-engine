@@ -148,6 +148,42 @@ mod debug_draw_tests {
     }
 }
 
+// ─── 비동기 에셋 로딩 진행 상황 ───────────────────────────────────────────────
+
+/// 비동기 에셋 로딩 진행 상황.
+///
+/// `App::load_image_async()`로 요청한 이미지의 로딩 완료 비율을 추적한다.
+///
+/// # 사용 예
+/// ```rust,ignore
+/// let prog = world.resource::<LoadProgress>().unwrap();
+/// draw_bar(prog.fraction()); // 0.0 ~ 1.0
+/// if prog.is_complete() { /* 로딩 완료 → 게임 씬으로 전환 */ }
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct LoadProgress {
+    /// 총 비동기 로드 요청 수.
+    pub total: usize,
+    /// 완료 수 (Loaded 또는 Failed 포함).
+    pub loaded: usize,
+}
+
+impl LoadProgress {
+    /// 0.0 ~ 1.0 사이의 진행률을 반환한다. 요청이 없으면 1.0.
+    pub fn fraction(&self) -> f32 {
+        if self.total == 0 {
+            1.0
+        } else {
+            self.loaded as f32 / self.total as f32
+        }
+    }
+
+    /// 모든 비동기 로드가 완료되었으면 true.
+    pub fn is_complete(&self) -> bool {
+        self.loaded >= self.total
+    }
+}
+
 // ─── 게임 상태 리소스 ────────────────────────────────────────────────────────
 
 /// 게임 상태 머신 값 (ECS 리소스로 삽입)

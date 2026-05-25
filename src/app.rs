@@ -38,7 +38,7 @@ use crate::{
     },
     resources::{
         DebugDraw, DebugDrawQueue, DebugRect, DisplayScaleFactor, FontData, GameState,
-        PendingResize, ShouldQuit, ViewportSize, WindowConfig,
+        LoadProgress, PendingResize, ShouldQuit, ViewportSize, WindowConfig,
     },
     scene::{Scene, SceneChange, SceneCmd},
 };
@@ -290,6 +290,7 @@ impl App {
         world.insert_resource(crate::resources::ProfilerData::default());
         world.insert_resource(SceneChange::default());
         world.insert_resource(AssetServer::new());
+        world.insert_resource(LoadProgress::default());
         // 엔진 내장 컴포넌트를 Reflect 레지스트리에 자동 등록 (이름 포함)
         world.register_reflect_named::<crate::components::Transform>("Transform");
         world.register_reflect_named::<crate::components::Sprite>("Sprite");
@@ -516,6 +517,26 @@ impl App {
             .load_image(&path)
     }
 
+    /// 이미지를 백그라운드에서 비동기로 로드한다.
+    ///
+    /// 즉시 핸들을 반환하며, 로딩 완료 전까지 마젠타 폴백 텍스처가 표시된다.
+    /// `world.resource::<LoadProgress>()` 로 전체 진행률을 확인할 수 있다.
+    ///
+    /// 개별 완료 확인: `assets.load_state(&handle) == AssetLoadState::Loaded`
+    pub fn load_image_async(&mut self, path: impl Into<String>) -> Handle<ImageAsset> {
+        let path = path.into();
+        let handle = self
+            .world
+            .resource_mut::<AssetServer>()
+            .expect("AssetServer 없음")
+            .load_image_async(&path);
+        // LoadProgress.total 증가
+        if let Some(prog) = self.world.resource_mut::<LoadProgress>() {
+            prog.total += 1;
+        }
+        handle
+    }
+
     /// 텍스처 아틀라스를 로드하고 `Handle<TextureAtlas>`를 반환한다.
     ///
     /// - `cols × rows` 균일 그리드로 분할된 단일 이미지 파일을 아틀라스로 등록한다.
@@ -571,6 +592,7 @@ impl App {
             .insert_resource(crate::resources::ProfilerData::default());
         self.world.insert_resource(SceneChange::default());
         self.world.insert_resource(AssetServer::new());
+        self.world.insert_resource(LoadProgress::default());
         // 등록된 이벤트 리소스 재삽입
         let inits = std::mem::take(&mut self.event_initializers);
         for init in &inits {
@@ -1691,6 +1713,29 @@ impl App {
                 for path in &reloaded {
                     sr.reload_texture(&gpu.device, &gpu.queue, path);
                 }
+            }
+        }
+
+        // 비동기 로드 완료 처리: 완료된 에셋을 GPU에 업로드하고 LoadProgress를 갱신한다.
+        let async_completed: Vec<String> = self
+            .world
+            .resource_mut::<AssetServer>()
+            .map(|as_| as_.poll_async_completions())
+            .unwrap_or_default();
+        if !async_completed.is_empty() {
+            // GPU 텍스처 업로드 (CPU AssetServer 데이터에서)
+            if let (Some(sr), Some(gpu)) = (&mut self.sprite_renderer, &self.gpu) {
+                // AssetServer에서 이미 업데이트된 CPU 데이터를 읽어 GPU에 올린다.
+                for path in &async_completed {
+                    // 이미 디코딩된 CPU 데이터가 AssetServer에 있으므로
+                    // load_texture (disk 재읽기) 대신 AssetServer 경유 업로드가 이상적이나,
+                    // 현재 SpriteRenderer는 path 기반 캐시를 사용하므로 강제 재업로드한다.
+                    sr.load_texture(&gpu.device, &gpu.queue, path);
+                }
+            }
+            // LoadProgress.loaded 갱신
+            if let Some(prog) = self.world.resource_mut::<LoadProgress>() {
+                prog.loaded += async_completed.len();
             }
         }
     }

@@ -82,8 +82,8 @@ pub use renderer::{
 };
 pub use resources::{
     AmbientLight, CullConfig, DebugDraw, DebugDrawQueue, DebugRect, DebugShape, DisplayScaleFactor,
-    FadeTransition, FontData, GameState, PendingResize, ProfilerData, RenderStats, SelectedEntity,
-    ShouldQuit, SystemProfile, ViewportSize, WindowConfig,
+    FadeTransition, FontData, GameState, LoadProgress, PendingResize, ProfilerData, RenderStats,
+    SelectedEntity, ShouldQuit, SystemProfile, ViewportSize, WindowConfig,
 };
 pub use scene::{Scene, SceneChange, SceneCmd};
 pub use scripting::{ScriptRunner, ScriptingSystem};

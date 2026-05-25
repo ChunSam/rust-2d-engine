@@ -354,6 +354,21 @@ impl SpriteRenderer {
         }
     }
 
+    /// CPU-side `ImageAsset`을 GPU 텍스처로 업로드한다 (비동기 로딩 완료 시 사용).
+    ///
+    /// 같은 경로가 이미 캐시에 있으면 재업로드한다 (비동기 완료 → 마젠타 폴백 교체).
+    pub fn load_texture_from_image(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        path: &str,
+        asset: &crate::asset::ImageAsset,
+    ) {
+        use crate::renderer::texture::Texture;
+        let tex = Texture::from_image_asset(device, queue, &self.texture_layout, asset, Some(path));
+        self.texture_cache.insert(path.to_string(), Arc::new(tex));
+    }
+
     /// 캐시를 무효화하고 파일에서 GPU 텍스처를 강제 재로드한다 (핫 리로딩용).
     pub fn reload_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, path: &str) {
         self.texture_cache.remove(path);
