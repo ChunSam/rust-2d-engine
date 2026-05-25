@@ -506,6 +506,7 @@ impl App {
     // ── 내부 메서드 ─────────────────────────────────────────────────────────
 
     fn update(&mut self, dt: f32) {
+        self.world.clear_change_tracking();
         // GPU 실제 크기는 물리 픽셀이고, 게임 좌표계는 논리 픽셀이다.
         // Retina/HiDPI에서 이 둘을 분리해야 스프라이트와 UI가 절반 크기로 보이지 않는다.
         if let Some(gpu) = &self.gpu {

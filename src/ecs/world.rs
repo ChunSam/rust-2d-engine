@@ -1,5 +1,5 @@
 use std::any::{Any, TypeId};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Entity(pub u32);
@@ -72,6 +72,8 @@ pub struct World {
     entity_location: HashMap<Entity, (ArchetypeId, usize)>,
     resources: HashMap<TypeId, Box<dyn Any>>,
     reflect_registry: HashMap<TypeId, ReflectEntry>,
+    added_this_tick: HashSet<(Entity, TypeId)>,
+    changed_this_tick: HashSet<(Entity, TypeId)>,
 }
 
 impl World {
@@ -88,6 +90,8 @@ impl World {
             entity_location: HashMap::new(),
             resources: HashMap::new(),
             reflect_registry: HashMap::new(),
+            added_this_tick: HashSet::new(),
+            changed_this_tick: HashSet::new(),
         }
     }
 
@@ -143,6 +147,8 @@ impl World {
 
         self.entity_location.remove(&entity);
         self.free_ids.push_back(entity.0);
+        self.added_this_tick.retain(|(e, _)| *e != entity);
+        self.changed_this_tick.retain(|(e, _)| *e != entity);
     }
 
     /// 엔티티에서 컴포넌트 T를 제거한다. 없어도 panic 하지 않는다.
@@ -166,6 +172,8 @@ impl World {
 
         let new_arch_id = self.get_or_create_archetype(new_sig);
         self.move_entity(entity, new_arch_id);
+        self.added_this_tick.remove(&(entity, tid));
+        self.changed_this_tick.remove(&(entity, tid));
     }
 
     /// 엔티티에서 컴포넌트 T를 꺼내 반환한다. 없으면 None.
@@ -206,6 +214,7 @@ impl World {
         if self.archetypes[arch_id].contains(tid) {
             let (a, row) = self.entity_location[&entity];
             self.archetypes[a].columns.get_mut(&tid).unwrap()[row] = Box::new(component);
+            self.changed_this_tick.insert((entity, tid));
             return;
         }
 
@@ -226,6 +235,7 @@ impl World {
             .get_mut(&tid)
             .unwrap()
             .push(Box::new(component));
+        self.added_this_tick.insert((entity, tid));
     }
 
     /// 엔티티의 컴포넌트를 불변 참조로 가져온다.
@@ -517,6 +527,42 @@ impl World {
     /// ```
     pub fn apply_commands(&mut self, commands: crate::ecs::Commands) {
         commands.apply(self);
+    }
+
+    // ── 변경 감지 ─────────────────────────────────────────────────────────────
+
+    /// 이번 틱 변경 추적을 초기화한다. 매 프레임 시작 시 `App`이 호출한다.
+    pub fn clear_change_tracking(&mut self) {
+        self.added_this_tick.clear();
+        self.changed_this_tick.clear();
+    }
+
+    /// 이번 틱에 *처음 추가된* 컴포넌트 T를 가진 엔티티만 조회한다.
+    pub fn query_added<T: 'static>(&self) -> impl Iterator<Item = (Entity, &T)> {
+        let tid = TypeId::of::<T>();
+        let entities: Vec<Entity> = self
+            .added_this_tick
+            .iter()
+            .filter(|(_, t)| *t == tid)
+            .map(|(e, _)| *e)
+            .collect();
+        entities
+            .into_iter()
+            .filter_map(move |e| self.get::<T>(e).map(|c| (e, c)))
+    }
+
+    /// 이번 틱에 *교체된* 컴포넌트 T를 가진 엔티티만 조회한다.
+    pub fn query_changed<T: 'static>(&self) -> impl Iterator<Item = (Entity, &T)> {
+        let tid = TypeId::of::<T>();
+        let entities: Vec<Entity> = self
+            .changed_this_tick
+            .iter()
+            .filter(|(_, t)| *t == tid)
+            .map(|(e, _)| *e)
+            .collect();
+        entities
+            .into_iter()
+            .filter_map(move |e| self.get::<T>(e).map(|c| (e, c)))
     }
 
     // ── 내부 헬퍼 ─────────────────────────────────────────────────────────────
@@ -997,5 +1043,54 @@ mod tests {
         world.add_component(e, Health(99)); // replace
         assert_eq!(world.get::<Health>(e).unwrap().0, 99);
         assert_eq!(world.query::<Health>().count(), 1);
+    }
+
+    #[test]
+    fn change_tracking_added() {
+        let mut world = World::new();
+        let e = world.spawn();
+        world.add_component(e, 42u32);
+        let added: Vec<_> = world.query_added::<u32>().collect();
+        assert_eq!(added.len(), 1);
+        assert_eq!(*added[0].1, 42);
+        // changed 에는 없어야 함
+        assert_eq!(world.query_changed::<u32>().count(), 0);
+        // clear 후 없어짐
+        world.clear_change_tracking();
+        assert_eq!(world.query_added::<u32>().count(), 0);
+    }
+
+    #[test]
+    fn change_tracking_changed() {
+        let mut world = World::new();
+        let e = world.spawn();
+        world.add_component(e, 1u32);
+        world.clear_change_tracking();
+        // 교체
+        world.add_component(e, 2u32);
+        assert_eq!(world.query_added::<u32>().count(), 0);
+        let changed: Vec<_> = world.query_changed::<u32>().collect();
+        assert_eq!(changed.len(), 1);
+        assert_eq!(*changed[0].1, 2);
+    }
+
+    #[test]
+    fn change_tracking_despawn_clears() {
+        let mut world = World::new();
+        let e = world.spawn();
+        world.add_component(e, 99u32);
+        assert_eq!(world.query_added::<u32>().count(), 1);
+        world.despawn(e);
+        assert_eq!(world.query_added::<u32>().count(), 0);
+    }
+
+    #[test]
+    fn change_tracking_remove_clears() {
+        let mut world = World::new();
+        let e = world.spawn();
+        world.add_component(e, 7u32);
+        assert_eq!(world.query_added::<u32>().count(), 1);
+        world.remove_component::<u32>(e);
+        assert_eq!(world.query_added::<u32>().count(), 0);
     }
 }
