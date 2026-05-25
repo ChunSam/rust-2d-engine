@@ -177,7 +177,11 @@ impl Reflect for Sprite {
 /// 텍스처 키 기준으로 배칭한 뒤 z 오름차순으로 렌더링한다.
 ///
 /// # 예
-/// ```
+/// ```rust,no_run
+/// # use engine::{RenderLayer, ecs::World};
+/// # let mut world = World::new();
+/// # let bg = world.spawn();
+/// # let effect = world.spawn();
 /// // 배경 레이어 (-1): 게임플레이보다 항상 뒤에 그려짐
 /// // 기본 레이어  ( 0): 대부분의 게임오브젝트
 /// // 전경 레이어  ( 1): HUD, 이펙트 등 항상 앞에 그려져야 하는 것들

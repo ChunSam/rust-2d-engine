@@ -475,6 +475,22 @@ impl World {
         self.entity_location.contains_key(&entity)
     }
 
+    /// Commands 버퍼에 쌓인 모든 명령을 즉시 World에 적용한다.
+    ///
+    /// 시스템 실행이 끝난 뒤(쿼리 이터레이터가 모두 해제된 뒤) 호출해야
+    /// borrow 충돌 없이 안전하게 엔티티/컴포넌트를 변경할 수 있다.
+    ///
+    /// ```rust,ignore
+    /// fn run(&mut self, world: &mut World, _dt: f32) {
+    ///     let mut cmds = Commands::new();
+    ///     cmds.spawn(|world, e| { world.add_component(e, MyTag); });
+    ///     world.apply_commands(cmds);
+    /// }
+    /// ```
+    pub fn apply_commands(&mut self, commands: crate::ecs::Commands) {
+        commands.apply(self);
+    }
+
     // ── 내부 헬퍼 ─────────────────────────────────────────────────────────────
 
     fn get_or_create_archetype(&mut self, sig: Vec<TypeId>) -> ArchetypeId {
