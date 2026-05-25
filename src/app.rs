@@ -498,6 +498,40 @@ impl App {
             }
         }
 
+        // ── 씬 그래프 데이터 사전 수집 (네이티브 전용) ──────────────────────────
+        // borrow checker 우회: egui 클로저 진입 전에 계층 구조를 모두 복사해 둔다.
+        #[cfg(not(target_arch = "wasm32"))]
+        let scene_graph_data: Vec<(Entity, Option<Entity>)> = {
+            // (entity, parent_entity_or_none)
+            entity_list
+                .iter()
+                .map(|&e| {
+                    let parent = self
+                        .world
+                        .get::<crate::hierarchy::Parent>(e)
+                        .map(|p| p.0);
+                    (e, parent)
+                })
+                .collect()
+        };
+        // children_map: 부모 → 자식 목록
+        #[cfg(not(target_arch = "wasm32"))]
+        let children_map: HashMap<Entity, Vec<Entity>> = {
+            let mut map: HashMap<Entity, Vec<Entity>> = HashMap::new();
+            for &(child, parent_opt) in &scene_graph_data {
+                if let Some(parent) = parent_opt {
+                    map.entry(parent).or_default().push(child);
+                }
+            }
+            map
+        };
+        // 루트 엔티티 = Parent 컴포넌트 없는 것
+        #[cfg(not(target_arch = "wasm32"))]
+        let root_entities: Vec<Entity> = scene_graph_data
+            .iter()
+            .filter_map(|&(e, p)| if p.is_none() { Some(e) } else { None })
+            .collect();
+
         // 내장 EngineStats 패널 + Inspector
         if let Some(ctx) = &egui_ctx {
             // ── Undo (Ctrl+Z) / Redo (Ctrl+Shift+Z) ─────────────────────────
@@ -589,8 +623,97 @@ impl App {
                             {
                                 self.inspector_tab = 1;
                             }
+                            #[cfg(not(target_arch = "wasm32"))]
+                            if ui
+                                .selectable_label(self.inspector_tab == 2, "Scene")
+                                .clicked()
+                            {
+                                self.inspector_tab = 2;
+                            }
                         });
                         ui.separator();
+
+                        // ── 씬 그래프 탭 (네이티브 전용) ─────────────────────────
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if self.inspector_tab == 2 {
+                            // 씬 그래프: 루트 → 자식 들여쓰기 트리
+                            let mut clicked_entity: Option<Entity> = None;
+
+                            egui::ScrollArea::vertical()
+                                .id_salt("scene_graph")
+                                .max_height(300.0)
+                                .show(ui, |ui| {
+                                    // 재귀 대신 스택 기반 DFS (클로저 안에서 fn 호출 불가 제약 우회)
+                                    let mut stack: Vec<(Entity, usize)> = root_entities
+                                        .iter()
+                                        .rev()
+                                        .map(|&e| (e, 0))
+                                        .collect();
+                                    while let Some((entity, depth)) = stack.pop() {
+                                        let name = tag_map
+                                            .get(&entity)
+                                            .cloned()
+                                            .unwrap_or_else(|| format!("Entity {}", entity.0));
+                                        let is_selected =
+                                            self.inspector_selected == Some(entity);
+                                        let has_children = children_map
+                                            .get(&entity)
+                                            .map(|c| !c.is_empty())
+                                            .unwrap_or(false);
+                                        let prefix = if has_children { "▶ " } else { "  " };
+                                        let label_text =
+                                            format!("{}{}{}", "  ".repeat(depth), prefix, name);
+
+                                        let response = ui.selectable_label(
+                                            is_selected,
+                                            &label_text,
+                                        );
+                                        if response.clicked() {
+                                            clicked_entity = Some(entity);
+                                        }
+
+                                        // 자식을 역순으로 스택에 push (DFS 순서 유지)
+                                        if let Some(ch) = children_map.get(&entity) {
+                                            for &child in ch.iter().rev() {
+                                                stack.push((child, depth + 1));
+                                            }
+                                        }
+                                    }
+                                });
+
+                            if let Some(e) = clicked_entity {
+                                self.inspector_selected = Some(e);
+                            }
+
+                            // 선택된 엔티티의 Tag 이름 편집
+                            ui.separator();
+                            if let Some(sel) = self.inspector_selected {
+                                let current_name = tag_map
+                                    .get(&sel)
+                                    .cloned()
+                                    .unwrap_or_default();
+                                let has_tag = self.world.get::<Tag>(sel).is_some();
+                                ui.horizontal(|ui| {
+                                    ui.label("Name:");
+                                    if has_tag {
+                                        let mut name_buf = current_name.clone();
+                                        if ui.text_edit_singleline(&mut name_buf).changed() {
+                                            self.world.add_component(sel, Tag(name_buf));
+                                        }
+                                    } else {
+                                        ui.label(format!("Entity {}", sel.0));
+                                        if ui.button("Add Name").clicked() {
+                                            self.world.add_component(
+                                                sel,
+                                                Tag(format!("Entity {}", sel.0)),
+                                            );
+                                        }
+                                    }
+                                });
+                            } else {
+                                ui.label("(no entity selected)");
+                            }
+                        }
 
                         if self.inspector_tab == 1 {
                             // ── 에셋 브라우저 ─────────────────────────────────────
@@ -782,6 +905,31 @@ impl App {
                                     });
                             });
                         });
+                        // ── 선택 엔티티 이름(Tag) 편집 (네이티브 전용) ──────────────
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if let Some(sel) = self.inspector_selected {
+                            ui.separator();
+                            let current_name =
+                                tag_map.get(&sel).cloned().unwrap_or_default();
+                            let has_tag = self.world.get::<Tag>(sel).is_some();
+                            ui.horizontal(|ui| {
+                                ui.label("Name:");
+                                if has_tag {
+                                    let mut name_buf = current_name;
+                                    if ui.text_edit_singleline(&mut name_buf).changed() {
+                                        self.world.add_component(sel, Tag(name_buf));
+                                    }
+                                } else {
+                                    ui.label(format!("Entity {}", sel.0));
+                                    if ui.button("Add Name").clicked() {
+                                        self.world.add_component(
+                                            sel,
+                                            Tag(format!("Entity {}", sel.0)),
+                                        );
+                                    }
+                                }
+                            });
+                        }
                         // ── 씬 저장 (Phase 28) ───────────────────────────────────
                         #[cfg(not(target_arch = "wasm32"))]
                         {
