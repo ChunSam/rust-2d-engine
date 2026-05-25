@@ -93,6 +93,8 @@ pub struct App {
     editor_save_path: String,
     /// 마지막 씬 저장 결과 메시지.
     editor_save_status: Option<String>,
+    /// Inspector 현재 탭 인덱스 (0: Entities, 1: Assets).
+    inspector_tab: u8,
 }
 
 impl App {
@@ -112,6 +114,7 @@ impl App {
         world.insert_resource(UiQueue::default());
         world.insert_resource(DebugDrawQueue::default());
         world.insert_resource(crate::resources::SelectedEntity::default());
+        world.insert_resource(crate::resources::ProfilerData::default());
         world.insert_resource(SceneChange::default());
         world.insert_resource(AssetServer::new());
         // 엔진 내장 컴포넌트를 Reflect 레지스트리에 자동 등록
@@ -142,6 +145,7 @@ impl App {
             gizmo_drag_offset: glam::Vec2::ZERO,
             editor_save_path: "saved_scene.ron".into(),
             editor_save_status: None,
+            inspector_tab: 0,
         }
     }
 
@@ -237,6 +241,7 @@ impl App {
         self.world.insert_resource(UiQueue::default());
         self.world.insert_resource(DebugDrawQueue::default());
         self.world.insert_resource(crate::resources::SelectedEntity::default());
+        self.world.insert_resource(crate::resources::ProfilerData::default());
         self.world.insert_resource(SceneChange::default());
         self.world.insert_resource(AssetServer::new());
         // 등록된 이벤트 리소스 재삽입
@@ -342,8 +347,27 @@ impl App {
             }
         };
 
-        for system in &mut self.systems {
-            system.run(&mut self.world, dt);
+        // 시스템 실행 + 프로파일러 계측
+        {
+            let system_count = self.systems.len();
+            let mut timings: Vec<(usize, &'static str, u64)> = Vec::with_capacity(system_count);
+            for (i, system) in self.systems.iter_mut().enumerate() {
+                let name = system.name();
+                let t0 = Instant::now();
+                system.run(&mut self.world, dt);
+                timings.push((i, name, t0.elapsed().as_micros() as u64));
+            }
+            if let Some(prof) = self.world.resource_mut::<crate::resources::ProfilerData>() {
+                if prof.systems.len() != system_count {
+                    prof.systems.clear();
+                    prof.systems
+                        .resize(system_count, crate::resources::SystemProfile::default());
+                }
+                for (i, name, us) in timings {
+                    prof.record_system(i, name, us);
+                }
+                prof.frame_ms = dt * 1000.0;
+            }
         }
         // 계층 변환 전파 — 유저 시스템(물리 포함) 이후, 렌더 직전에 실행
         HierarchySystem.run(&mut self.world, dt);
@@ -385,19 +409,106 @@ impl App {
                     .unwrap_or(0);
                 egui::Window::new("Engine Stats")
                     .default_pos([10.0, 10.0])
-                    .resizable(false)
+                    .resizable(true)
                     .show(ctx, |ui| {
                         ui.label(format!("FPS   {:>6.1}", 1.0_f32 / dt.max(0.001)));
                         ui.label(format!("ms    {:>6.2}", dt * 1000.0));
                         ui.label(format!("Ent   {entity_count}"));
                         ui.label(format!("Asset {asset_count}"));
+                        ui.separator();
+                        if let Some(prof) =
+                            self.world.resource::<crate::resources::ProfilerData>()
+                        {
+                            ui.collapsing("Systems", |ui| {
+                                egui::Grid::new("sys_prof")
+                                    .num_columns(2)
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        for sys in &prof.systems {
+                                            let label = if sys.name.is_empty() {
+                                                "anonymous"
+                                            } else {
+                                                &sys.name
+                                            };
+                                            ui.label(label);
+                                            ui.label(format!("{:.0} µs", sys.avg_us));
+                                            ui.end_row();
+                                        }
+                                    });
+                            });
+                            let r = prof.render;
+                            ui.collapsing("Render", |ui| {
+                                ui.label(format!("draw calls  {}", r.draw_calls));
+                                ui.label(format!("rendered    {}", r.sprites_rendered));
+                                ui.label(format!("culled      {}", r.sprites_culled));
+                            });
+                        }
                     });
 
-                // Inspector 패널: 엔티티 목록 + 컴포넌트 필드 편집기
+                // Inspector 패널: 엔티티 목록 + 컴포넌트 필드 편집기 + 에셋 브라우저
                 egui::Window::new("Inspector")
                     .default_pos([10.0, 130.0])
-                    .default_size([440.0, 340.0])
+                    .default_size([440.0, 380.0])
                     .show(ctx, |ui| {
+                        // ── 탭 선택 ──────────────────────────────────────────────
+                        ui.horizontal(|ui| {
+                            if ui
+                                .selectable_label(self.inspector_tab == 0, "Entities")
+                                .clicked()
+                            {
+                                self.inspector_tab = 0;
+                            }
+                            if ui
+                                .selectable_label(self.inspector_tab == 1, "Assets")
+                                .clicked()
+                            {
+                                self.inspector_tab = 1;
+                            }
+                        });
+                        ui.separator();
+
+                        if self.inspector_tab == 1 {
+                            // ── 에셋 브라우저 ─────────────────────────────────────
+                            let entries = self
+                                .world
+                                .resource::<AssetServer>()
+                                .map(|a| a.image_list())
+                                .unwrap_or_default();
+                            if entries.is_empty() {
+                                ui.label("(No images loaded)");
+                            } else {
+                                egui::ScrollArea::vertical()
+                                    .id_salt("asset_browser")
+                                    .max_height(300.0)
+                                    .show(ui, |ui| {
+                                        egui::Grid::new("asset_grid")
+                                            .num_columns(2)
+                                            .spacing([8.0, 4.0])
+                                            .show(ui, |ui| {
+                                                for entry in &entries {
+                                                    let filename =
+                                                        std::path::Path::new(&entry.path)
+                                                            .file_name()
+                                                            .map(|f| {
+                                                                f.to_string_lossy().into_owned()
+                                                            })
+                                                            .unwrap_or_else(|| {
+                                                                entry.path.clone()
+                                                            });
+                                                    ui.label("[ ]");
+                                                    ui.vertical(|ui| {
+                                                        ui.label(&filename);
+                                                        ui.small(format!(
+                                                            "{}×{}",
+                                                            entry.width, entry.height
+                                                        ));
+                                                    });
+                                                    ui.end_row();
+                                                }
+                                            });
+                                    });
+                            }
+                        } else {
                         // ── 에디터 액션 버튼 ─────────────────────────────────────
                         ui.horizontal(|ui| {
                             if ui.button("＋ New Entity").clicked() {
@@ -549,7 +660,12 @@ impl App {
                                 );
                                 if ui.button("💾 Save Scene").clicked() {
                                     let mut scene_def = crate::prefab::SceneDef::default();
-                                    for &e in &entity_list {
+                                    // 부모가 자식보다 먼저 나오도록 위상 정렬
+                                    let sorted = crate::prefab::topological_sort_entities(
+                                        &entity_list,
+                                        &self.world,
+                                    );
+                                    for &e in &sorted {
                                         let tag = self
                                             .world
                                             .get::<crate::prefab::Tag>(e)
@@ -562,6 +678,12 @@ impl App {
                                             .world
                                             .get::<crate::components::Sprite>(e)
                                             .cloned();
+                                        // Parent 컴포넌트 → 부모의 tag 문자열
+                                        let parent = self
+                                            .world
+                                            .get::<crate::hierarchy::Parent>(e)
+                                            .and_then(|p| tag_map.get(&p.0))
+                                            .cloned();
                                         if tag.is_some()
                                             || transform.is_some()
                                             || sprite.is_some()
@@ -571,6 +693,7 @@ impl App {
                                                     tag,
                                                     transform,
                                                     sprite,
+                                                    parent,
                                                 },
                                             );
                                         }
@@ -591,6 +714,7 @@ impl App {
                                 ui.small(msg.as_str());
                             }
                         }
+                        } // end Entities tab
                     });
             }
         }
@@ -817,7 +941,7 @@ impl App {
 
         // 2단계: 스프라이트 그리기
         if let Some(sr) = &mut self.sprite_renderer {
-            sr.render(
+            let render_stats = sr.render(
                 &gpu.device,
                 &gpu.queue,
                 render_view,
@@ -826,6 +950,9 @@ impl App {
                 logical_w,
                 logical_h,
             );
+            if let Some(prof) = self.world.resource_mut::<crate::resources::ProfilerData>() {
+                prof.render = render_stats;
+            }
         }
 
         // 2.5단계: UI 사각형 그리기 (DebugDrawQueue → UiQueue 변환)

@@ -369,7 +369,8 @@ impl SpriteRenderer {
         world: &World,
         width: u32,
         height: u32,
-    ) {
+    ) -> crate::resources::RenderStats {
+        let mut stats = crate::resources::RenderStats::default();
         // ── 카메라: ECS 리소스에서 Camera 를 읽어 view_proj 를 계산한다 ───
         let fallback = Camera::default();
         let camera = world.resource::<Camera>().unwrap_or(&fallback);
@@ -424,17 +425,21 @@ impl SpriteRenderer {
                 .or_else(|| sprite.texture.clone());
             if let Some(gt) = world.get::<GlobalTransform>(entity) {
                 if !is_visible(gt.position, gt.scale, gt.rotation) {
+                    stats.sprites_culled += 1;
                     continue;
                 }
                 if !is_above_lod(gt.scale) {
+                    stats.sprites_culled += 1;
                     continue;
                 }
                 sprites.push((gt.z, tex_key, InstanceRaw::from_global(gt, sprite, uv)));
             } else if let Some(transform) = world.get::<Transform>(entity) {
                 if !is_visible(transform.position, transform.scale, transform.rotation) {
+                    stats.sprites_culled += 1;
                     continue;
                 }
                 if !is_above_lod(transform.scale) {
+                    stats.sprites_culled += 1;
                     continue;
                 }
                 sprites.push((
@@ -464,9 +469,11 @@ impl SpriteRenderer {
                         let tex_key = Some(atlas.texture_path().to_string());
                         if let Some(gt) = world.get::<GlobalTransform>(*entity) {
                             if !is_visible(gt.position, gt.scale, gt.rotation) {
+                                stats.sprites_culled += 1;
                                 continue;
                             }
                             if !is_above_lod(gt.scale) {
+                                stats.sprites_culled += 1;
                                 continue;
                             }
                             sprites.push((
@@ -481,9 +488,11 @@ impl SpriteRenderer {
                             ));
                         } else if let Some(tr) = world.get::<Transform>(*entity) {
                             if !is_visible(tr.position, tr.scale, tr.rotation) {
+                                stats.sprites_culled += 1;
                                 continue;
                             }
                             if !is_above_lod(tr.scale) {
+                                stats.sprites_culled += 1;
                                 continue;
                             }
                             sprites.push((
@@ -505,6 +514,7 @@ impl SpriteRenderer {
         // ── 전역 z 오름차순 안정 정렬 ────────────────────────────────────
         // z가 같으면 수집 순서를 유지한다 (stable sort).
         sprites.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        stats.sprites_rendered = sprites.len() as u32;
 
         // ── 일반 스프라이트 렌더 패스 ────────────────────────────────────────
         if !sprites.is_empty() {
@@ -567,12 +577,15 @@ impl SpriteRenderer {
                 pass.set_bind_group(1, bind_group, &[]);
                 pass.set_vertex_buffer(1, self.instance_buf.slice(byte_start..byte_end));
                 pass.draw_indexed(0..INDICES.len() as u32, 0, 0..run_len as u32);
+                stats.draw_calls += 1;
             }
             // pass drops here → encoder 해방
         }
 
         // ── ShaderMaterial 렌더 패스 (별도 패스, z-sort 독립) ───────────────
         self.render_materials(device, queue, view, encoder, world, width, height);
+
+        stats
     }
 
     /// 소스 해시를 키로 커스텀 파이프라인을 컴파일·캐싱한다.

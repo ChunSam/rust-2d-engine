@@ -80,6 +80,15 @@ pub struct ImageAsset {
     pub height: u32,
 }
 
+/// 에셋 브라우저에서 표시할 이미지 항목 정보.
+#[derive(Debug, Clone)]
+pub struct ImageEntry {
+    pub path: String,
+    pub id: AssetId,
+    pub width: u32,
+    pub height: u32,
+}
+
 // ─── ScriptAsset ─────────────────────────────────────────────────────────────
 
 /// CPU-side Rhai 스크립트 에셋.
@@ -199,6 +208,26 @@ impl AssetServer {
     /// CPU-side 이미지 데이터를 반환한다.
     pub fn get_image(&self, handle: &Handle<ImageAsset>) -> Option<&ImageAsset> {
         self.images.get(&handle.id)
+    }
+
+    /// id로 이미지 에셋을 직접 조회한다 (에셋 브라우저용).
+    pub fn get_image_by_id(&self, id: AssetId) -> Option<&ImageAsset> {
+        self.images.get(&id)
+    }
+
+    /// 현재 로드된 이미지 에셋 목록을 반환한다 (에셋 브라우저용).
+    pub fn image_list(&self) -> Vec<ImageEntry> {
+        self.path_to_id
+            .iter()
+            .filter_map(|(path, &id)| {
+                self.images.get(&id).map(|img| ImageEntry {
+                    path: path.to_string(),
+                    id,
+                    width: img.width,
+                    height: img.height,
+                })
+            })
+            .collect()
     }
 
     /// 스크립트를 로드해 핸들을 반환한다. 같은 경로 재호출 시 캐시된 핸들 반환.

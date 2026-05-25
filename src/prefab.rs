@@ -22,6 +22,7 @@
 //!             tag: Some("player".into()),
 //!             transform: Some(Transform::new(Vec2::ZERO, Vec2::splat(64.0), 0.0)),
 //!             sprite: Some(Sprite::textured("assets/player.png")),
+//!             parent: None,
 //!         },
 //!     ],
 //! };
@@ -32,6 +33,7 @@
 //! let entities = spawn_scene_def(&mut world, &loaded);
 //! ```
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -95,6 +97,10 @@ pub struct EntityDef {
     pub transform: Option<Transform>,
     /// 텍스처·색상 (선택)
     pub sprite: Option<Sprite>,
+    /// 부모 엔티티의 tag 문자열. None이면 루트 엔티티.
+    /// 스폰 시 해당 태그를 가진 엔티티에 계층 연결된다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }
 
 // ─── SceneDef ─────────────────────────────────────────────────────────────────
@@ -206,12 +212,68 @@ pub fn spawn_entity_def(world: &mut World, def: &EntityDef) -> Entity {
 }
 
 /// `SceneDef`의 모든 엔티티를 월드에 스폰하고 엔티티 목록을 반환한다.
+///
+/// `EntityDef.parent`가 설정된 경우, 해당 태그의 엔티티를 부모로 연결한다.
+/// RON 파일에 `parent` 키가 없는 구버전 씬도 그대로 로드된다 (하위 호환).
 pub fn spawn_scene_def(world: &mut World, scene: &SceneDef) -> Vec<Entity> {
-    scene
+    // 1패스: 모든 엔티티 생성 + tag → Entity 맵 구축
+    let mut tag_to_entity: HashMap<String, Entity> = HashMap::new();
+    let entities: Vec<Entity> = scene
         .entities
         .iter()
-        .map(|def| spawn_entity_def(world, def))
-        .collect()
+        .map(|def| {
+            let e = spawn_entity_def(world, def);
+            if let Some(tag) = &def.tag {
+                tag_to_entity.insert(tag.clone(), e);
+            }
+            e
+        })
+        .collect();
+
+    // 2패스: parent 태그가 있는 엔티티에 계층 연결
+    for (def, &child) in scene.entities.iter().zip(entities.iter()) {
+        if let Some(parent_tag) = &def.parent {
+            if let Some(&parent) = tag_to_entity.get(parent_tag) {
+                crate::hierarchy::attach(world, child, parent);
+            }
+        }
+    }
+
+    entities
+}
+
+/// 엔티티 목록을 위상 정렬하여 루트 → 자식 순으로 반환한다.
+///
+/// 씬 저장 시 부모가 자식보다 먼저 나와야 `spawn_scene_def()`의 2패스 attach가 동작한다.
+pub fn topological_sort_entities(entities: &[Entity], world: &World) -> Vec<Entity> {
+    use std::collections::VecDeque;
+
+    // 부모 → 자식 인접 맵
+    let mut children_map: HashMap<Entity, Vec<Entity>> = HashMap::new();
+    let entity_set: std::collections::HashSet<Entity> = entities.iter().copied().collect();
+    let mut roots: Vec<Entity> = Vec::new();
+
+    for &e in entities {
+        match world.get::<crate::hierarchy::Parent>(e) {
+            Some(p) if entity_set.contains(&p.0) => {
+                children_map.entry(p.0).or_default().push(e);
+            }
+            _ => roots.push(e),
+        }
+    }
+
+    // BFS: 루트부터 자식 순으로 수집
+    let mut result = Vec::with_capacity(entities.len());
+    let mut queue: VecDeque<Entity> = roots.into_iter().collect();
+    while let Some(e) = queue.pop_front() {
+        result.push(e);
+        if let Some(kids) = children_map.get(&e) {
+            for &kid in kids {
+                queue.push_back(kid);
+            }
+        }
+    }
+    result
 }
 
 // ─── 단위 테스트 ───────────────────────────────────────────────────────────────
@@ -241,6 +303,7 @@ mod tests {
                 0.5,
             )),
             sprite: Some(Sprite::colored(1.0, 0.0, 0.0)),
+            parent: None,
         };
 
         let entity = spawn_entity_def(&mut world, &def);
@@ -282,11 +345,13 @@ mod tests {
                         0.0,
                     )),
                     sprite: Some(Sprite::colored(0.3, 0.6, 0.3)),
+                    parent: None,
                 },
                 EntityDef {
                     tag: Some("player".into()),
                     transform: Some(Transform::default()),
                     sprite: None,
+                    parent: None,
                 },
             ],
         };
@@ -319,6 +384,7 @@ mod tests {
                     0.0,
                 )),
                 sprite: Some(Sprite::textured("assets/coin.png")),
+                parent: None,
             },
         };
 
@@ -350,5 +416,70 @@ mod tests {
         };
         let entities = spawn_scene_def(&mut world, &scene);
         assert_eq!(entities.len(), 3);
+    }
+
+    #[test]
+    fn scene_hierarchy_roundtrip() {
+        use crate::hierarchy::Parent;
+
+        let path = tmp_path("hierarchy_scene.ron");
+
+        // parent → child 계층 씬 저장
+        let scene = SceneDef {
+            entities: vec![
+                EntityDef {
+                    tag: Some("parent".into()),
+                    transform: Some(Transform::default()),
+                    sprite: None,
+                    parent: None,
+                },
+                EntityDef {
+                    tag: Some("child".into()),
+                    transform: Some(Transform::default()),
+                    sprite: None,
+                    parent: Some("parent".into()),
+                },
+            ],
+        };
+
+        scene.save(&path).expect("save should succeed");
+        let loaded = SceneDef::load(&path).expect("load should succeed");
+
+        // RON에 parent 필드가 보존됐는지 확인
+        assert_eq!(loaded.entities[1].parent.as_deref(), Some("parent"));
+
+        // 스폰 후 Parent 컴포넌트 확인
+        let mut world = World::new();
+        let entities = spawn_scene_def(&mut world, &loaded);
+        let parent_entity = entities[0];
+        let child_entity = entities[1];
+        let p = world
+            .get::<Parent>(child_entity)
+            .expect("child should have Parent component");
+        assert_eq!(p.0, parent_entity);
+
+        fs::remove_file(&path).ok();
+        fs::remove_dir(path.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn topological_sort_roots_before_children() {
+        use crate::hierarchy::{attach, Parent};
+
+        let mut world = World::new();
+        let parent = world.spawn();
+        let child = world.spawn();
+        attach(&mut world, child, parent);
+
+        let entities = vec![child, parent]; // 역순으로 제공
+        let sorted = topological_sort_entities(&entities, &world);
+
+        // 부모가 먼저 나와야 함
+        assert_eq!(sorted[0], parent);
+        assert_eq!(sorted[1], child);
+
+        // Parent 컴포넌트가 있는 child의 parent.0이 parent임을 재확인
+        let p = world.get::<Parent>(child).unwrap();
+        assert_eq!(p.0, parent);
     }
 }

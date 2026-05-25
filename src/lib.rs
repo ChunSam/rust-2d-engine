@@ -37,7 +37,7 @@ pub use animation::{
     TransitionCond, UvRect,
 };
 pub use app::App;
-pub use asset::{AssetServer, Handle, ImageAsset, ScriptAsset};
+pub use asset::{AssetServer, Handle, ImageAsset, ImageEntry, ScriptAsset};
 pub use atlas::{AtlasSprite, TextureAtlas};
 #[cfg(not(target_arch = "wasm32"))]
 pub use audio::AudioManager;
@@ -55,7 +55,10 @@ pub use particle::{Particle, ParticleEmitter, ParticleSystem};
 pub use physics::{
     CharacterController, CollisionEvent, PhysicsBody, PhysicsSystem, PhysicsWorld, RaycastHit,
 };
-pub use prefab::{spawn_entity_def, spawn_scene_def, EntityDef, Prefab, SceneDef, Tag};
+pub use prefab::{
+    spawn_entity_def, spawn_scene_def, topological_sort_entities, EntityDef, Prefab, SceneDef,
+    Tag,
+};
 pub use material::ShaderMaterial;
 pub use network::{NetworkClient, NetworkEvent, NetworkSystem};
 // par_query_for_each / par_query_map / par_query2_for_each / par_query2_map 은
@@ -64,7 +67,8 @@ pub use reflect::{Reflect, ReflectValue};
 pub use renderer::{DrawRect, DrawText, PostProcessConfig, TextQueue, TextRenderer, UiQueue};
 pub use resources::{
     CullConfig, DebugDrawQueue, DebugRect, DisplayScaleFactor, FontData, GameState, PendingResize,
-    SelectedEntity, ShouldQuit, ViewportSize, WindowConfig,
+    ProfilerData, RenderStats, SelectedEntity, ShouldQuit, SystemProfile, ViewportSize,
+    WindowConfig,
 };
 pub use scene::{Scene, SceneChange, SceneCmd};
 pub use scripting::{ScriptRunner, ScriptingSystem};

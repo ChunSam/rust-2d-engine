@@ -142,3 +142,51 @@ impl Default for CullConfig {
 /// ```
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SelectedEntity(pub Option<crate::ecs::world::Entity>);
+
+// ─── 프로파일러 ─────────────────────────────────────────────────────────────
+
+/// 시스템 하나의 프로파일링 항목.
+#[derive(Debug, Clone, Default)]
+pub struct SystemProfile {
+    pub name: String,
+    /// 직전 프레임 실행 시간 (마이크로초).
+    pub last_us: u64,
+    /// 최근 60프레임 지수 이동 평균 (마이크로초).
+    pub avg_us: f32,
+}
+
+/// 렌더러 패스 통계.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RenderStats {
+    /// 텍스처 전환 횟수 (draw call 수).
+    pub draw_calls: u32,
+    /// GPU에 제출된 스프라이트 인스턴스 수.
+    pub sprites_rendered: u32,
+    /// 뷰 컬링/LOD로 스킵된 스프라이트 수.
+    pub sprites_culled: u32,
+}
+
+/// 프로파일러 전체 데이터. `App`이 매 프레임 갱신하고 Engine Stats 패널이 읽는다.
+#[derive(Debug, Clone, Default)]
+pub struct ProfilerData {
+    pub systems: Vec<SystemProfile>,
+    pub render: RenderStats,
+    /// 전체 프레임 시간 (ms).
+    pub frame_ms: f32,
+}
+
+impl ProfilerData {
+    /// EMA α = 1/60
+    const ALPHA: f32 = 1.0 / 60.0;
+
+    /// 시스템 실행 결과를 기록한다. idx 가 범위를 벗어나면 자동 확장.
+    pub fn record_system(&mut self, idx: usize, name: &str, elapsed_us: u64) {
+        if idx >= self.systems.len() {
+            self.systems.resize(idx + 1, SystemProfile::default());
+        }
+        let s = &mut self.systems[idx];
+        s.name = name.to_string();
+        s.last_us = elapsed_us;
+        s.avg_us = s.avg_us * (1.0 - Self::ALPHA) + elapsed_us as f32 * Self::ALPHA;
+    }
+}

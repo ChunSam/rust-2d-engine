@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 28 갱신: 2026-05-25)  
-엔진 버전: v0.28.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 31 갱신: 2026-05-25)  
+엔진 버전: v0.31.0 (태그: v0.3.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -52,6 +52,9 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 26 | LOD/컬링 — Camera::visible_rect, CullConfig 리소스, 회전 고려 AABB 프러스텀 컬링, min_pixel_size LOD | `8db9bbe` |
 | Phase 27 | 멀티플레이어 데모 — mp_server(릴레이 서버) + mp_client(게임 클라이언트) 예제 | — |
 | Phase 28 | 에디터 씬 저장 — Inspector에 "💾 Save Scene" 버튼, SceneDef RON 직렬화 | — |
+| Phase 29 | 씬 계층 직렬화 — EntityDef.parent, spawn_scene_def 2패스, topological_sort_entities | — |
+| Phase 30 | 시스템 프로파일러 — System::name(), ProfilerData/RenderStats 리소스, Engine Stats 패널 확장 | — |
+| Phase 31 | 에셋 브라우저 — ImageEntry, image_list(), Inspector "Assets" 탭 | — |
 
 ---
 
@@ -179,6 +182,55 @@ src/
 cargo run --example mp_server   # 터미널 1
 cargo run --example mp_client   # 터미널 2, 3, ...
 ```
+
+---
+
+### Phase 29 — 씬 계층 직렬화
+
+**배경**: Phase 12에서 `Parent`/`Children`/`GlobalTransform`/`HierarchySystem` 계층 시스템이 완전히 구현됐지만, `EntityDef`/`SceneDef` 직렬화 포맷이 평면 리스트여서 씬 파일 저장/로드 시 계층 관계가 소실됐다.
+
+**변경 파일**: `src/prefab.rs`, `src/app.rs`, `src/lib.rs`
+
+**추가 기능**:
+- `EntityDef`에 `parent: Option<String>` 필드 추가 (`#[serde(default, skip_serializing_if = "Option::is_none")]`으로 기존 RON 파일 하위 호환 유지)
+- `spawn_scene_def()` 2패스 방식으로 교체: 1패스 엔티티 생성 + tag→Entity 맵, 2패스 `hierarchy::attach()` 호출
+- `topological_sort_entities(entities: &[Entity], world: &World) -> Vec<Entity>` 자유 함수 추가 (BFS, 루트→자식 순)
+- 에디터 씬 저장 시 `topological_sort_entities()`로 정렬 후 `Parent` 컴포넌트를 읽어 `EntityDef.parent` 채움
+- `topological_sort_entities` re-export (`lib.rs`)
+- 테스트: `scene_hierarchy_roundtrip`, `topological_sort_roots_before_children` 추가
+
+---
+
+### Phase 30 — 시스템 프로파일러
+
+**배경**: 시스템별 실행 시간과 렌더러 통계(draw call 수, culled 스프라이트 수)를 에디터에서 실시간으로 확인할 수 없었다.
+
+**변경 파일**: `src/ecs/system.rs`, `src/resources.rs`, `src/renderer/sprite.rs`, `src/app.rs`, `src/lib.rs`
+
+**추가 기능**:
+- `System` 트레잇에 `fn name(&self) -> &'static str { "" }` default 메서드 추가 (기존 impl System 하위 호환)
+- `SystemProfile { name, last_us, avg_us }`, `RenderStats { draw_calls, sprites_rendered, sprites_culled }`, `ProfilerData { systems, render, frame_ms }` 리소스 추가
+- `ProfilerData::record_system()` — EMA(α=1/60) 이동 평균 계산
+- `App::update()` 시스템 루프를 `Instant` 계측 래퍼로 교체, 결과를 `ProfilerData`에 기록
+- `sprite.rs render()` 반환 타입 `RenderStats`로 변경, culling/draw call 카운터 수집
+- Engine Stats 패널에 "Systems" / "Render" collapsible 섹션 추가, `resizable(true)`로 변경
+- `ProfilerData`, `RenderStats`, `SystemProfile` re-export (`lib.rs`)
+
+---
+
+### Phase 31 — 에셋 브라우저
+
+**배경**: 현재 로드된 이미지 에셋 목록을 에디터에서 확인할 수 없었고, `AssetServer`의 내부 `path_to_id` 맵이 private이어서 외부에서 조회 불가였다.
+
+**변경 파일**: `src/asset.rs`, `src/app.rs`, `src/lib.rs`
+
+**추가 기능**:
+- `ImageEntry { path, id, width, height }` 구조체 추가
+- `AssetServer::image_list() -> Vec<ImageEntry>` — 현재 로드된 이미지 목록 반환
+- `AssetServer::get_image_by_id(id: AssetId) -> Option<&ImageAsset>` 추가
+- `App` 구조체에 `inspector_tab: u8` (0=Entities, 1=Assets) 필드 추가
+- Inspector 패널 상단에 탭 버튼 추가, "Assets" 탭에서 파일명·해상도 그리드 표시
+- `ImageEntry` re-export (`lib.rs`)
 
 ---
 
@@ -1166,6 +1218,9 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 26~~ | ~~LOD / 컬링 — Camera::visible_rect, CullConfig, AABB 프러스텀 컬링, min_pixel_size LOD~~ | — | 완료 |
 | ~~Phase 27~~ | ~~멀티플레이어 데모 — NetworkClient 기반 서버-클라 롤플레잉 예제~~ | — | 완료 |
 | ~~Phase 28~~ | ~~에디터 씬 저장 — 기즈모로 배치한 엔티티를 SceneDef RON으로 직렬화~~ | — | 완료 |
+| ~~Phase 29~~ | ~~씬 계층 직렬화 — EntityDef.parent, 2패스 스폰, topological_sort_entities~~ | — | 완료 |
+| ~~Phase 30~~ | ~~시스템 프로파일러 — System::name(), ProfilerData, RenderStats, Engine Stats 확장~~ | — | 완료 |
+| ~~Phase 31~~ | ~~에셋 브라우저 — ImageEntry, image_list(), Inspector Assets 탭~~ | — | 완료 |
 
 ---
 
