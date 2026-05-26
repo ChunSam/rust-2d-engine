@@ -245,12 +245,30 @@ impl Default for PointLight {
 
 /// 엔티티에 이 컴포넌트를 붙이면 매 프레임 지정된 `RenderTarget`에
 /// `camera` 시점으로 오프스크린 렌더링을 수행한다.
-#[derive(Clone)]
+///
+/// # Layer Mask
+///
+/// `layer_mask`는 렌더할 `RenderLayer` 값들의 비트마스크다.
+/// 0(기본값)이면 레이어 필터링 없이 전체를 렌더한다.
+///
+/// ```rust,no_run
+/// # use engine::{OffscreenCamera, RenderLayer};
+/// // 레이어 0(게임 월드)만 렌더 — 레이어 1(HUD/미니맵 UI)은 제외
+/// let cam = OffscreenCamera {
+///     target: "minimap".to_string(),
+///     camera: Default::default(),
+///     layer_mask: 1 << 0,  // 비트 0 = RenderLayer(0)
+/// };
+/// ```
+#[derive(Clone, Default)]
 pub struct OffscreenCamera {
     /// `App::create_render_target`에 등록한 이름 (RenderTarget 키)
     pub target: String,
     /// 이 시점 전용 카메라 (메인 카메라와 독립적으로 동작)
     pub camera: crate::camera::Camera,
+    /// 렌더할 RenderLayer 비트마스크. 0 = 전체 레이어 허용 (기본값, 하위 호환).
+    /// RenderLayer(n)은 비트 n에 대응한다 (n은 0~31로 클램프).
+    pub layer_mask: u32,
 }
 
 // ─── 하위 호환 재수출 ─────────────────────────────────────────────────────────

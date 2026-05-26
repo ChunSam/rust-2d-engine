@@ -188,25 +188,23 @@ impl AssetServer {
                     }
                 });
             match watcher_result {
-                Ok(w) => {
-                    return Self {
-                        images: HashMap::new(),
-                        image_load_states: HashMap::new(),
-                        path_to_id: HashMap::new(),
-                        scripts: HashMap::new(),
-                        script_path_to_id: HashMap::new(),
-                        atlases: HashMap::new(),
-                        atlas_path_to_id: HashMap::new(),
-                        reload_rx: Some(rx),
-                        _watcher: Some(w),
-                        async_tx,
-                        async_rx,
-                    }
-                }
+                Ok(w) => Self {
+                    images: HashMap::new(),
+                    image_load_states: HashMap::new(),
+                    path_to_id: HashMap::new(),
+                    scripts: HashMap::new(),
+                    script_path_to_id: HashMap::new(),
+                    atlases: HashMap::new(),
+                    atlas_path_to_id: HashMap::new(),
+                    reload_rx: Some(rx),
+                    _watcher: Some(w),
+                    async_tx,
+                    async_rx,
+                },
                 Err(e) => {
                     log::warn!("파일 감시 초기화 실패 (핫 리로딩 비활성): {e}");
                     let (async_tx2, async_rx2) = std::sync::mpsc::sync_channel::<AsyncImageResult>(128);
-                    return Self {
+                    Self {
                         images: HashMap::new(),
                         image_load_states: HashMap::new(),
                         path_to_id: HashMap::new(),
@@ -218,7 +216,7 @@ impl AssetServer {
                         _watcher: None,
                         async_tx: async_tx2,
                         async_rx: async_rx2,
-                    };
+                    }
                 }
             }
         }

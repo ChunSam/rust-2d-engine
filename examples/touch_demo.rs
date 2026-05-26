@@ -92,8 +92,9 @@ impl System for JoystickMoveSystem {
     fn run(&mut self, world: &mut World, dt: f32) {
         let speed = 200.0;
 
+        type TouchVec = Vec<(u64, Vec2)>;
         // 1. 터치 데이터를 owned 값으로 추출 (borrow 해제)
-        let (began, ended, active): (Vec<(u64, Vec2)>, Vec<(u64, Vec2)>, Vec<(u64, Vec2)>) =
+        let (began, ended, active): (TouchVec, TouchVec, TouchVec) =
             world
                 .resource::<TouchState>()
                 .map(|ts| {

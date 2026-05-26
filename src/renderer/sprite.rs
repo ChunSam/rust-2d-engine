@@ -390,6 +390,11 @@ impl SpriteRenderer {
     /// 모든 스프라이트를 z 오름차순으로 전역 정렬한 뒤, 연속으로 같은 텍스처를 쓰는
     /// 구간마다 draw call을 한 번씩 발행한다. 텍스처가 섞이더라도 z 값이 정확히 반영된다.
     #[allow(clippy::too_many_arguments)]
+    /// 스프라이트를 렌더한다.
+    ///
+    /// `layer_mask`가 0이면 모든 레이어를 렌더한다.
+    /// `layer_mask`가 0이 아니면 `RenderLayer(n)` 엔티티 중 `(layer_mask >> n) & 1 == 1`인 것만 렌더한다.
+    /// `RenderLayer`가 없는 엔티티는 레이어 0으로 취급한다.
     pub fn render(
         &mut self,
         device: &wgpu::Device,
@@ -399,6 +404,7 @@ impl SpriteRenderer {
         world: &World,
         width: u32,
         height: u32,
+        layer_mask: u32,
     ) -> crate::resources::RenderStats {
         let mut stats = crate::resources::RenderStats::default();
         // ── 카메라: ECS 리소스에서 Camera 를 읽어 view_proj 를 계산한다 ───
@@ -452,6 +458,13 @@ impl SpriteRenderer {
                 .get::<crate::components::RenderLayer>(entity)
                 .map(|l| l.0)
                 .unwrap_or(0);
+            // layer_mask 필터: 0 = 전체 허용, 비 0 = 해당 비트만 렌더
+            if layer_mask != 0 {
+                let bit = (layer.clamp(0, 31)) as u32;
+                if (layer_mask >> bit) & 1 == 0 {
+                    continue;
+                }
+            }
             // image_handle이 있으면 그 경로를 우선 사용, 없으면 texture 경로 사용
             let tex_key = sprite
                 .image_handle

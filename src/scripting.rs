@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use rhai::{Engine, EvalAltResult, Scope};
@@ -46,7 +48,7 @@ impl ScriptRunner {
     }
 }
 
-// ─── ScriptCommand ────────────────────────────────────────────────────────────
+// ─── 내부 버퍼 타입 (모듈 레벨) ───────────────────────────────────────────────
 
 /// 스크립트 실행 중 수집된 ECS 명령.
 #[derive(Default)]
@@ -54,6 +56,47 @@ struct ScriptCommands {
     despawn: Vec<Entity>,
     spawn_count: u32,
     spawned_ids: Vec<i64>,
+}
+
+#[derive(Clone)]
+enum BbEntry {
+    Bool(String, bool),
+    Float(String, f64),
+    Int(String, i64),
+}
+
+#[derive(Clone)]
+enum SteeringCmd {
+    Seek { tx: f32, ty: f32, speed: f32 },
+    Flee { tx: f32, ty: f32, speed: f32, radius: f32 },
+    Stop,
+}
+
+// ─── Thread-local 실행 컨텍스트 ───────────────────────────────────────────────
+//
+// 엔티티마다 register_fn을 반복 호출하는 대신, with_limits()에서 1회만 등록하고
+// 실행 컨텍스트(버퍼)를 thread_local로 전달한다.
+// ECS 시스템은 단일 스레드이므로 RefCell이 안전하다.
+
+struct ScriptCtx {
+    cmd_buf:   Arc<Mutex<ScriptCommands>>,
+    bb_buf:    Arc<Mutex<Vec<BbEntry>>>,
+    steer_buf: Arc<Mutex<Option<SteeringCmd>>>,
+    bb_snap:   Arc<Mutex<HashMap<String, BbEntry>>>,
+}
+
+thread_local! {
+    static SCRIPT_CTX: RefCell<Option<ScriptCtx>> = const { RefCell::new(None) };
+}
+
+/// thread_local 컨텍스트를 설정한다. 스크립트 실행 전 호출.
+fn set_script_ctx(ctx: ScriptCtx) {
+    SCRIPT_CTX.with(|c| *c.borrow_mut() = Some(ctx));
+}
+
+/// thread_local 컨텍스트를 제거한다. 스크립트 실행 후 호출.
+fn clear_script_ctx() {
+    SCRIPT_CTX.with(|c| *c.borrow_mut() = None);
 }
 
 // ─── ScriptingSystem ──────────────────────────────────────────────────────────
@@ -119,8 +162,122 @@ impl ScriptingSystem {
 
     pub fn with_limits(limits: ScriptingLimits) -> Self {
         let mut engine = Engine::new();
-        engine.register_fn("log", |msg: &str| println!("[Script] {msg}"));
         engine.set_max_operations(limits.max_operations);
+
+        // ── 모든 함수를 1회만 등록 (thread_local로 실행 컨텍스트 전달) ──────
+
+        engine.register_fn("log", |msg: &str| println!("[Script] {msg}"));
+
+        engine.register_fn("spawn_entity", || -> i64 {
+            SCRIPT_CTX.with(|c| {
+                let borrow = c.borrow();
+                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                let mut cmds = ctx.cmd_buf.lock().unwrap();
+                cmds.spawn_count += 1;
+                let handle = -(cmds.spawn_count as i64);
+                cmds.spawned_ids.push(handle);
+                handle
+            })
+        });
+
+        engine.register_fn("despawn_entity", |id: i64| {
+            SCRIPT_CTX.with(|c| {
+                let borrow = c.borrow();
+                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                if id >= 0 {
+                    ctx.cmd_buf.lock().unwrap().despawn.push(Entity(id as u32));
+                }
+            });
+        });
+
+        engine.register_fn("bb_set_bool", |key: &str, val: bool| {
+            SCRIPT_CTX.with(|c| {
+                let borrow = c.borrow();
+                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                ctx.bb_buf.lock().unwrap().push(BbEntry::Bool(key.to_string(), val));
+            });
+        });
+
+        engine.register_fn("bb_set_float", |key: &str, val: f64| {
+            SCRIPT_CTX.with(|c| {
+                let borrow = c.borrow();
+                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                ctx.bb_buf.lock().unwrap().push(BbEntry::Float(key.to_string(), val));
+            });
+        });
+
+        engine.register_fn("bb_set_int", |key: &str, val: i64| {
+            SCRIPT_CTX.with(|c| {
+                let borrow = c.borrow();
+                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                ctx.bb_buf.lock().unwrap().push(BbEntry::Int(key.to_string(), val));
+            });
+        });
+
+        engine.register_fn("bb_get_bool", |key: &str| -> bool {
+            SCRIPT_CTX.with(|c| {
+                let borrow = c.borrow();
+                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                let snap = ctx.bb_snap.lock().unwrap();
+                match snap.get(key) {
+                    Some(BbEntry::Bool(_, v)) => *v,
+                    _ => false,
+                }
+            })
+        });
+
+        engine.register_fn("bb_get_float", |key: &str| -> f64 {
+            SCRIPT_CTX.with(|c| {
+                let borrow = c.borrow();
+                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                let snap = ctx.bb_snap.lock().unwrap();
+                match snap.get(key) {
+                    Some(BbEntry::Float(_, v)) => *v,
+                    _ => 0.0,
+                }
+            })
+        });
+
+        engine.register_fn("bb_get_int", |key: &str| -> i64 {
+            SCRIPT_CTX.with(|c| {
+                let borrow = c.borrow();
+                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                let snap = ctx.bb_snap.lock().unwrap();
+                match snap.get(key) {
+                    Some(BbEntry::Int(_, v)) => *v,
+                    _ => 0,
+                }
+            })
+        });
+
+        engine.register_fn("seek_target", |tx: f64, ty: f64, speed: f64| {
+            SCRIPT_CTX.with(|c| {
+                let borrow = c.borrow();
+                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                *ctx.steer_buf.lock().unwrap() = Some(SteeringCmd::Seek {
+                    tx: tx as f32, ty: ty as f32, speed: speed as f32,
+                });
+            });
+        });
+
+        engine.register_fn("flee_from", |tx: f64, ty: f64, speed: f64, radius: f64| {
+            SCRIPT_CTX.with(|c| {
+                let borrow = c.borrow();
+                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                *ctx.steer_buf.lock().unwrap() = Some(SteeringCmd::Flee {
+                    tx: tx as f32, ty: ty as f32, speed: speed as f32, radius: radius as f32,
+                });
+            });
+        });
+
+        engine.register_fn("stop_steering", || {
+            SCRIPT_CTX.with(|c| {
+                let borrow = c.borrow();
+                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                *ctx.steer_buf.lock().unwrap() = Some(SteeringCmd::Stop);
+            });
+        });
+
         Self { engine }
     }
 }
@@ -156,12 +313,7 @@ impl System for ScriptingSystem {
                 })
                 .unwrap_or((0.0, 0.0, 0.0, 1.0, 1.0));
 
-            // Blackboard 스냅샷 읽기 (bool/float/int)
-            // — 스크립트 실행 전에 현재 엔티티의 Blackboard 값을 꺼낸다.
-            // — 스크립트가 bb_set_* 를 호출하면 Arc<Mutex<...>> 버퍼에 변경을 기록하고,
-            //   실행 후 World에 반영한다.
-
-            // AssetServer에서 AST 읽기
+            // AST 읽기
             let ast = match world
                 .resource::<AssetServer>()
                 .and_then(|s| s.get_script_by_id(script_id))
@@ -171,117 +323,22 @@ impl System for ScriptingSystem {
                 None => continue,
             };
 
-            // ── Commands 버퍼 ──────────────────────────────────────────────────
-            // 스크립트가 spawn_entity / despawn_entity 를 호출할 때 사용.
-            // World를 클로저로 직접 캡처할 수 없으므로 Arc<Mutex<...>>로 수집 후 후처리.
-            let cmd_buf: Arc<Mutex<ScriptCommands>> =
-                Arc::new(Mutex::new(ScriptCommands::default()));
+            // ── 엔티티별 버퍼 생성 ─────────────────────────────────────────────
+            let cmd_buf:   Arc<Mutex<ScriptCommands>>           = Arc::new(Mutex::new(ScriptCommands::default()));
+            let bb_buf:    Arc<Mutex<Vec<BbEntry>>>             = Arc::new(Mutex::new(Vec::new()));
+            let steer_buf: Arc<Mutex<Option<SteeringCmd>>>      = Arc::new(Mutex::new(None));
+            let bb_snap:   Arc<Mutex<HashMap<String, BbEntry>>> = Arc::new(Mutex::new(HashMap::new()));
 
-            // ── Blackboard 변경 버퍼 ──────────────────────────────────────────
-            // (key, value) 쌍 목록. 스크립트 실행 후 Blackboard 컴포넌트에 반영.
-            #[derive(Clone)]
-            enum BbEntry {
-                Bool(String, bool),
-                Float(String, f64),
-                Int(String, i64),
-            }
-            let bb_buf: Arc<Mutex<Vec<BbEntry>>> = Arc::new(Mutex::new(Vec::new()));
-
-            // ── Steering 변경 버퍼 ────────────────────────────────────────────
-            #[derive(Clone)]
-            enum SteeringCmd {
-                Seek {
-                    tx: f32,
-                    ty: f32,
-                    speed: f32,
-                },
-                Flee {
-                    tx: f32,
-                    ty: f32,
-                    speed: f32,
-                    radius: f32,
-                },
-                Stop,
-            }
-            let steer_buf: Arc<Mutex<Option<SteeringCmd>>> = Arc::new(Mutex::new(None));
-
-            // ── Rhai 함수 등록 ────────────────────────────────────────────────
-
-            // --- spawn_entity ---
-            {
-                let cb = Arc::clone(&cmd_buf);
-                self.engine.register_fn("spawn_entity", move || -> i64 {
-                    let mut cmds = cb.lock().unwrap();
-                    cmds.spawn_count += 1;
-                    // 실제 Entity ID는 스크립트 실행 후 World에서 할당된다.
-                    // 여기서는 임시 음수 핸들(-1, -2, …)을 반환한다.
-                    let handle = -(cmds.spawn_count as i64);
-                    cmds.spawned_ids.push(handle);
-                    handle
-                });
-            }
-
-            // --- despawn_entity ---
-            {
-                let cb = Arc::clone(&cmd_buf);
-                self.engine.register_fn("despawn_entity", move |id: i64| {
-                    if id >= 0 {
-                        cb.lock().unwrap().despawn.push(Entity(id as u32));
-                    }
-                });
-            }
-
-            // --- bb_set_bool ---
-            {
-                let buf = Arc::clone(&bb_buf);
-                self.engine
-                    .register_fn("bb_set_bool", move |key: &str, val: bool| {
-                        buf.lock()
-                            .unwrap()
-                            .push(BbEntry::Bool(key.to_string(), val));
-                    });
-            }
-
-            // --- bb_set_float ---
-            {
-                let buf = Arc::clone(&bb_buf);
-                self.engine
-                    .register_fn("bb_set_float", move |key: &str, val: f64| {
-                        buf.lock()
-                            .unwrap()
-                            .push(BbEntry::Float(key.to_string(), val));
-                    });
-            }
-
-            // --- bb_set_int ---
-            {
-                let buf = Arc::clone(&bb_buf);
-                self.engine
-                    .register_fn("bb_set_int", move |key: &str, val: i64| {
-                        buf.lock().unwrap().push(BbEntry::Int(key.to_string(), val));
-                    });
-            }
-
-            // --- bb_get_bool (현재 엔티티의 Blackboard에서 읽기) ---
-            // World를 클로저로 캡처할 수 없으므로, 실행 전 스냅샷을 찍어 scope에 전달하는
-            // 방식 대신, Rhai `Dynamic` 맵을 scope에 주입하는 단순 패턴을 사용한다:
-            // 스크립트 실행 전에 값을 추출해 scope 변수로 제공하고,
-            // bb_get_* 함수는 그 scope 변수를 읽는다.
-            //
-            // 단, 함수로 제공하려면 스냅샷 Arc를 공유해야 한다.
-            // 여기서는 스크립트 실행 전에 현재 값을 Arc<Mutex<HashMap>> 에 복사한다.
-            let bb_snap: Arc<Mutex<std::collections::HashMap<String, BbEntry>>> =
-                Arc::new(Mutex::new(std::collections::HashMap::new()));
+            // Blackboard 스냅샷 수집
             {
                 use crate::behavior::BlackboardValue;
                 if let Some(bb) = world.get::<Blackboard>(entity) {
                     let mut snap = bb_snap.lock().unwrap();
                     for (key, val) in bb.entries() {
                         let entry = match val {
-                            BlackboardValue::Bool(v) => BbEntry::Bool(key.to_string(), *v),
+                            BlackboardValue::Bool(v)  => BbEntry::Bool(key.to_string(), *v),
                             BlackboardValue::Float(v) => BbEntry::Float(key.to_string(), *v as f64),
-                            BlackboardValue::Int(v) => BbEntry::Int(key.to_string(), *v as i64),
-                            // Vec2 / String은 bb_get_* API에서 지원하지 않으므로 건너뜀
+                            BlackboardValue::Int(v)   => BbEntry::Int(key.to_string(), *v as i64),
                             _ => continue,
                         };
                         snap.insert(key.to_string(), entry);
@@ -289,83 +346,14 @@ impl System for ScriptingSystem {
                 }
             }
 
-            // bb_get_bool
-            {
-                let snap = Arc::clone(&bb_snap);
-                self.engine
-                    .register_fn("bb_get_bool", move |key: &str| -> bool {
-                        let s = snap.lock().unwrap();
-                        match s.get(key) {
-                            Some(BbEntry::Bool(_, v)) => *v,
-                            _ => false,
-                        }
-                    });
-            }
+            // ── thread_local 컨텍스트 설정 → 스크립트 실행 → 컨텍스트 제거 ───
+            set_script_ctx(ScriptCtx {
+                cmd_buf:   Arc::clone(&cmd_buf),
+                bb_buf:    Arc::clone(&bb_buf),
+                steer_buf: Arc::clone(&steer_buf),
+                bb_snap:   Arc::clone(&bb_snap),
+            });
 
-            // bb_get_float
-            {
-                let snap = Arc::clone(&bb_snap);
-                self.engine
-                    .register_fn("bb_get_float", move |key: &str| -> f64 {
-                        let s = snap.lock().unwrap();
-                        match s.get(key) {
-                            Some(BbEntry::Float(_, v)) => *v,
-                            _ => 0.0,
-                        }
-                    });
-            }
-
-            // bb_get_int
-            {
-                let snap = Arc::clone(&bb_snap);
-                self.engine
-                    .register_fn("bb_get_int", move |key: &str| -> i64 {
-                        let s = snap.lock().unwrap();
-                        match s.get(key) {
-                            Some(BbEntry::Int(_, v)) => *v,
-                            _ => 0,
-                        }
-                    });
-            }
-
-            // --- seek_target ---
-            {
-                let buf = Arc::clone(&steer_buf);
-                self.engine
-                    .register_fn("seek_target", move |tx: f64, ty: f64, speed: f64| {
-                        *buf.lock().unwrap() = Some(SteeringCmd::Seek {
-                            tx: tx as f32,
-                            ty: ty as f32,
-                            speed: speed as f32,
-                        });
-                    });
-            }
-
-            // --- flee_from ---
-            {
-                let buf = Arc::clone(&steer_buf);
-                self.engine.register_fn(
-                    "flee_from",
-                    move |tx: f64, ty: f64, speed: f64, radius: f64| {
-                        *buf.lock().unwrap() = Some(SteeringCmd::Flee {
-                            tx: tx as f32,
-                            ty: ty as f32,
-                            speed: speed as f32,
-                            radius: radius as f32,
-                        });
-                    },
-                );
-            }
-
-            // --- stop_steering ---
-            {
-                let buf = Arc::clone(&steer_buf);
-                self.engine.register_fn("stop_steering", move || {
-                    *buf.lock().unwrap() = Some(SteeringCmd::Stop);
-                });
-            }
-
-            // ── 스크립트 실행 ─────────────────────────────────────────────────
             let (new_tx, new_ty, new_tr, new_tsx, new_tsy) = {
                 let runner = world.get_mut::<ScriptRunner>(entity).unwrap();
                 runner.scope.set_value("x", tx);
@@ -386,21 +374,23 @@ impl System for ScriptingSystem {
                     (dt as f64,),
                 );
 
-                let nx = runner.scope.get_value::<f64>("x").unwrap_or(tx);
-                let ny = runner.scope.get_value::<f64>("y").unwrap_or(ty);
-                let nr = runner.scope.get_value::<f64>("rot").unwrap_or(tr);
+                let nx  = runner.scope.get_value::<f64>("x").unwrap_or(tx);
+                let ny  = runner.scope.get_value::<f64>("y").unwrap_or(ty);
+                let nr  = runner.scope.get_value::<f64>("rot").unwrap_or(tr);
                 let nsx = runner.scope.get_value::<f64>("sx").unwrap_or(tsx);
                 let nsy = runner.scope.get_value::<f64>("sy").unwrap_or(tsy);
                 (nx, ny, nr, nsx, nsy)
             };
 
+            clear_script_ctx();
+
             // ── Transform 결과 적용 ──────────────────────────────────────────
             if let Some(t) = world.get_mut::<Transform>(entity) {
                 t.position.x = new_tx as f32;
                 t.position.y = new_ty as f32;
-                t.rotation = new_tr as f32;
-                t.scale.x = new_tsx as f32;
-                t.scale.y = new_tsy as f32;
+                t.rotation   = new_tr as f32;
+                t.scale.x    = new_tsx as f32;
+                t.scale.y    = new_tsy as f32;
             }
 
             // ── Commands 적용 ────────────────────────────────────────────────
@@ -408,31 +398,25 @@ impl System for ScriptingSystem {
                 let guard = cmd_buf.lock().unwrap();
                 (guard.spawn_count, guard.despawn.clone())
             };
-            // spawn (임시 핸들이므로 Entity ID는 순서대로 할당된다)
             for _ in 0..spawn_count {
                 world.spawn();
             }
-            // despawn
             for e in despawn_list {
                 world.despawn(e);
             }
 
             // ── Blackboard 변경 적용 ──────────────────────────────────────────
-            let bb_changes = {
-                let guard = bb_buf.lock().unwrap();
-                guard.clone()
-            };
+            let bb_changes = { bb_buf.lock().unwrap().clone() };
             if !bb_changes.is_empty() {
-                // Blackboard 컴포넌트가 없으면 새로 추가
                 if world.get::<Blackboard>(entity).is_none() {
                     world.add_component(entity, Blackboard::new());
                 }
                 if let Some(bb) = world.get_mut::<Blackboard>(entity) {
                     for entry in bb_changes {
                         match entry {
-                            BbEntry::Bool(k, v) => bb.set_bool(&k, v),
+                            BbEntry::Bool(k, v)  => bb.set_bool(&k, v),
                             BbEntry::Float(k, v) => bb.set_float(&k, v as f32),
-                            BbEntry::Int(k, v) => bb.set_int(&k, v as i32),
+                            BbEntry::Int(k, v)   => bb.set_int(&k, v as i32),
                         }
                     }
                 }
@@ -447,32 +431,14 @@ impl System for ScriptingSystem {
                         if world.get::<SteeringVelocity>(entity).is_none() {
                             world.add_component(entity, SteeringVelocity::default());
                         }
-                        world.add_component(
-                            entity,
-                            Seek {
-                                target: Vec2::new(tx, ty),
-                                max_speed: speed,
-                            },
-                        );
+                        world.add_component(entity, Seek { target: Vec2::new(tx, ty), max_speed: speed });
                     }
-                    SteeringCmd::Flee {
-                        tx,
-                        ty,
-                        speed,
-                        radius,
-                    } => {
+                    SteeringCmd::Flee { tx, ty, speed, radius } => {
                         use glam::Vec2;
                         if world.get::<SteeringVelocity>(entity).is_none() {
                             world.add_component(entity, SteeringVelocity::default());
                         }
-                        world.add_component(
-                            entity,
-                            Flee {
-                                target: Vec2::new(tx, ty),
-                                max_speed: speed,
-                                flee_radius: radius,
-                            },
-                        );
+                        world.add_component(entity, Flee { target: Vec2::new(tx, ty), max_speed: speed, flee_radius: radius });
                     }
                     SteeringCmd::Stop => {
                         if let Some(sv) = world.get_mut::<SteeringVelocity>(entity) {
@@ -499,5 +465,96 @@ fn call_fn_optional<A: rhai::FuncArgs>(
             EvalAltResult::ErrorFunctionNotFound(_, _) => {}
             ref other => log::warn!("Script '{fn_name}' 오류: {other}"),
         }
+    }
+}
+
+// ─── 테스트 ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_engine() -> ScriptingSystem {
+        ScriptingSystem::new()
+    }
+
+    fn eval_with_ctx(sys: &ScriptingSystem, ctx: ScriptCtx, script: &str) {
+        let ast = sys.engine.compile(script).unwrap();
+        let mut scope = Scope::new();
+        set_script_ctx(ctx);
+        let _ = sys.engine.eval_ast_with_scope::<rhai::Dynamic>(&mut scope, &ast);
+        clear_script_ctx();
+    }
+
+    #[test]
+    fn scripting_spawn_entity_works() {
+        let sys = make_engine();
+        let cmd_buf = Arc::new(Mutex::new(ScriptCommands::default()));
+        let ctx = ScriptCtx {
+            cmd_buf: Arc::clone(&cmd_buf),
+            bb_buf: Arc::new(Mutex::new(Vec::new())),
+            steer_buf: Arc::new(Mutex::new(None)),
+            bb_snap: Arc::new(Mutex::new(HashMap::new())),
+        };
+        eval_with_ctx(&sys, ctx, "let id = spawn_entity(); spawn_entity();");
+        assert_eq!(cmd_buf.lock().unwrap().spawn_count, 2);
+    }
+
+    #[test]
+    fn scripting_bb_roundtrip() {
+        let sys = make_engine();
+        let bb_buf = Arc::new(Mutex::new(Vec::new()));
+        let bb_snap = Arc::new(Mutex::new(HashMap::new()));
+        // 사전에 스냅샷에 값 넣기 (get 테스트용)
+        bb_snap.lock().unwrap().insert("score".to_string(), BbEntry::Float("score".to_string(), 42.0));
+
+        let ctx = ScriptCtx {
+            cmd_buf: Arc::new(Mutex::new(ScriptCommands::default())),
+            bb_buf: Arc::clone(&bb_buf),
+            steer_buf: Arc::new(Mutex::new(None)),
+            bb_snap: Arc::clone(&bb_snap),
+        };
+        eval_with_ctx(&sys, ctx, r#"
+            bb_set_bool("active", true);
+            bb_set_int("hp", 99);
+            let s = bb_get_float("score");
+        "#);
+
+        let changes = bb_buf.lock().unwrap().clone();
+        assert!(changes.iter().any(|e| matches!(e, BbEntry::Bool(k, true) if k == "active")));
+        assert!(changes.iter().any(|e| matches!(e, BbEntry::Int(k, 99) if k == "hp")));
+    }
+
+    #[test]
+    fn scripting_two_entities_no_buffer_cross_contamination() {
+        let sys = make_engine();
+
+        // 엔티티 A 실행
+        let bb_buf_a = Arc::new(Mutex::new(Vec::new()));
+        let ctx_a = ScriptCtx {
+            cmd_buf: Arc::new(Mutex::new(ScriptCommands::default())),
+            bb_buf: Arc::clone(&bb_buf_a),
+            steer_buf: Arc::new(Mutex::new(None)),
+            bb_snap: Arc::new(Mutex::new(HashMap::new())),
+        };
+        eval_with_ctx(&sys, ctx_a, r#"bb_set_bool("flag_a", true);"#);
+
+        // 엔티티 B 실행
+        let bb_buf_b = Arc::new(Mutex::new(Vec::new()));
+        let ctx_b = ScriptCtx {
+            cmd_buf: Arc::new(Mutex::new(ScriptCommands::default())),
+            bb_buf: Arc::clone(&bb_buf_b),
+            steer_buf: Arc::new(Mutex::new(None)),
+            bb_snap: Arc::new(Mutex::new(HashMap::new())),
+        };
+        eval_with_ctx(&sys, ctx_b, r#"bb_set_bool("flag_b", true);"#);
+
+        // A 버퍼에는 flag_a만, B 버퍼에는 flag_b만 있어야 한다
+        let a = bb_buf_a.lock().unwrap();
+        let b = bb_buf_b.lock().unwrap();
+        assert!(a.iter().any(|e| matches!(e, BbEntry::Bool(k, _) if k == "flag_a")));
+        assert!(!a.iter().any(|e| matches!(e, BbEntry::Bool(k, _) if k == "flag_b")));
+        assert!(b.iter().any(|e| matches!(e, BbEntry::Bool(k, _) if k == "flag_b")));
+        assert!(!b.iter().any(|e| matches!(e, BbEntry::Bool(k, _) if k == "flag_a")));
     }
 }

@@ -48,10 +48,11 @@ type ComponentFactory = Box<dyn Fn(&mut World, Entity) + Send + Sync>;
 type OffscreenRenderInfo = (
     String,
     crate::camera::Camera,
-    u32,
-    u32,
+    u32,    // rt_w
+    u32,    // rt_h
     *const wgpu::TextureView,
     Arc<wgpu::BindGroup>,
+    u32,    // layer_mask
 );
 
 // ─── 에디터 Undo/Redo ────────────────────────────────────────────────────────
@@ -2082,15 +2083,15 @@ impl App {
             // render_targets와 sprite_renderer를 동시에 borrow할 수 없으므로
             // raw pointer로 view 참조를 보관한다.
             // Safety: render_targets HashMap은 이 루프 안에서 수정되지 않는다.
-            let offscreen_cams: Vec<(String, crate::camera::Camera)> = self
+            let offscreen_cams: Vec<(String, crate::camera::Camera, u32)> = self
                 .world
                 .query::<crate::components::OffscreenCamera>()
-                .map(|(_, oc)| (oc.target.clone(), oc.camera))
+                .map(|(_, oc)| (oc.target.clone(), oc.camera, oc.layer_mask))
                 .collect();
 
             let rt_info: Vec<OffscreenRenderInfo> = offscreen_cams
                 .into_iter()
-                .filter_map(|(name, cam)| {
+                .filter_map(|(name, cam, layer_mask)| {
                     self.render_targets.get(&name).map(|rt| {
                         (
                             name,
@@ -2099,18 +2100,18 @@ impl App {
                             rt.height,
                             &rt.view as *const wgpu::TextureView,
                             std::sync::Arc::clone(&rt.bind_group),
+                            layer_mask,
                         )
                     })
                 })
                 .collect();
 
-            for (target_name, cam, rt_w, rt_h, view_ptr, bg) in rt_info {
-                // ① 카메라 교체
+            for (target_name, cam, rt_w, rt_h, view_ptr, bg, layer_mask) in rt_info {
+                // ① 카메라 교체 — 기존 카메라가 없으면 렌더 후 제거, 있으면 원복
                 let saved_cam = self
                     .world
                     .resource::<crate::camera::Camera>()
-                    .copied()
-                    .unwrap_or_default();
+                    .copied();
                 self.world.insert_resource(cam);
 
                 // ② Safety: render_targets는 이 루프에서 수정되지 않는다.
@@ -2139,7 +2140,7 @@ impl App {
                     });
                 }
 
-                // ④ 스프라이트 렌더 → RT
+                // ④ 스프라이트 렌더 → RT (layer_mask로 자기캡처 방지)
                 if let Some(sr) = &mut self.sprite_renderer {
                     sr.render(
                         &gpu.device,
@@ -2149,11 +2150,15 @@ impl App {
                         &self.world,
                         rt_w,
                         rt_h,
+                        layer_mask,
                     );
                 }
 
-                // ⑤ 카메라 복원
-                self.world.insert_resource(saved_cam);
+                // ⑤ 카메라 복원 — 원래 없던 경우 제거해 World 오염 방지
+                match saved_cam {
+                    Some(c) => self.world.insert_resource(c),
+                    None => { self.world.remove_resource::<crate::camera::Camera>(); }
+                }
 
                 // ⑥ RT bind_group을 스프라이트 렌더러에 등록 (Sprite.texture 키로 샘플 가능)
                 if let Some(sr) = &mut self.sprite_renderer {
@@ -2231,7 +2236,7 @@ impl App {
         let logical_w = viewport.width.round().max(1.0) as u32;
         let logical_h = viewport.height.round().max(1.0) as u32;
 
-        // 2단계: 스프라이트 그리기
+        // 2단계: 스프라이트 그리기 (메인 패스 — 레이어 필터 없음)
         if let Some(sr) = &mut self.sprite_renderer {
             let render_stats = sr.render(
                 &gpu.device,
@@ -2241,6 +2246,7 @@ impl App {
                 &self.world,
                 logical_w,
                 logical_h,
+                0, // layer_mask = 0: 전체 레이어 렌더
             );
             if let Some(prof) = self.world.resource_mut::<crate::resources::ProfilerData>() {
                 prof.render = render_stats;
@@ -2827,12 +2833,25 @@ impl App {
 }
 
 // ── egui 렌더 헬퍼 ───────────────────────────────────────────────────────────
-// egui-wgpu 0.29 의 PaintCallbackFn 이 &mut RenderPass<'static> 을 요구하기 때문에
-// render<'rp>(&'rp self, &mut RenderPass<'rp>) 가 'rp: 'static 을 강제한다.
-//
-// SAFETY: paint callback 을 등록하지 않으므로 'static transmute 는 실제로 안전하다.
-// rpass 를 transmute 로 소비(move)하면 NLL borrow checker 가 enc 의 borrow 를 해제하고,
-// 새 RenderPass<'static> 은 enc 와 독립적 lifetime 으로 추론되어 enc.finish() 가 가능해진다.
+/// egui-wgpu 0.29 가 `Renderer::render()` 에서 `RenderPass<'static>` 을 요구하므로
+/// 두 가지 transmute 가 필요하다.
+///
+/// # Safety
+///
+/// **불변 조건 (호출 시 반드시 유지해야 함)**
+/// 1. `er` 참조는 이 함수가 반환되기 전까지 유효하다.
+///    raw pointer cast 로 `'static` 을 부여하지만 실제로는 호출자 스택 프레임보다
+///    수명이 짧지 않으므로 dangling 이 발생하지 않는다.
+/// 2. `rpass` (→ `rpass_s`) 는 이 함수 본문 밖으로 이탈하지 않는다.
+///    `er_s.render()` 내부에서도 `PaintCallback` 을 등록하지 않으므로 `rpass_s`
+///    가 클로저나 힙에 캡처되지 않는다.
+/// 3. `rpass_s` 가 drop 된 이후에 `enc` 를 사용하므로 CommandEncoder 이중 borrow
+///    가 발생하지 않는다 (NLL 이 정확히 처리).
+///
+/// **제거 체크리스트 (egui-wgpu 업그레이드 시 확인)**
+/// - [ ] `egui_wgpu::Renderer::render()` 시그니처가 `RenderPass<'_>` (generic lifetime) 로
+///   변경되었는가?  변경되면 두 transmute 를 모두 제거하고 직접 전달하면 된다.
+/// - [ ] `PaintCallback` API 가 `'rp` lifetime 을 수용하는가?
 fn egui_render_pass(
     er: &egui_wgpu::Renderer,
     enc: &mut wgpu::CommandEncoder,
@@ -2854,8 +2873,7 @@ fn egui_render_pass(
         occlusion_query_set: None,
         timestamp_writes: None,
     });
-    // SAFETY: rpass 는 이 함수 밖으로 탈출하지 않는다. transmute 로 'encoder borrow 를
-    // 'static 으로 변환해 NLL 이 enc borrow 를 해제하도록 한다. er 도 동일하게 처리.
+    // Safety: 위 doc comment의 불변 조건 참조.
     unsafe {
         let er_s: &'static egui_wgpu::Renderer = &*(er as *const _);
         let mut rpass_s: wgpu::RenderPass<'static> = std::mem::transmute(rpass);

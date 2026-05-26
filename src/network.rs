@@ -1,6 +1,8 @@
 use crate::ecs::{events::Events, system::System, world::World};
 
 pub const DEFAULT_MAX_MESSAGE_BYTES: usize = 64 * 1024;
+/// 기본 송신 큐 최대 메시지 수. 큐가 가득 차면 새 메시지를 드롭하고 warn 로그를 남긴다.
+pub const DEFAULT_MAX_PENDING_MESSAGES: usize = 256;
 
 /// 매 프레임 [`NetworkSystem`]이 생성하는 ECS 이벤트.
 #[derive(Clone, Debug)]
@@ -17,12 +19,15 @@ pub enum NetworkEvent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NetworkConfig {
     pub max_message_bytes: usize,
+    /// 송신 큐 최대 메시지 수. 초과 시 `send_text`/`send_bytes`는 메시지를 드롭한다.
+    pub max_pending_messages: usize,
 }
 
 impl Default for NetworkConfig {
     fn default() -> Self {
         Self {
             max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
+            max_pending_messages: DEFAULT_MAX_PENDING_MESSAGES,
         }
     }
 }
@@ -41,7 +46,7 @@ mod native {
 
     pub struct NetworkClient {
         event_rx: std::sync::mpsc::Receiver<NetworkEvent>,
-        msg_tx: std::sync::mpsc::Sender<OutMsg>,
+        msg_tx: std::sync::mpsc::SyncSender<OutMsg>,
     }
 
     impl NetworkClient {
@@ -53,7 +58,8 @@ mod native {
 
         pub fn connect_with_config(url: &str, config: NetworkConfig) -> Self {
             let (event_tx, event_rx) = std::sync::mpsc::channel::<NetworkEvent>();
-            let (msg_tx, msg_rx) = std::sync::mpsc::channel::<OutMsg>();
+            let (msg_tx, msg_rx) =
+                std::sync::mpsc::sync_channel::<OutMsg>(config.max_pending_messages);
             let url = url.to_string();
             let max_message_bytes = config.max_message_bytes;
 
@@ -71,6 +77,9 @@ mod native {
                     tcp.set_read_timeout(Some(std::time::Duration::from_millis(5)))
                         .ok();
                 }
+                // TODO: TLS 소켓(MaybeTlsStream::Rustls / NativeTls)은 내부 TCP 스트림에
+                // read_timeout을 직접 설정하는 공개 API가 없어 tungstenite 현 버전에서
+                // 미지원. 향후 tungstenite/rustls API 변경 시 재검토 필요.
 
                 let _ = event_tx.send(NetworkEvent::Connected);
 
@@ -153,15 +162,30 @@ mod native {
         }
 
         pub fn send_bytes(&self, data: &[u8]) {
-            let _ = self.msg_tx.send(OutMsg::Binary(data.to_vec()));
+            if self.msg_tx.try_send(OutMsg::Binary(data.to_vec())).is_err() {
+                log::warn!("network: 송신 큐 만원 — binary 메시지 드롭 ({} bytes)", data.len());
+            }
         }
 
         pub fn send_text(&self, text: impl Into<String>) {
-            let _ = self.msg_tx.send(OutMsg::Text(text.into()));
+            let text = text.into();
+            if self.msg_tx.try_send(OutMsg::Text(text.clone())).is_err() {
+                log::warn!("network: 송신 큐 만원 — text 메시지 드롭 ({} bytes)", text.len());
+            }
+        }
+
+        /// 송신 큐가 가득 차지 않은 경우에만 전송하고 성공 여부를 반환한다.
+        pub fn try_send_bytes(&self, data: &[u8]) -> bool {
+            self.msg_tx.try_send(OutMsg::Binary(data.to_vec())).is_ok()
+        }
+
+        /// 송신 큐가 가득 차지 않은 경우에만 전송하고 성공 여부를 반환한다.
+        pub fn try_send_text(&self, text: impl Into<String>) -> bool {
+            self.msg_tx.try_send(OutMsg::Text(text.into())).is_ok()
         }
 
         pub fn disconnect(&self) {
-            let _ = self.msg_tx.send(OutMsg::Close);
+            let _ = self.msg_tx.try_send(OutMsg::Close);
         }
 
         pub(super) fn poll(&mut self) -> Vec<NetworkEvent> {
@@ -325,5 +349,26 @@ impl System for NetworkSystem {
                 bus.send(ev);
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn network_config_defaults() {
+        let cfg = NetworkConfig::default();
+        assert_eq!(cfg.max_message_bytes, DEFAULT_MAX_MESSAGE_BYTES);
+        assert_eq!(cfg.max_pending_messages, DEFAULT_MAX_PENDING_MESSAGES);
+    }
+
+    #[test]
+    fn network_bounded_channel_drops_on_full() {
+        // SyncSender with capacity 1: first send succeeds, second fails (full).
+        let (tx, _rx) = std::sync::mpsc::sync_channel::<u8>(1);
+        assert!(tx.try_send(1).is_ok());
+        assert!(tx.try_send(2).is_err(), "queue should be full after capacity is reached");
     }
 }

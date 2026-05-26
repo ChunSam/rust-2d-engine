@@ -8,7 +8,7 @@
 use engine::{
     App, GpuParticleEmitter, InputState, System, Transform, World,
     renderer::{DrawText, TextQueue},
-    resources::{ViewportSize, WindowConfig},
+    resources::WindowConfig,
 };
 use glam::Vec2;
 use winit::{
@@ -90,7 +90,7 @@ impl System for GpuParticleDemo {
                 [220, 220, 220, 230],
             ));
             tq.push(DrawText::new(
-                &format!("Emitters: {}  (4096 particle slots total)", self.emitter_count),
+                format!("Emitters: {}  (4096 particle slots total)", self.emitter_count),
                 Vec2::new(10.0, 36.0),
                 16.0,
                 [160, 200, 255, 200],

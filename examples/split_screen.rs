@@ -217,6 +217,7 @@ fn main() {
         OffscreenCamera {
             target: "left_view".to_string(),
             camera: Camera::new(Vec2::new(-200.0, 0.0), 1.0),
+            layer_mask: 0, // 전체 레이어 렌더
         },
     );
 
@@ -227,6 +228,7 @@ fn main() {
         OffscreenCamera {
             target: "right_view".to_string(),
             camera: Camera::new(Vec2::new(200.0, 0.0), 1.0),
+            layer_mask: 0, // 전체 레이어 렌더
         },
     );
 

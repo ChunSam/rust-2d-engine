@@ -90,7 +90,7 @@ impl System for LoadingUpdateSystem {
         // 퍼센트 텍스트
         if let Some(tq) = world.resource_mut::<TextQueue>() {
             tq.push(engine::renderer::DrawText::new(
-                &format!("Loading... {:.0}%", progress * 100.0),
+                format!("Loading... {:.0}%", progress * 100.0),
                 glam::Vec2::new(-70.0, -60.0),
                 22.0,
                 [255, 255, 255, 255],

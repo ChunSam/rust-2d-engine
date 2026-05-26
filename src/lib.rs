@@ -84,6 +84,7 @@ pub use renderer::{
     DrawRect, DrawText, PostProcessConfig, RenderTarget, TextAlign, TextQueue, TextRenderer,
     UiQueue,
 };
+pub use renderer::texture::TextureError;
 pub use resources::{
     AmbientLight, CullConfig, DebugDraw, DebugDrawQueue, DebugRect, DebugShape, DisplayScaleFactor,
     FadeTransition, FontData, GameState, LoadProgress, PanickedSystems, PendingResize, ProfilerData,

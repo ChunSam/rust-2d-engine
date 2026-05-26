@@ -424,6 +424,14 @@ impl World {
             .downcast_mut::<T>()
     }
 
+    /// 리소스 `T`를 World에서 제거하고 소유권을 반환한다.
+    /// 리소스가 없으면 `None`.
+    pub fn remove_resource<T: 'static>(&mut self) -> Option<T> {
+        self.resources
+            .remove(&TypeId::of::<T>())
+            .and_then(|b| b.downcast::<T>().ok().map(|b| *b))
+    }
+
     // ── Reflect 레지스트리 ────────────────────────────────────────────────────
 
     /// 타입 T를 Reflect 레지스트리에 등록한다.
@@ -1206,5 +1214,23 @@ mod tests {
         let dst = world.clone_entity(src);
         assert!(world.is_alive(dst));
         assert_eq!(world.entity_count(), 1); // only dst
+    }
+
+    #[test]
+    fn world_remove_resource_removes_and_returns() {
+        let mut world = World::new();
+        world.insert_resource(42u32);
+        assert_eq!(world.resource::<u32>().copied(), Some(42));
+
+        let v = world.remove_resource::<u32>();
+        assert_eq!(v, Some(42));
+        assert_eq!(world.resource::<u32>(), None);
+    }
+
+    #[test]
+    fn world_remove_resource_missing_returns_none() {
+        let mut world = World::new();
+        let v = world.remove_resource::<u32>();
+        assert_eq!(v, None);
     }
 }

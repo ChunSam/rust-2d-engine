@@ -273,7 +273,7 @@ impl GpuParticleRenderer {
             0,
             bytemuck::bytes_of(&ComputeUniforms { dt, _pad: [0.0; 3] }),
         );
-        let workgroups = (self.particle_capacity + 63) / 64;
+        let workgroups = self.particle_capacity.div_ceil(64);
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("gpu particle compute pass"),
             timestamp_writes: None,

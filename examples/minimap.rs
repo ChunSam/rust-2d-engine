@@ -159,6 +159,7 @@ fn main() {
         OffscreenCamera {
             target: "minimap".to_string(),
             camera: Camera::new(Vec2::ZERO, 0.15),
+            layer_mask: 1 << 0, // 게임 월드(layer 0)만 — 미니맵 표시용 스프라이트(layer 1) 제외
         },
     );
 

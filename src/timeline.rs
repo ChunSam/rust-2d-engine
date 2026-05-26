@@ -90,6 +90,9 @@ impl<T: Clone + Lerp> Track<T> {
     /// 시간 `t`에서 보간된 값을 반환한다.
     /// 키프레임이 없으면 `None`, 범위 밖이면 첫/마지막 값을 클램프.
     pub fn sample(&self, t: f32) -> Option<T> {
+        if t.is_nan() {
+            return None;
+        }
         if self.keyframes.is_empty() {
             return None;
         }
@@ -367,6 +370,25 @@ mod tests {
         let track = Track::with_keyframes(kfs);
         let v = track.sample(0.5).unwrap();
         assert!((v - 50.0).abs() < 1e-4, "expected ~50, got {v}");
+    }
+
+    #[test]
+    fn track_sample_nan_returns_none() {
+        let mut track: Track<f32> = Track::new();
+        track.add(0.0, 0.0, Easing::Linear);
+        track.add(1.0, 1.0, Easing::Linear);
+        assert_eq!(track.sample(f32::NAN), None);
+    }
+
+    #[test]
+    fn track_nan_keyframe_does_not_panic_normal_sample() {
+        let mut track: Track<f32> = Track::new();
+        track.add(f32::NAN, 99.0, Easing::Linear);
+        track.add(0.0, 0.0, Easing::Linear);
+        track.add(1.0, 1.0, Easing::Linear);
+        // NaN keyframe 존재해도 정상 시간 샘플링은 panic 없이 값 반환
+        let v = track.sample(0.5);
+        assert!(v.is_some(), "normal sample must not panic with NaN keyframe");
     }
 
     #[test]
