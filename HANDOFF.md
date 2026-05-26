@@ -97,7 +97,8 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 59 | API Freeze — Cargo.toml v1.0.0, keywords/categories/rust-version 추가 | `706a263` |
 | 코드 리뷰 | 런타임·구조 리스크 7항목 수정 — Timeline NaN, TextureError fallback, World 오염, OffscreenCamera layer_mask, ScriptingSystem register_fn 1회화, Network backpressure, egui unsafe 문서화 | `4084cee` |
 
-> Phase 46~59 모두 완료. 코드 리뷰 7항목 추가 수정. 총 195개 테스트 통과. `cargo clippy --all-targets -- -D warnings` 경고 0개. **v1.0.0 릴리즈 준비 완료.**
+> Phase 46~59 모두 완료. 코드 리뷰 7항목 수정 + wss:// TLS read timeout 실제 수정 완료.
+> 검증: `cargo test --lib` 195 tests 통과 / `cargo test --all-targets` lib 195 + examples 3 tests 통과 / `cargo clippy --all-targets -- -D warnings` 통과. **v1.0.0 릴리즈 준비 완료.**
 
 ---
 
@@ -168,7 +169,8 @@ src/
 ## 이번 세션에서 한 일 (코드 리뷰 7항목 수정 — v1.0.0 품질 강화)
 
 > 다른 작업자가 작성한 ENGINE_REVIEW_FIX_PROMPT.md의 런타임·구조 리스크 7개 항목을 우선순위 순서로 수정.  
-> 기존 공개 API 변경 없음. 테스트 183개 → 195개. `cargo clippy --all-targets -- -D warnings` 경고 0개.
+> 기존 공개 API 변경 없음.
+> 검증: `cargo test --lib` 195 tests 통과 / `cargo test --all-targets` lib 195 + examples 3 tests 통과 / `cargo clippy --all-targets -- -D warnings` 통과.
 
 ### 1. Timeline NaN 샘플링 panic 제거
 
@@ -240,11 +242,11 @@ src/
 
 ---
 
-### 6. 네트워크 backpressure 개선
+### 6. 네트워크 backpressure + wss:// TLS read timeout 수정
 
 **변경 파일**: `src/network.rs`
 
-**문제**: 송신 채널 unbounded → 느린 연결에서 메모리 무제한 증가. `send_text`/`send_bytes` 드롭 여부 불투명.
+**문제**: 송신 채널 unbounded → 느린 연결에서 메모리 무제한 증가. `send_text`/`send_bytes` 드롭 여부 불투명. `wss://` TLS 연결에서 `socket.read()`가 블로킹되어 발신/종료 처리 지연 가능.
 
 **수정**:
 - `NetworkConfig.max_pending_messages: usize` 필드 추가 (기본값 256)
@@ -252,7 +254,7 @@ src/
 - `NetworkClient.msg_tx`: `Sender` → `SyncSender`
 - `send_bytes`/`send_text`: `try_send` 사용, 큐 만원 시 `log::warn!` + 드롭 (시그니처 유지)
 - `try_send_bytes(&self, data: &[u8]) -> bool`, `try_send_text(&self, text) -> bool` 추가
-- TLS `read_timeout` 미지원 TODO 주석 명시
+- **TLS read timeout 실제 수정**: `MaybeTlsStream::Rustls(tls)` variant에서 `tls.sock`(`rustls::StreamOwned.sock: pub TcpStream`)으로 직접 `set_read_timeout(5ms)` 호출. `wss://` 연결도 plain TCP와 동일하게 5 ms 주기로 발신 채널 확인 가능.
 - 추가 테스트 1개: `network_bounded_channel_drops_on_full`
 
 ---

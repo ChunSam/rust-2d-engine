@@ -72,14 +72,17 @@ mod native {
                     }
                 };
 
-                // 5 ms read timeout → loop가 5 ms마다 발신 채널을 확인
-                if let tungstenite::stream::MaybeTlsStream::Plain(tcp) = socket.get_mut() {
-                    tcp.set_read_timeout(Some(std::time::Duration::from_millis(5)))
-                        .ok();
+                // 5 ms read timeout → loop가 5 ms마다 발신 채널을 확인한다.
+                // Plain TCP와 rustls TLS 양쪽 모두 내부 TcpStream에 직접 설정한다.
+                const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(5);
+                let stream = socket.get_mut();
+                if let tungstenite::stream::MaybeTlsStream::Plain(tcp) = stream {
+                    tcp.set_read_timeout(Some(READ_TIMEOUT)).ok();
+                } else if let tungstenite::stream::MaybeTlsStream::Rustls(tls) = stream {
+                    // rustls::StreamOwned.sock 은 pub 필드 (rustls 0.22+)
+                    // wss:// 연결에서도 5 ms 주기로 발신 채널을 확인할 수 있게 한다.
+                    tls.sock.set_read_timeout(Some(READ_TIMEOUT)).ok();
                 }
-                // TODO: TLS 소켓(MaybeTlsStream::Rustls / NativeTls)은 내부 TCP 스트림에
-                // read_timeout을 직접 설정하는 공개 API가 없어 tungstenite 현 버전에서
-                // 미지원. 향후 tungstenite/rustls API 변경 시 재검토 필요.
 
                 let _ = event_tx.send(NetworkEvent::Connected);
 
