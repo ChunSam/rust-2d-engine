@@ -1,6 +1,6 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 45~53 갱신: 2026-05-26 / Phase 46~59 완료: 2026-05-26)  
+작성일: 2026-05-24 (Phase 45~53 갱신: 2026-05-26 / Phase 46~59 완료: 2026-05-26 / 코드 리뷰 7항목 수정: 2026-05-26)  
 엔진 버전: **v1.0.0** (태그: v1.0.0, main 브랜치 기준)  
 작성자: ChunSam
 
@@ -95,8 +95,9 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 57c | CI — .github/workflows/ci.yml (native+WASM 빌드, clippy, rustdoc) | `706a263` |
 | Phase 57a/b | Rustdoc — broken intra_doc_link/invalid_html_tags 수정, RUSTDOCFLAGS="-D warnings" 통과 | `706a263` |
 | Phase 59 | API Freeze — Cargo.toml v1.0.0, keywords/categories/rust-version 추가 | `706a263` |
+| 코드 리뷰 | 런타임·구조 리스크 7항목 수정 — Timeline NaN, TextureError fallback, World 오염, OffscreenCamera layer_mask, ScriptingSystem register_fn 1회화, Network backpressure, egui unsafe 문서화 | `4084cee` |
 
-> Phase 46~59 모두 완료. 총 183개 테스트 통과. `cargo doc --no-deps` 경고 0개. **v1.0.0 릴리즈 준비 완료.**
+> Phase 46~59 모두 완료. 코드 리뷰 7항목 추가 수정. 총 195개 테스트 통과. `cargo clippy --all-targets -- -D warnings` 경고 0개. **v1.0.0 릴리즈 준비 완료.**
 
 ---
 
@@ -161,6 +162,110 @@ src/
 │       └── post_process.wgsl                                      ← Phase 10
 └── save.rs           RON 세이브/불러오기 (save/load/load_or_default/exists/delete)
 ```
+
+---
+
+## 이번 세션에서 한 일 (코드 리뷰 7항목 수정 — v1.0.0 품질 강화)
+
+> 다른 작업자가 작성한 ENGINE_REVIEW_FIX_PROMPT.md의 런타임·구조 리스크 7개 항목을 우선순위 순서로 수정.  
+> 기존 공개 API 변경 없음. 테스트 183개 → 195개. `cargo clippy --all-targets -- -D warnings` 경고 0개.
+
+### 1. Timeline NaN 샘플링 panic 제거
+
+**변경 파일**: `src/timeline.rs`
+
+**문제**: `Track::sample(f32::NAN)` 호출 시 `rposition` 비교가 모두 false → `unwrap()` panic.
+
+**수정**: `if t.is_nan() { return None; }` 조기 반환 추가.
+
+**추가 테스트**: `track_sample_nan_returns_none`, `track_nan_keyframe_does_not_panic_normal_sample`
+
+---
+
+### 2. Texture 로딩 panic → fallback 전환
+
+**변경 파일**: `src/renderer/texture.rs`, `src/lib.rs`
+
+**문제**: `from_path` 파일 없음/디코딩 실패 시 panic.
+
+**수정**:
+- `TextureError { Io(std::io::Error), Decode(image::ImageError) }` 추가
+- `try_from_path(...)  -> Result<Self, TextureError>` 추가
+- `from_path` → `try_from_path` 실패 시 magenta 1×1 fallback + `log::warn!`
+- `decode_image_bytes(bytes) -> Result<(Vec<u8>, u32, u32), TextureError>` 추가 (GPU-free 테스트용)
+- `src/lib.rs`에 `pub use renderer::texture::TextureError` 추가
+- 추가 테스트 3개 (IO 오류, decode 오류, 정상 PNG)
+
+---
+
+### 3. OffscreenCamera World 상태 오염 수정
+
+**변경 파일**: `src/ecs/world.rs`, `src/app.rs`
+
+**문제**: 오프스크린 렌더 전 Camera 없어도 `unwrap_or_default()`로 저장 → 렌더 후 항상 Camera 삽입됨.
+
+**수정**:
+- `World::remove_resource<T>()  -> Option<T>` 메서드 추가
+- app.rs: `Option<Camera>` 저장 → 복원 시 `None`이면 `remove_resource::<Camera>()` 호출
+- 추가 테스트 2개: `world_remove_resource_removes_and_returns`, `world_remove_resource_missing_returns_none`
+
+---
+
+### 4. OffscreenCamera 자기 캡처 방지 (layer_mask)
+
+**변경 파일**: `src/components.rs`, `src/renderer/sprite.rs`, `src/app.rs`, `examples/minimap.rs`, `examples/split_screen.rs`
+
+**문제**: 오프스크린 패스에서 결과를 표시하는 스프라이트까지 렌더 대상에 포함될 수 있음.
+
+**수정**:
+- `OffscreenCamera.layer_mask: u32` 필드 추가 (0 = 전체 허용, 하위 호환)
+- `SpriteRenderer::render(...)` 에 `layer_mask: u32` 파라미터 추가
+- 스프라이트 수집 루프: `layer_mask != 0`이면 비트 필터링
+- 오프스크린 패스는 `cam.layer_mask`, 메인 패스는 `0` 전달
+- `examples/minimap.rs`: `layer_mask: 1 << 0` (게임 월드만, UI 스프라이트 제외)
+
+---
+
+### 5. ScriptingSystem register_fn 중복 호출 제거
+
+**변경 파일**: `src/scripting.rs`
+
+**문제**: `register_fn` 11개가 매 프레임 N 엔티티마다 반복 호출 → Rhai 내부 레지스트리 누적.
+
+**수정**: `thread_local! { static SCRIPT_CTX: RefCell<Option<ScriptCtx>> }` 패턴 도입.
+- `with_limits()`에서 모든 함수 **1회만** 등록; `SCRIPT_CTX.with(|c| { ... })` 으로 컨텍스트 접근
+- `run()` 루프: 엔티티별 버퍼 생성 → `set_script_ctx(ctx)` → 실행 → `clear_script_ctx()`
+- 기존 API 이름 전부 유지 (`spawn_entity`, `bb_set_bool`, 등)
+- 추가 테스트 3개: spawn 명령, bb 라운드트립, 두 엔티티 버퍼 오염 없음
+
+---
+
+### 6. 네트워크 backpressure 개선
+
+**변경 파일**: `src/network.rs`
+
+**문제**: 송신 채널 unbounded → 느린 연결에서 메모리 무제한 증가. `send_text`/`send_bytes` 드롭 여부 불투명.
+
+**수정**:
+- `NetworkConfig.max_pending_messages: usize` 필드 추가 (기본값 256)
+- `mpsc::channel` → `mpsc::sync_channel(config.max_pending_messages)` 교체
+- `NetworkClient.msg_tx`: `Sender` → `SyncSender`
+- `send_bytes`/`send_text`: `try_send` 사용, 큐 만원 시 `log::warn!` + 드롭 (시그니처 유지)
+- `try_send_bytes(&self, data: &[u8]) -> bool`, `try_send_text(&self, text) -> bool` 추가
+- TLS `read_timeout` 미지원 TODO 주석 명시
+- 추가 테스트 1개: `network_bounded_channel_drops_on_full`
+
+---
+
+### 7. egui unsafe helper 격리·문서화
+
+**변경 파일**: `src/app.rs` (`egui_render_pass` 함수)
+
+**문제**: `transmute` 2개 사용 — 즉시 안전 API로 교체 불가 (egui-wgpu 0.29 요구사항).
+
+**수정**: 코드 변경 없이 문서화만. `fn egui_render_pass`를 doc 함수로 변환:
+- `/// # Safety` 섹션에 3가지 불변 조건 명시
+- egui-wgpu 업그레이드 시 제거 체크리스트 추가
 
 ---
 
@@ -1995,6 +2100,9 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 39d~~ | ~~REFERENCE.md v0.38.0 — Steering/Blackboard/Commands/SceneGraph/Rhai 문서화~~ | — | 완료 |
 | ~~Phase 40c~~ | ~~Gizmo Grid Snap — 체크박스 + 격자 크기 DragValue + snap_to_grid 헬퍼~~ | — | 완료 |
 | ~~Phase 40d~~ | ~~REFERENCE.md v0.39.0 — 컴포넌트 추가/제거 UI, register_component 문서화~~ | — | 완료 |
+| ~~코드 리뷰 7항목~~ | ~~Timeline NaN / TextureError / remove_resource / layer_mask / register_fn 1회화 / network backpressure / egui unsafe 문서화~~ | — | 완료 (`4084cee`) |
+
+> **현재 상태**: 미해결 항목 없음. v1.0.0 릴리즈 준비 완료.
 
 ---
 
