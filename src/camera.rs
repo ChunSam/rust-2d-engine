@@ -30,7 +30,7 @@ pub struct Camera {
     shake_timer: f32,
 
     // --- Smooth Follow ---
-    /// 따라갈 엔티티 (Entity 타입은 Copy이므로 Option<Entity> 도 Copy)
+    /// 따라갈 엔티티 (`Entity` 타입은 Copy이므로 `Option<Entity>` 도 Copy)
     pub follow_entity: Option<crate::ecs::Entity>,
     /// 초당 lerp 강도. 0.0 = 추적 없음, 1.0 = 즉시 스냅. 기본값 5.0
     pub lerp_factor: f32,

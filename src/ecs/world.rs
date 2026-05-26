@@ -697,7 +697,7 @@ impl World {
     /// T를 가진 모든 엔티티에 클로저를 **병렬**로 적용한다 (읽기 전용).
     ///
     /// 결과를 수집할 때는 클로저 내에서 `Mutex` 또는 채널을 사용하거나,
-    /// 반환값이 필요하면 [`par_query_map`]을 사용한다.
+    /// 반환값이 필요하면 `par_query_map`을 사용한다.
     ///
     /// ```text
     /// world.par_query_for_each::<Transform, _>(|e, t| {

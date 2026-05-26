@@ -1,10 +1,13 @@
 [package]
 name        = "engine"
-version     = "0.3.0"
+version     = "1.0.0"
 edition     = "2021"
 description = "Lightweight 2D game engine — wgpu rendering, custom ECS, rapier2d physics"
 repository  = "https://github.com/ChunSam/rust-2d-engine"
 license     = "MIT"
+keywords    = ["game", "engine", "wgpu", "ecs", "2d"]
+categories  = ["game-engines", "rendering", "wasm"]
+rust-version = "1.79"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -61,3 +64,20 @@ wasm-opt = false
 
 [package.metadata.wasm-pack.profile.dev]
 wasm-opt = false
+
+# ── 릴리즈 빌드 최적화 ────────────────────────────────────────────────────────
+[profile.release]
+opt-level     = 3
+lto           = "thin"
+codegen-units = 1
+strip         = "symbols"
+panic         = "abort"
+
+# wasm 릴리즈: LTO + panic=abort 으로 바이너리 크기 최소화
+[profile.release-wasm]
+inherits      = "release"
+opt-level     = "z"
+lto           = true
+codegen-units = 1
+strip         = "symbols"
+panic         = "abort"
