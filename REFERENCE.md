@@ -2843,3 +2843,169 @@ match load::<GameProgress>(&path) {
 ```
 
 > `save_path`는 네이티브에서 OS 표준 데이터 디렉토리(`~/Library/Application Support/` 등)를 반환한다. WASM에서는 `"{app_name}/{file}"` 상대 경로를 반환하며, 파일 I/O 호출은 호출자가 별도로 처리해야 한다.
+
+---
+
+## 렌더 텍스처 (Phase 46)
+
+오프스크린 렌더 타겟에 별도 카메라로 씬을 그린 뒤 일반 스프라이트 텍스처처럼 재사용한다.
+
+### RenderTarget
+
+```rust
+// App 시작 시 렌더 타겟 예약
+app.create_render_target("minimap", 256, 256);
+
+// OffscreenCamera 컴포넌트로 오프스크린 렌더 지정
+let cam_entity = world.spawn();
+world.add_component(cam_entity, OffscreenCamera {
+    target: "minimap".to_string(),
+    camera: Camera { zoom: 0.25, ..Default::default() },
+});
+
+// 렌더 텍스처를 스프라이트로 표시
+let sprite_entity = world.spawn();
+world.add_component(sprite_entity, Transform {
+    position: Vec2::new(1180.0, 60.0),
+    scale: Vec2::splat(256.0),
+    ..Default::default()
+});
+world.add_component(sprite_entity, Sprite {
+    texture_key: Some("minimap".to_string()),
+    ..Default::default()
+});
+```
+
+---
+
+## 터치 입력 (Phase 47)
+
+### TouchState API
+
+```rust
+let touch = world.resource::<TouchState>().unwrap();
+
+// 터치 시작 이번 프레임
+for tp in touch.began() { println!("터치 시작: {:?}", tp.position); }
+
+// 활성 터치 목록
+for (id, tp) in touch.active() { /* ... */ }
+
+// 핀치/스와이프
+let pinch_delta: f32 = touch.pinch_delta();        // 양수 = 확대
+let swipe: Option<Vec2> = touch.swipe().cloned();  // 50px 이상 이동 시 Some
+```
+
+### VirtualJoystick
+
+```rust
+let mut joystick = VirtualJoystick {
+    center: Vec2::new(150.0, 550.0),
+    radius: 60.0,
+    ..Default::default()
+};
+
+impl System for MySystem {
+    fn run(&mut self, world: &mut World, _dt: f32) {
+        let touch = world.resource::<TouchState>().unwrap();
+        self.joystick.update(touch);
+        let dir = self.joystick.output_with_deadzone(0.1); // 정규화 Vec2
+    }
+}
+```
+
+---
+
+## 에셋 비동기 로딩 (Phase 51)
+
+```rust
+// 백그라운드 로드 시작
+app.load_image_async("assets/level1.png");
+
+// 진행 상태 폴링 (시스템 내)
+let progress = world.resource::<LoadProgress>().unwrap();
+println!("{:.0}%", progress.fraction() * 100.0);
+if progress.is_complete() { /* 모든 에셋 로드 완료 */ }
+
+// 핸들로 로드 상태 확인
+let handle = app.load_image("assets/sprite.png");
+match server.state(&handle) {
+    AssetLoadState::Loading  => { /* 로딩 중 */ }
+    AssetLoadState::Loaded   => { /* 사용 가능 */ }
+    AssetLoadState::NotFound => { /* 에러 */ }
+}
+```
+
+---
+
+## GPU 파티클 (Phase 56a)
+
+GPU 컴퓨트 셰이더로 시뮬레이션하는 고성능 파티클 시스템 (네이티브 전용).
+
+```rust
+let entity = world.spawn();
+world.add_component(entity, Transform { position: Vec2::new(640.0, 360.0), ..Default::default() });
+
+let mut emitter = GpuParticleEmitter::default();
+emitter.spawn_rate     = 200.0;          // 초당 파티클 수
+emitter.lifetime       = 2.5;            // 수명(초)
+emitter.velocity       = Vec2::new(0.0, -100.0);
+emitter.velocity_spread = Vec2::new(50.0, 30.0);
+emitter.color_start    = [1.0, 0.8, 0.2, 1.0]; // 시작 색(RGBA)
+emitter.color_end      = [1.0, 0.0, 0.0, 0.0]; // 종료 색(RGBA)
+emitter.size           = 8.0;            // 파티클 크기(픽셀)
+emitter.emit           = true;
+world.add_component(entity, emitter);
+
+// 방출 중지
+if let Some(em) = world.get_mut::<GpuParticleEmitter>(entity) {
+    em.emit = false;
+}
+```
+
+- 내부적으로 4096 슬롯 링 버퍼를 사용한다. `GpuParticleRenderer`는 첫 이미터 등록 시 자동으로 lazy-init된다.
+- WASM에서는 CPU `ParticleEmitter`를 사용할 것.
+
+---
+
+## 포스트 프로세스 색보정 (Phase 56b)
+
+```rust
+world.insert_resource(PostProcessConfig {
+    enabled: true,
+    vignette_strength: 0.4,
+    aberration_strength: 0.003,
+    bloom_strength: 0.15,
+    brightness: 0.05,   // -1.0 ~ 1.0 (0 = 변화 없음)
+    contrast: 1.1,      // 0.0 ~ 2.0  (1.0 = 변화 없음)
+    saturation: 1.2,    // 0.0 ~ 2.0  (1.0 = 변화 없음)
+    ..Default::default()
+});
+```
+
+---
+
+## 배포 패키징 (Phase 55)
+
+```toml
+# Cargo.toml 릴리즈 프로필 (자동 적용됨)
+[profile.release]
+opt-level     = 3
+lto           = "thin"
+strip         = "symbols"
+panic         = "abort"
+
+[profile.release-wasm]   # wasm 최적화
+inherits      = "release"
+opt-level     = "z"
+lto           = true
+```
+
+```bash
+# WASM 빌드
+./scripts/build_wasm.sh          # dist/ 에 번들 생성
+./scripts/build_wasm.sh --dev    # 개발 모드
+
+# 로컬 서버
+python3 -m http.server --directory dist 8080
+```

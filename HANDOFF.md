@@ -1,7 +1,7 @@
 # 핸드오프 문서 — rust-2d-engine
 
-작성일: 2026-05-24 (Phase 45~53 갱신: 2026-05-26)  
-엔진 버전: v0.46.0 (태그: v0.3.0, main 브랜치 기준)  
+작성일: 2026-05-24 (Phase 45~53 갱신: 2026-05-26 / Phase 46~59 완료: 2026-05-26)  
+엔진 버전: **v1.0.0** (태그: v1.0.0, main 브랜치 기준)  
 작성자: ChunSam
 
 ---
@@ -85,9 +85,18 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 49 | 텍스트 완성 — 멀티라인/정렬(TextAlign), 리치텍스트, IME 조합 입력(preedit) | `d648371` |
 | Phase 50 | 로컬라이제이션 — LocaleResource, t API, TextDirection(RTL), LocaleBundle/Data | `9321cac` |
 | Phase 53 | 저장 보안 — chacha20poly1305 AEAD 암호화 + 변조 감지(SaveError::Corrupted) | `34aa368` |
+| Phase 46 | 렌더 텍스처 — RenderTarget, OffscreenCamera, SpriteRenderer rt_cache, 오프스크린 패스 | `96aa5d7` |
+| Phase 47 | 터치 입력/모바일 — TouchState(멀티터치/스와이프/핀치), VirtualJoystick, WASM 마우스 에뮬레이션 | `96aa5d7` |
+| Phase 51 | 에셋 비동기 로딩 — AssetLoadState::Loading, load_image_async, LoadProgress, WASM fetch | `96aa5d7` |
+| Phase 52 | 패닉 복구 — catch_unwind 시스템 래퍼, PanickedSystems, 크래시 로그 기록 | `96aa5d7` |
+| Phase 54 | 에디터 완성 — PrefabInstance 추적, break_prefab_instance, 복수 선택 Ctrl+C/V, 그룹 이동 | `96aa5d7` |
+| Phase 56 | 고급 렌더링 — GpuParticleEmitter/GpuParticleRenderer(컴퓨트 셰이더), PostProcess 색보정 | `687ec89` |
+| Phase 55 | 배포 패키징 — release/release-wasm 프로필, scripts/build_wasm.sh | `706a263` |
+| Phase 57c | CI — .github/workflows/ci.yml (native+WASM 빌드, clippy, rustdoc) | `706a263` |
+| Phase 57a/b | Rustdoc — broken intra_doc_link/invalid_html_tags 수정, RUSTDOCFLAGS="-D warnings" 통과 | `706a263` |
+| Phase 59 | API Freeze — Cargo.toml v1.0.0, keywords/categories/rust-version 추가 | `706a263` |
 
-> Phase 45·48·49·50·53은 멀티 세션 병렬 진행(Track A: 45·49 / Track B: 48·50·53) 후 main에 머지.
-> **Milestone 1 잔여**: Phase 46(렌더 텍스처)·47(터치 입력) 미완.
+> Phase 46~59 모두 완료. 총 183개 테스트 통과. `cargo doc --no-deps` 경고 0개. **v1.0.0 릴리즈 준비 완료.**
 
 ---
 
@@ -155,11 +164,74 @@ src/
 
 ---
 
-## 이번 세션에서 한 일 (Phase 45·48·49·50·53 — 멀티 세션 병렬)
+## 이번 세션에서 한 일 (Phase 46~59 — v1.0.0 완성)
 
-> ROADMAP "동시 진행 가이드"에 따라 5개 페이즈를 여러 세션에서 병렬 진행 후 main에 머지.
-> 충돌 병목인 `src/app.rs`를 건드리는 Track A(45·49)는 직렬, app.rs 무관 Track B(48·50·53)는 병렬.
-> 각 phase-* 브랜치 → `merge:` 커밋으로 main 통합. 테스트 166개 통과, native+WASM 빌드 통과.
+> REMAINING_WORK.md Track A 직렬 체인(46→47→51→52→54→56) + Track B(55, 57c) + Solo(57a/b, 59)를 단일 세션에서 완료.
+> 테스트 183개 통과. `cargo doc --no-deps` 경고 0개. v1.0.0 API Freeze 완료.
+
+### Phase 46 — 렌더 텍스처 (Offscreen Render Targets)
+
+**변경 파일**: `src/renderer/render_target.rs`(신규), `src/renderer/mod.rs`, `src/components.rs`, `src/app.rs`, `src/lib.rs`
+
+- `RenderTarget { texture, view, sampler, bind_group: Arc<BindGroup>, width, height }` — RENDER_ATTACHMENT|TEXTURE_BINDING
+- `OffscreenCamera { target: String, camera: Camera }` 컴포넌트
+- `App::create_render_target(name, w, h)` + 오프스크린 렌더 패스 (메인 패스 이전 실행)
+- `SpriteRenderer::register_render_target(key, bg)` + `rt_cache` — 렌더 텍스처를 스프라이트 소스로 사용
+- `examples/minimap.rs`, `examples/split_screen.rs`
+
+### Phase 47 — 터치 입력 + 모바일
+
+**변경 파일**: `src/input/touch.rs`(신규), `src/input/mod.rs`, `src/ui/joystick.rs`(신규), `src/ui/mod.rs`, `src/app.rs`, `src/lib.rs`
+
+- `TouchState`: 멀티터치 HashMap, began/moved/ended 프레임 버퍼, 핀치·스와이프 감지
+- `VirtualJoystick`: TouchState → 정규화 Vec2 출력, `update_raw()`, `output_with_deadzone(f32)`
+- `WindowEvent::Touch` 처리 + WASM/PC 마우스 에뮬레이션
+- `examples/touch_demo.rs`
+
+### Phase 51 — 에셋 비동기 로딩
+
+**변경 파일**: `src/asset.rs`, `src/app.rs`, `src/resources.rs`, `src/lib.rs`, `Cargo.toml`
+
+- `AssetLoadState::Loading` 추가, `AsyncImageResult` + mpsc 채널(네이티브) / thread_local VecDeque(WASM)
+- `App::load_image_async(path)` — spawn_blocking(native) / wasm_bindgen_futures::spawn_local
+- `LoadProgress { total, loaded }` 리소스, 매 프레임 `poll_async_completions()` 처리
+
+### Phase 52 — 패닉 복구
+
+**변경 파일**: `src/app.rs`, `src/resources.rs`, `src/lib.rs`
+
+- `catch_unwind(AssertUnwindSafe(|| system.run(...)))` 래퍼로 시스템 패닉 격리
+- 패닉 발생 시스템 인덱스를 `HashSet<usize>`에 보관, 이후 프레임 건너뜀
+- `PanickedSystems { disabled: Vec<String> }` 리소스, `write_crash_log()` (네이티브 전용)
+
+### Phase 54 — 에디터 완성
+
+**변경 파일**: `src/app.rs`, `src/prefab.rs`, `src/lib.rs`
+
+- `PrefabInstance { source_path: String }` 컴포넌트, `Prefab::spawn_with_tracking()`
+- `break_prefab_instance(world, entity)` — PrefabInstance 제거
+- Inspector Ctrl+C(복사)/Ctrl+V(붙여넣기), 복수 엔티티 선택/그룹 이동
+
+### Phase 56 — 고급 렌더링
+
+**변경 파일**: `src/gpu_particle.rs`(신규), `src/renderer/gpu_particle.rs`(신규), `src/renderer/shaders/gpu_particle_*.wgsl`(신규), `src/renderer/post_process.rs`, `src/renderer/shaders/post_process.wgsl`, `src/app.rs`, `src/lib.rs`
+
+**56a GPU 파티클**:
+- `GpuParticleEmitter` 컴포넌트, 링 버퍼(4096 슬롯) 방출 로직
+- `GpuParticleRenderer`: 컴퓨트 셰이더(WGSL) 물리 시뮬레이션 + 렌더 파이프라인(파티클당 6 버텍스)
+- App 렌더 루프 2.8단계 lazy-init 통합, `last_dt` 필드로 render() 내 dt 전달
+- `examples/gpu_particles.rs`
+
+**56b 포스트 프로세스 색보정**:
+- `PostProcessConfig`: `brightness/contrast/saturation` 파라미터 추가
+- `post_process.wgsl`: WGSL 색보정 코드 (밝기→대비→채도 순)
+
+### Phase 55/57c/57a-b/59 — 배포·CI·Rustdoc·API Freeze
+
+- `Cargo.toml`: release/release-wasm 프로필(LTO/strip), v1.0.0 메타데이터
+- `scripts/build_wasm.sh`: wasm-bindgen 자동화 + index.html 생성
+- `.github/workflows/ci.yml`: native(test/clippy/fmt/release) + WASM + rustdoc 검사
+- `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps` 경고 0개
 
 ### Phase 45 — 시스템 실행 순서 명시 (Track A)
 
