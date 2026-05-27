@@ -460,7 +460,10 @@ impl AudioManager {
             if (eff.pitch - 1.0).abs() > 0.001 {
                 let s = source.speed(eff.pitch);
                 if let Some(hz) = eff.low_pass_hz {
-                    let s = s.convert_samples::<f32>().low_pass(hz).convert_samples::<i16>();
+                    let s = s
+                        .convert_samples::<f32>()
+                        .low_pass(hz)
+                        .convert_samples::<i16>();
                     if eff.attack_secs > 0.001 {
                         Box::new(s.fade_in(Duration::from_secs_f32(eff.attack_secs)))
                     } else {
@@ -475,7 +478,10 @@ impl AudioManager {
                     Box::new(s.convert_samples::<i16>())
                 }
             } else if let Some(hz) = eff.low_pass_hz {
-                let s = source.convert_samples::<f32>().low_pass(hz).convert_samples::<i16>();
+                let s = source
+                    .convert_samples::<f32>()
+                    .low_pass(hz)
+                    .convert_samples::<i16>();
                 if eff.attack_secs > 0.001 {
                     Box::new(s.fade_in(Duration::from_secs_f32(eff.attack_secs)))
                 } else {

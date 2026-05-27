@@ -3,9 +3,8 @@
 /// 월드 카메라로 정상 렌더, OffscreenCamera로 줌-아웃된 256x256 미니맵을 만들어
 /// 화면 우상단에 표시한다.
 use engine::{
-    App, Camera, OffscreenCamera, RenderLayer, Sprite, Transform,
     ecs::{Entity, System, World},
-    WindowConfig,
+    App, Camera, OffscreenCamera, RenderLayer, Sprite, Transform, WindowConfig,
 };
 use glam::Vec2;
 use winit::keyboard::KeyCode;
@@ -36,10 +35,7 @@ impl System for MoveSystem {
             }
         }
 
-        let entities: Vec<Entity> = world
-            .query::<PlayerTag>()
-            .map(|(e, _)| e)
-            .collect();
+        let entities: Vec<Entity> = world.query::<PlayerTag>().map(|(e, _)| e).collect();
         let dt = _dt;
         for e in &entities {
             if let Some(t) = world.get_mut::<Transform>(*e) {

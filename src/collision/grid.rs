@@ -61,7 +61,7 @@ pub struct GridEntry {
 /// 공간 해시 그리드.
 ///
 /// 매 프레임 `rebuild` 로 갱신하고 `query_radius` / `query_aabb` 로 조회.
-/// 기본 셀 크기: 128 픽셀 (CLAUDE.md 결정)
+/// 기본 셀 크기: 128 픽셀.
 #[derive(Debug)]
 pub struct SpatialGrid {
     /// 셀 한 변 길이 (픽셀)

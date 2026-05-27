@@ -1,6 +1,6 @@
 use glam::IVec2;
-use std::collections::{BinaryHeap, HashMap};
 use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap};
 
 /// 통행 가능 여부를 저장하는 격자 (row-major 배열)
 pub struct PathGrid {
@@ -13,13 +13,21 @@ impl PathGrid {
     /// 전부 통행 가능 상태로 초기화
     pub fn new(width: i32, height: i32) -> Self {
         let size = (width * height).max(0) as usize;
-        Self { width, height, cells: vec![true; size] }
+        Self {
+            width,
+            height,
+            cells: vec![true; size],
+        }
     }
 
     /// 전부 막힌 상태로 초기화
     pub fn new_blocked(width: i32, height: i32) -> Self {
         let size = (width * height).max(0) as usize;
-        Self { width, height, cells: vec![false; size] }
+        Self {
+            width,
+            height,
+            cells: vec![false; size],
+        }
     }
 
     pub fn set_walkable(&mut self, x: i32, y: i32, walkable: bool) {
@@ -53,7 +61,11 @@ struct Node {
 impl Ord for Node {
     fn cmp(&self, other: &Self) -> Ordering {
         other.f.cmp(&self.f).then_with(|| {
-            other.pos.x.cmp(&self.pos.x).then(other.pos.y.cmp(&self.pos.y))
+            other
+                .pos
+                .x
+                .cmp(&self.pos.x)
+                .then(other.pos.y.cmp(&self.pos.y))
         })
     }
 }
@@ -95,7 +107,10 @@ pub fn find_path(grid: &PathGrid, start: IVec2, goal: IVec2) -> Option<Vec<IVec2
     let mut came_from: HashMap<IVec2, IVec2> = HashMap::new();
 
     g_score.insert(start, 0);
-    open.push(Node { f: manhattan(start, goal), pos: start });
+    open.push(Node {
+        f: manhattan(start, goal),
+        pos: start,
+    });
 
     while let Some(Node { pos: current, .. }) = open.pop() {
         if current == goal {
@@ -121,7 +136,10 @@ pub fn find_path(grid: &PathGrid, start: IVec2, goal: IVec2) -> Option<Vec<IVec2
             if g_next < *g_score.get(&next).unwrap_or(&i32::MAX) {
                 g_score.insert(next, g_next);
                 came_from.insert(next, current);
-                open.push(Node { f: g_next + manhattan(next, goal), pos: next });
+                open.push(Node {
+                    f: g_next + manhattan(next, goal),
+                    pos: next,
+                });
             }
         }
     }

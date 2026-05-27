@@ -1,6 +1,6 @@
-# rust-2d-engine 레퍼런스
+# skeleton-engine 레퍼런스
 
-> 버전 v0.46.0 기준. wgpu 기반 2D 게임 엔진.
+> 버전 v1.0.0 기준. 패키지명은 `skeleton-engine`, 라이브러리 크레이트명은 `engine`인 wgpu 기반 2D 게임 엔진.
 
 ---
 
@@ -58,13 +58,16 @@
 
 ```rust
 use engine::*;
-use winit::keyboard::KeyCode;
 
 struct MySystem;
 impl System for MySystem {
-    fn run(&mut self, world: &mut World, dt: f32) {
-        let input = world.resource::<InputState>().unwrap();
-        if input.just_pressed(KeyCode::Escape) {
+    fn run(&mut self, world: &mut World, _dt: f32) {
+        let should_quit = world
+            .resource::<InputState>()
+            .map(|input| input.just_pressed(KeyCode::Escape))
+            .unwrap_or(false);
+
+        if should_quit {
             world.resource_mut::<ShouldQuit>().unwrap().0 = true;
         }
     }
@@ -372,6 +375,7 @@ world.add_component(e, Sprite::colored(1.0, 0.0, 0.0));  // RGB
 world.add_component(e, Sprite {
     texture: Some("assets/hero.png".into()),
     color: [1.0, 0.5, 0.5, 0.8],  // RGBA 배율 (텍스처와 곱해짐)
+    ..Default::default()
 });
 ```
 
@@ -1369,12 +1373,12 @@ world.add_component(fx_entity, RenderLayer(10));
 
 ### 배칭 동작
 
-렌더러는 스프라이트를 `(layer, texture_key, z)` 순서로 정렬한 뒤 같은 텍스처가 연속되면 한 번의 드로우 콜로 묶는다.
+렌더러는 스프라이트를 `(layer, texture, z)` 순서로 정렬한 뒤 같은 텍스처가 연속되면 한 번의 드로우 콜로 묶는다.
 
 | 정렬 키 | 의미 |
 |---|---|
 | `layer` (i32) | `RenderLayer` 값. 없으면 0 |
-| `texture_key` (String) | 텍스처 경로. 같은 레이어 내 텍스처 변경 최소화 |
+| `texture` (`Option<String>`) | 텍스처 경로 또는 렌더 타겟 키. 같은 레이어 내 텍스처 변경 최소화 |
 | `z` (f32) | `Transform.z`. 같은 레이어·텍스처 내 미세 순서 |
 
 > **주의**: 같은 레이어에서 서로 다른 텍스처를 사용하는 스프라이트 간 z-정렬은 보장되지 않는다. 엄격한 순서가 필요하면 `RenderLayer`로 레이어를 분리하라.
@@ -2853,6 +2857,9 @@ match load::<GameProgress>(&path) {
 ### RenderTarget
 
 ```rust
+use engine::{Camera, OffscreenCamera, Sprite, Transform};
+use glam::Vec2;
+
 // App 시작 시 렌더 타겟 예약
 app.create_render_target("minimap", 256, 256);
 
@@ -2861,6 +2868,7 @@ let cam_entity = world.spawn();
 world.add_component(cam_entity, OffscreenCamera {
     target: "minimap".to_string(),
     camera: Camera { zoom: 0.25, ..Default::default() },
+    layer_mask: 1 << 0,
 });
 
 // 렌더 텍스처를 스프라이트로 표시
@@ -2871,7 +2879,7 @@ world.add_component(sprite_entity, Transform {
     ..Default::default()
 });
 world.add_component(sprite_entity, Sprite {
-    texture_key: Some("minimap".to_string()),
+    texture: Some("minimap".to_string()),
     ..Default::default()
 });
 ```
@@ -2886,24 +2894,22 @@ world.add_component(sprite_entity, Sprite {
 let touch = world.resource::<TouchState>().unwrap();
 
 // 터치 시작 이번 프레임
-for tp in touch.began() { println!("터치 시작: {:?}", tp.position); }
+for (id, pos) in &touch.began {
+    println!("터치 시작 {id}: {:?}", pos);
+}
 
 // 활성 터치 목록
-for (id, tp) in touch.active() { /* ... */ }
+for (id, pos) in touch.active_touches() { /* ... */ }
 
 // 핀치/스와이프
-let pinch_delta: f32 = touch.pinch_delta();        // 양수 = 확대
-let swipe: Option<Vec2> = touch.swipe().cloned();  // 50px 이상 이동 시 Some
+let pinch_delta: f32 = touch.pinch_delta;  // 양수 = 확대
+let swipe: Option<Vec2> = touch.swipe;     // 50px 이상 이동 시 Some
 ```
 
 ### VirtualJoystick
 
 ```rust
-let mut joystick = VirtualJoystick {
-    center: Vec2::new(150.0, 550.0),
-    radius: 60.0,
-    ..Default::default()
-};
+let mut joystick = VirtualJoystick::new(Vec2::new(150.0, 550.0), 60.0);
 
 impl System for MySystem {
     fn run(&mut self, world: &mut World, _dt: f32) {

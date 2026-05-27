@@ -6,7 +6,7 @@
 #   ./scripts/build_wasm.sh --dev        # dev 프로필 (빠른 반복)
 #
 # 출력: dist/
-#   engine_bg.wasm   — 최적화된 WASM 모듈
+#   engine_bg.wasm   — 최적화된 WASM 모듈 (lib crate name: engine)
 #   engine.js        — wasm-bindgen JS 글루 코드
 #   index.html       — 기본 HTML 엔트리 포인트
 #
@@ -55,14 +55,14 @@ cat > "$INDEX" <<'HTML'
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>rust-2d-engine</title>
+  <title>skeleton-engine</title>
   <style>
     body { margin: 0; background: #0a0a0f; display: flex; justify-content: center; align-items: center; height: 100vh; }
     canvas { display: block; }
   </style>
 </head>
 <body>
-  <canvas id="canvas"></canvas>
+  <canvas id="game-canvas"></canvas>
   <script type="module">
     import init, { run_demo } from './engine.js';
     await init();

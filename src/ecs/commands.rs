@@ -139,11 +139,7 @@ mod tests {
         let count = world.query::<Health>().count();
         assert_eq!(count, 1);
 
-        let health = world
-            .query::<Health>()
-            .next()
-            .map(|(_, h)| h.0)
-            .unwrap();
+        let health = world.query::<Health>().next().map(|(_, h)| h.0).unwrap();
         assert_eq!(health, 100);
     }
 

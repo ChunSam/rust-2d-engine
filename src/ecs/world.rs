@@ -200,7 +200,7 @@ impl World {
             // Box<dyn Any+Send+Sync> → Box<T> → T
             *extracted.downcast::<T>().ok()?
         }; // archetypes 빌림 해제
-        // Step 2: placeholder를 포함한 슬롯을 아키타입에서 제거
+           // Step 2: placeholder를 포함한 슬롯을 아키타입에서 제거
         self.remove_component::<T>(entity);
         Some(value)
     }
@@ -779,7 +779,11 @@ impl World {
                     .zip(ca.par_iter())
                     .zip(cb.par_iter())
                     .for_each(|((&e, a), b)| {
-                        f(e, a.downcast_ref::<A>().unwrap(), b.downcast_ref::<B>().unwrap());
+                        f(
+                            e,
+                            a.downcast_ref::<A>().unwrap(),
+                            b.downcast_ref::<B>().unwrap(),
+                        );
                     });
             });
     }
@@ -806,7 +810,11 @@ impl World {
                     .zip(ca.par_iter())
                     .zip(cb.par_iter())
                     .map(|((&e, a), b)| {
-                        f(e, a.downcast_ref::<A>().unwrap(), b.downcast_ref::<B>().unwrap())
+                        f(
+                            e,
+                            a.downcast_ref::<A>().unwrap(),
+                            b.downcast_ref::<B>().unwrap(),
+                        )
                     })
             })
             .collect()

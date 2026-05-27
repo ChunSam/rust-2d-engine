@@ -1,13 +1,16 @@
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::channel;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
-#[cfg(target_arch = "wasm32")]
-use std::cell::RefCell;
 
 #[cfg(not(target_arch = "wasm32"))]
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -158,6 +161,7 @@ pub struct AssetServer {
     script_path_to_id: HashMap<Arc<str>, AssetId>,
     atlases: HashMap<AssetId, crate::atlas::TextureAtlas>,
     atlas_path_to_id: HashMap<Arc<str>, AssetId>,
+    #[cfg(not(target_arch = "wasm32"))]
     reload_rx: Option<Receiver<PathBuf>>,
     #[cfg(not(target_arch = "wasm32"))]
     _watcher: Option<RecommendedWatcher>,
@@ -203,7 +207,8 @@ impl AssetServer {
                 },
                 Err(e) => {
                     log::warn!("파일 감시 초기화 실패 (핫 리로딩 비활성): {e}");
-                    let (async_tx2, async_rx2) = std::sync::mpsc::sync_channel::<AsyncImageResult>(128);
+                    let (async_tx2, async_rx2) =
+                        std::sync::mpsc::sync_channel::<AsyncImageResult>(128);
                     Self {
                         images: HashMap::new(),
                         image_load_states: HashMap::new(),
@@ -229,7 +234,6 @@ impl AssetServer {
             script_path_to_id: HashMap::new(),
             atlases: HashMap::new(),
             atlas_path_to_id: HashMap::new(),
-            reload_rx: None,
         }
     }
 
@@ -246,10 +250,22 @@ impl AssetServer {
             };
         }
         let id = alloc_id();
-        let (asset, state) = decode_image_with_state(&key);
-        self.images.insert(id, asset);
-        self.image_load_states.insert(id, state);
         self.path_to_id.insert(Arc::clone(&key), id);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (asset, state) = decode_image_with_state(&key);
+            self.images.insert(id, asset);
+            self.image_load_states.insert(id, state);
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.images.insert(id, magenta_fallback());
+            self.image_load_states.insert(id, AssetLoadState::Loading);
+            spawn_image_fetch_wasm(id, key.to_string());
+        }
+
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(ref mut w) = self._watcher {
             let _ = w.watch(path.as_ref(), RecursiveMode::NonRecursive);
@@ -384,34 +400,42 @@ impl AssetServer {
     ///
     /// `App`이 매 프레임 이를 호출하고, 반환된 경로들에 대해 GPU 텍스처를 재업로드한다.
     pub fn poll_reloads(&mut self) -> Vec<String> {
-        let rx = match &self.reload_rx {
-            Some(r) => r,
-            None => return Vec::new(),
-        };
-        let mut seen: Vec<String> = Vec::new();
-        while let Ok(path) = rx.try_recv() {
-            if let Some(s) = path.to_str() {
-                let key: Arc<str> = s.into();
-                let s_str = s.to_string();
-                let is_known =
-                    self.path_to_id.contains_key(&key) || self.script_path_to_id.contains_key(&key);
-                if is_known && !seen.contains(&s_str) {
-                    seen.push(s_str);
+        #[cfg(target_arch = "wasm32")]
+        {
+            Vec::new()
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let rx = match &self.reload_rx {
+                Some(r) => r,
+                None => return Vec::new(),
+            };
+            let mut seen: Vec<String> = Vec::new();
+            while let Ok(path) = rx.try_recv() {
+                if let Some(s) = path.to_str() {
+                    let key: Arc<str> = s.into();
+                    let s_str = s.to_string();
+                    let is_known = self.path_to_id.contains_key(&key)
+                        || self.script_path_to_id.contains_key(&key);
+                    if is_known && !seen.contains(&s_str) {
+                        seen.push(s_str);
+                    }
                 }
             }
-        }
-        for path_str in &seen {
-            let key: Arc<str> = path_str.as_str().into();
-            if let Some(&id) = self.path_to_id.get(&key) {
-                let (asset, state) = decode_image_with_state(path_str);
-                self.images.insert(id, asset);
-                self.image_load_states.insert(id, state);
+            for path_str in &seen {
+                let key: Arc<str> = path_str.as_str().into();
+                if let Some(&id) = self.path_to_id.get(&key) {
+                    let (asset, state) = decode_image_with_state(path_str);
+                    self.images.insert(id, asset);
+                    self.image_load_states.insert(id, state);
+                }
+                if let Some(&id) = self.script_path_to_id.get(&key) {
+                    self.scripts.insert(id, compile_script_file(path_str));
+                }
             }
-            if let Some(&id) = self.script_path_to_id.get(&key) {
-                self.scripts.insert(id, compile_script_file(path_str));
-            }
+            seen
         }
-        seen
     }
 
     /// 이미지를 백그라운드에서 비동기로 로드한다.
@@ -454,11 +478,7 @@ impl AssetServer {
 
         #[cfg(target_arch = "wasm32")]
         {
-            let path_clone = key.to_string();
-            wasm_bindgen_futures::spawn_local(async move {
-                let result = fetch_image_wasm(&path_clone).await;
-                WASM_ASYNC_QUEUE.with(|q| q.borrow_mut().push_back((id, path_clone, result)));
-            });
+            spawn_image_fetch_wasm(id, key.to_string());
         }
 
         Handle {
@@ -471,26 +491,27 @@ impl AssetServer {
     /// 완료된 비동기 로드 결과를 처리해 내부 캐시를 갱신한다.
     ///
     /// `App`이 매 프레임 호출한다. 완료된 에셋의 경로 목록을 반환한다.
-    pub(crate) fn poll_async_completions(&mut self) -> Vec<String> {
-        let mut completed_paths = Vec::new();
+    pub(crate) fn poll_async_completions(&mut self) -> Vec<(String, ImageAsset)> {
+        let mut completed = Vec::new();
 
         #[cfg(not(target_arch = "wasm32"))]
         while let Ok(result) = self.async_rx.try_recv() {
-            self.images.insert(result.id, result.asset);
+            let asset = result.asset;
+            self.images.insert(result.id, asset.clone());
             self.image_load_states.insert(result.id, result.state);
-            completed_paths.push(result.path);
+            completed.push((result.path, asset));
         }
 
         #[cfg(target_arch = "wasm32")]
         WASM_ASYNC_QUEUE.with(|q| {
             while let Some((id, path, (asset, state))) = q.borrow_mut().pop_front() {
-                self.images.insert(id, asset);
+                self.images.insert(id, asset.clone());
                 self.image_load_states.insert(id, state);
-                completed_paths.push(path);
+                completed.push((path, asset));
             }
         });
 
-        completed_paths
+        completed
     }
 
     /// 현재 `AssetLoadState::Loading` 상태인 이미지 수를 반환한다.
@@ -510,6 +531,7 @@ impl Default for AssetServer {
 
 // ─── 내부 헬퍼 ────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 fn decode_image_with_state(path: &str) -> (ImageAsset, AssetLoadState) {
     match std::fs::read(path) {
         Ok(bytes) => match image::load_from_memory(&bytes) {
@@ -640,4 +662,12 @@ async fn fetch_image_wasm(url: &str) -> (ImageAsset, AssetLoadState) {
             (magenta_fallback(), AssetLoadState::Failed(msg))
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_image_fetch_wasm(id: AssetId, path: String) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = fetch_image_wasm(&path).await;
+        WASM_ASYNC_QUEUE.with(|q| q.borrow_mut().push_back((id, path, result)));
+    });
 }

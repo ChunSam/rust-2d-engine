@@ -388,7 +388,10 @@ mod tests {
         track.add(1.0, 1.0, Easing::Linear);
         // NaN keyframe 존재해도 정상 시간 샘플링은 panic 없이 값 반환
         let v = track.sample(0.5);
-        assert!(v.is_some(), "normal sample must not panic with NaN keyframe");
+        assert!(
+            v.is_some(),
+            "normal sample must not panic with NaN keyframe"
+        );
     }
 
     #[test]

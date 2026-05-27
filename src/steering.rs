@@ -109,17 +109,16 @@ impl System for SteeringSystem {
     fn run(&mut self, world: &mut World, dt: f32) {
         // ── 1. Seek ────────────────────────────────────────────────────────────
         {
-            let entities: Vec<Entity> = world
-                .query::<Seek>()
-                .map(|(e, _)| e)
-                .collect();
+            let entities: Vec<Entity> = world.query::<Seek>().map(|(e, _)| e).collect();
 
             for entity in entities {
                 let (pos, target, max_speed) = {
-                    let t = world.query::<Transform>()
+                    let t = world
+                        .query::<Transform>()
                         .find(|(e, _)| *e == entity)
                         .map(|(_, t)| t.position);
-                    let seek = world.query::<Seek>()
+                    let seek = world
+                        .query::<Seek>()
                         .find(|(e, _)| *e == entity)
                         .map(|(_, s)| (s.target, s.max_speed));
                     match (t, seek) {
@@ -144,17 +143,16 @@ impl System for SteeringSystem {
 
         // ── 2. Flee ────────────────────────────────────────────────────────────
         {
-            let entities: Vec<Entity> = world
-                .query::<Flee>()
-                .map(|(e, _)| e)
-                .collect();
+            let entities: Vec<Entity> = world.query::<Flee>().map(|(e, _)| e).collect();
 
             for entity in entities {
                 let (pos, target, max_speed, flee_radius) = {
-                    let t = world.query::<Transform>()
+                    let t = world
+                        .query::<Transform>()
                         .find(|(e, _)| *e == entity)
                         .map(|(_, t)| t.position);
-                    let flee = world.query::<Flee>()
+                    let flee = world
+                        .query::<Flee>()
                         .find(|(e, _)| *e == entity)
                         .map(|(_, f)| (f.target, f.max_speed, f.flee_radius));
                     match (t, flee) {
@@ -180,17 +178,16 @@ impl System for SteeringSystem {
 
         // ── 3. Arrive ──────────────────────────────────────────────────────────
         {
-            let entities: Vec<Entity> = world
-                .query::<Arrive>()
-                .map(|(e, _)| e)
-                .collect();
+            let entities: Vec<Entity> = world.query::<Arrive>().map(|(e, _)| e).collect();
 
             for entity in entities {
                 let (pos, target, max_speed, slow_radius, stop_radius) = {
-                    let t = world.query::<Transform>()
+                    let t = world
+                        .query::<Transform>()
                         .find(|(e, _)| *e == entity)
                         .map(|(_, t)| t.position);
-                    let arrive = world.query::<Arrive>()
+                    let arrive = world
+                        .query::<Arrive>()
                         .find(|(e, _)| *e == entity)
                         .map(|(_, a)| (a.target, a.max_speed, a.slow_radius, a.stop_radius));
                     match (t, arrive) {
@@ -222,10 +219,7 @@ impl System for SteeringSystem {
 
         // ── 4. Wander ─────────────────────────────────────────────────────────
         {
-            let entities: Vec<Entity> = world
-                .query::<Wander>()
-                .map(|(e, _)| e)
-                .collect();
+            let entities: Vec<Entity> = world.query::<Wander>().map(|(e, _)| e).collect();
 
             for entity in entities {
                 // 타이머 갱신 및 방향 결정
@@ -255,13 +249,11 @@ impl System for SteeringSystem {
 
         // ── 5. Transform 이동 적용 ─────────────────────────────────────────────
         {
-            let entities: Vec<Entity> = world
-                .query::<SteeringVelocity>()
-                .map(|(e, _)| e)
-                .collect();
+            let entities: Vec<Entity> = world.query::<SteeringVelocity>().map(|(e, _)| e).collect();
 
             for entity in entities {
-                let velocity = match world.query::<SteeringVelocity>()
+                let velocity = match world
+                    .query::<SteeringVelocity>()
                     .find(|(e, _)| *e == entity)
                     .map(|(_, sv)| sv.velocity)
                 {
@@ -293,12 +285,15 @@ mod tests {
     fn make_world_with_transform(pos: Vec2) -> (World, Entity) {
         let mut world = World::new();
         let e = world.spawn();
-        world.add_component(e, Transform {
-            position: pos,
-            scale: Vec2::ONE,
-            rotation: 0.0,
-            z: 0.0,
-        });
+        world.add_component(
+            e,
+            Transform {
+                position: pos,
+                scale: Vec2::ONE,
+                rotation: 0.0,
+                z: 0.0,
+            },
+        );
         (world, e)
     }
 
@@ -306,15 +301,19 @@ mod tests {
     fn seek_generates_velocity_toward_target() {
         let (mut world, e) = make_world_with_transform(Vec2::ZERO);
         world.add_component(e, SteeringVelocity::default());
-        world.add_component(e, Seek {
-            target: Vec2::new(100.0, 0.0),
-            max_speed: 200.0,
-        });
+        world.add_component(
+            e,
+            Seek {
+                target: Vec2::new(100.0, 0.0),
+                max_speed: 200.0,
+            },
+        );
 
         let mut sys = SteeringSystem;
         sys.run(&mut world, 0.016);
 
-        let sv = world.query::<SteeringVelocity>()
+        let sv = world
+            .query::<SteeringVelocity>()
             .find(|(en, _)| *en == e)
             .map(|(_, sv)| sv.velocity)
             .unwrap();
@@ -323,7 +322,11 @@ mod tests {
         assert!(sv.x > 0.0, "velocity.x should be positive, got {}", sv.x);
         assert!(sv.y.abs() < 1e-4, "velocity.y should be ~0, got {}", sv.y);
         let speed = sv.length();
-        assert!((speed - 200.0).abs() < 1e-3, "speed should equal max_speed=200, got {}", speed);
+        assert!(
+            (speed - 200.0).abs() < 1e-3,
+            "speed should equal max_speed=200, got {}",
+            speed
+        );
     }
 
     #[test]
@@ -331,22 +334,30 @@ mod tests {
         // 목표와 동일한 위치 — stop_radius(5.0) 이내
         let (mut world, e) = make_world_with_transform(Vec2::new(1.0, 0.0));
         world.add_component(e, SteeringVelocity::default());
-        world.add_component(e, Arrive {
-            target: Vec2::new(2.0, 0.0),  // 거리 1.0 < stop_radius=5.0
-            max_speed: 200.0,
-            slow_radius: 50.0,
-            stop_radius: 5.0,
-        });
+        world.add_component(
+            e,
+            Arrive {
+                target: Vec2::new(2.0, 0.0), // 거리 1.0 < stop_radius=5.0
+                max_speed: 200.0,
+                slow_radius: 50.0,
+                stop_radius: 5.0,
+            },
+        );
 
         let mut sys = SteeringSystem;
         sys.run(&mut world, 0.016);
 
-        let sv = world.query::<SteeringVelocity>()
+        let sv = world
+            .query::<SteeringVelocity>()
             .find(|(en, _)| *en == e)
             .map(|(_, sv)| sv.velocity)
             .unwrap();
 
-        assert!(sv.length() < 1e-5, "velocity should be ~0 within stop_radius, got {:?}", sv);
+        assert!(
+            sv.length() < 1e-5,
+            "velocity should be ~0 within stop_radius, got {:?}",
+            sv
+        );
     }
 
     #[test]
@@ -354,21 +365,29 @@ mod tests {
         // flee_radius = 50, 엔티티는 target으로부터 100 떨어져 있음
         let (mut world, e) = make_world_with_transform(Vec2::new(100.0, 0.0));
         world.add_component(e, SteeringVelocity::default());
-        world.add_component(e, Flee {
-            target: Vec2::ZERO,
-            max_speed: 200.0,
-            flee_radius: 50.0,
-        });
+        world.add_component(
+            e,
+            Flee {
+                target: Vec2::ZERO,
+                max_speed: 200.0,
+                flee_radius: 50.0,
+            },
+        );
 
         let mut sys = SteeringSystem;
         sys.run(&mut world, 0.016);
 
-        let sv = world.query::<SteeringVelocity>()
+        let sv = world
+            .query::<SteeringVelocity>()
             .find(|(en, _)| *en == e)
             .map(|(_, sv)| sv.velocity)
             .unwrap();
 
-        assert!(sv.length() < 1e-5, "velocity outside flee_radius should be 0, got {:?}", sv);
+        assert!(
+            sv.length() < 1e-5,
+            "velocity outside flee_radius should be 0, got {:?}",
+            sv
+        );
     }
 
     #[test]
@@ -376,22 +395,32 @@ mod tests {
         // 거리 30 < flee_radius 50
         let (mut world, e) = make_world_with_transform(Vec2::new(30.0, 0.0));
         world.add_component(e, SteeringVelocity::default());
-        world.add_component(e, Flee {
-            target: Vec2::ZERO,
-            max_speed: 200.0,
-            flee_radius: 50.0,
-        });
+        world.add_component(
+            e,
+            Flee {
+                target: Vec2::ZERO,
+                max_speed: 200.0,
+                flee_radius: 50.0,
+            },
+        );
 
         let mut sys = SteeringSystem;
         sys.run(&mut world, 0.016);
 
-        let sv = world.query::<SteeringVelocity>()
+        let sv = world
+            .query::<SteeringVelocity>()
             .find(|(en, _)| *en == e)
             .map(|(_, sv)| sv.velocity)
             .unwrap();
 
         // 도망 방향 = +x (target이 원점, 위치가 +x이므로)
-        assert!(sv.x > 0.0, "flee velocity.x should be positive (away from origin)");
-        assert!((sv.length() - 200.0).abs() < 1e-3, "flee speed should be max_speed when inside radius");
+        assert!(
+            sv.x > 0.0,
+            "flee velocity.x should be positive (away from origin)"
+        );
+        assert!(
+            (sv.length() - 200.0).abs() < 1e-3,
+            "flee speed should be max_speed when inside radius"
+        );
     }
 }

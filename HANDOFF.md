@@ -1,7 +1,8 @@
-# 핸드오프 문서 — rust-2d-engine
+# 핸드오프 문서 — skeleton-engine
 
 작성일: 2026-05-24 (Phase 45~53 갱신: 2026-05-26 / Phase 46~59 완료: 2026-05-26 / 코드 리뷰 7항목 수정: 2026-05-26)  
 엔진 버전: **v1.0.0** (태그: v1.0.0, main 브랜치 기준)  
+패키지: **skeleton-engine** (라이브러리 크레이트: `engine`)  
 작성자: ChunSam
 
 ---
@@ -98,7 +99,7 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | 코드 리뷰 | 런타임·구조 리스크 7항목 수정 — Timeline NaN, TextureError fallback, World 오염, OffscreenCamera layer_mask, ScriptingSystem register_fn 1회화, Network backpressure, egui unsafe 문서화 | `4084cee` |
 
 > Phase 46~59 모두 완료. 코드 리뷰 7항목 수정 + wss:// TLS read timeout 실제 수정 완료.
-> 검증: `cargo test --lib` 195 tests 통과 / `cargo test --all-targets` lib 195 + examples 3 tests 통과 / `cargo clippy --all-targets -- -D warnings` 통과. **v1.0.0 릴리즈 준비 완료.**
+> 검증: `cargo test` lib 196 tests + doctest 31 통과 / `cargo clippy --all-targets -- -D warnings` 통과 / `cargo build --release` 통과. **skeleton-engine v1.0.0 릴리즈 준비 완료.**
 
 ---
 
@@ -170,7 +171,7 @@ src/
 
 > 다른 작업자가 작성한 ENGINE_REVIEW_FIX_PROMPT.md의 런타임·구조 리스크 7개 항목을 우선순위 순서로 수정.  
 > 기존 공개 API 변경 없음.
-> 검증: `cargo test --lib` 195 tests 통과 / `cargo test --all-targets` lib 195 + examples 3 tests 통과 / `cargo clippy --all-targets -- -D warnings` 통과.
+> 검증: `cargo test` lib 196 tests + doctest 31 통과 / `cargo clippy --all-targets -- -D warnings` 통과.
 
 ### 1. Timeline NaN 샘플링 panic 제거
 
@@ -274,7 +275,7 @@ src/
 ## 이번 세션에서 한 일 (Phase 46~59 — v1.0.0 완성)
 
 > REMAINING_WORK.md Track A 직렬 체인(46→47→51→52→54→56) + Track B(55, 57c) + Solo(57a/b, 59)를 단일 세션에서 완료.
-> 테스트 183개 통과. `cargo doc --no-deps` 경고 0개. v1.0.0 API Freeze 완료.
+> 당시 테스트 183개 통과. 현재 v1.0.0 게이트는 `cargo test` lib 196 tests + doctest 31, `cargo doc --no-deps` 경고 0개 기준.
 
 ### Phase 46 — 렌더 텍스처 (Offscreen Render Targets)
 
@@ -2112,8 +2113,8 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 
 | 저장소 | 역할 | 경로 |
 |---|---|---|
-| `rust-2d-engine` | 엔진 코어 (이 저장소) | `/Volumes/SSD/Projects/rust-2d-engine` |
-| `rust-survivors` | 엔진을 사용하는 게임 프로젝트 | `/Volumes/SSD/Projects/rust-survivors` |
+| `rust-2d-engine` | 엔진 코어 (이 저장소) | `/Users/jkl/Projects/rust-2d-engine` |
+| `rust-survivors` | 엔진을 사용하는 게임 프로젝트 | `/Users/jkl/Projects/rust-survivors` |
 
 두 저장소는 **독립적으로** 개발된다. 엔진 개선은 `rust-2d-engine`에서만, 게임 로직은 `rust-survivors`에서만.
 

@@ -255,7 +255,12 @@ impl Prefab {
     /// Inspector의 "Break Prefab" 버튼으로 링크를 끊을 수 있다.
     pub fn spawn_with_tracking(&self, world: &mut World, path: impl Into<String>) -> Entity {
         let entity = self.spawn(world);
-        world.add_component(entity, PrefabInstance { source_path: path.into() });
+        world.add_component(
+            entity,
+            PrefabInstance {
+                source_path: path.into(),
+            },
+        );
         entity
     }
 }

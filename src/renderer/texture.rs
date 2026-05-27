@@ -35,7 +35,15 @@ impl Texture {
         Self::try_from_path(device, queue, layout, path).unwrap_or_else(|e| {
             log::warn!("텍스처 로드 실패 ({path}): {e}, magenta fallback 사용");
             // magenta 1×1: 누락된 텍스처를 시각적으로 즉시 식별 가능
-            Self::from_rgba(device, queue, layout, &[255u8, 0, 255, 255], 1, 1, Some("fallback"))
+            Self::from_rgba(
+                device,
+                queue,
+                layout,
+                &[255u8, 0, 255, 255],
+                1,
+                1,
+                Some("fallback"),
+            )
         })
     }
 
@@ -50,7 +58,15 @@ impl Texture {
         let img = image::load_from_memory(&bytes).map_err(TextureError::Decode)?;
         let rgba = img.to_rgba8();
         let (w, h) = rgba.dimensions();
-        Ok(Self::from_rgba(device, queue, layout, &rgba, w, h, Some(path)))
+        Ok(Self::from_rgba(
+            device,
+            queue,
+            layout,
+            &rgba,
+            w,
+            h,
+            Some(path),
+        ))
     }
 
     /// CPU-side `ImageAsset` 데이터를 GPU 텍스처로 업로드한다 (비동기 로딩 완료 시 사용).
@@ -61,7 +77,15 @@ impl Texture {
         asset: &crate::asset::ImageAsset,
         label: Option<&str>,
     ) -> Self {
-        Self::from_rgba(device, queue, layout, &asset.data, asset.width, asset.height, label)
+        Self::from_rgba(
+            device,
+            queue,
+            layout,
+            &asset.data,
+            asset.width,
+            asset.height,
+            label,
+        )
     }
 
     /// 흰색 1×1 픽셀 기본 텍스처 생성 (색상 스프라이트용)
@@ -181,8 +205,7 @@ mod tests {
     #[test]
     fn try_from_path_missing_file_returns_io_error() {
         // GPU 없이 파일 읽기 실패를 검증
-        let result = std::fs::read("/nonexistent/__does_not_exist__.png")
-            .map_err(TextureError::Io);
+        let result = std::fs::read("/nonexistent/__does_not_exist__.png").map_err(TextureError::Io);
         assert!(matches!(result, Err(TextureError::Io(_))));
     }
 
@@ -202,9 +225,8 @@ mod tests {
             0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1×1
             0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, // bit depth 8, RGB
             0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, // IDAT
-            0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
-            0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc,
-            0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, // IEND
+            0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xe2,
+            0x21, 0xbc, 0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, // IEND
             0x44, 0xae, 0x42, 0x60, 0x82,
         ];
         // 위 PNG가 실제 유효한지 라이브러리에 위임 — 최소한 panic 없이 시도

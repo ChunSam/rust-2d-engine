@@ -4,10 +4,10 @@
 ///   DrawRect로 진행률 바를 표시한다.
 /// - 로딩 완료 후 GameScene으로 자동 전환한다.
 use engine::{
-    App, AssetServer, LoadProgress, Scene, SceneChange, SceneCmd,
     ecs::{System, World},
     renderer::{DrawRect, TextQueue, UiQueue},
     resources::WindowConfig,
+    App, AssetServer, LoadProgress, Scene, SceneChange, SceneCmd,
 };
 
 // ─── 로딩 씬 ─────────────────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -13,6 +14,7 @@ use crate::camera::Camera;
 use crate::components::{Sprite, Transform};
 use crate::ecs::World;
 use crate::hierarchy::GlobalTransform;
+use crate::material::ShaderMaterial;
 use crate::renderer::texture::Texture;
 use crate::renderer::ui::DrawRect;
 use crate::resources::CullConfig;
@@ -119,6 +121,247 @@ impl InstanceRaw {
             ],
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn raw() -> InstanceRaw {
+        InstanceRaw {
+            model: [[0.0; 4]; 4],
+            color: [1.0; 4],
+            uv_offset: [0.0; 2],
+            uv_size: [1.0; 2],
+        }
+    }
+
+    fn sprite(layer: i32, z: f32, order: usize, texture_key: &str) -> SpriteRenderEntry {
+        SpriteRenderEntry::sprite(layer, z, order, texture_key.to_string(), raw())
+    }
+
+    fn material(layer: i32, z: f32, order: usize, entity_id: u32) -> SpriteRenderEntry {
+        SpriteRenderEntry::material(
+            layer,
+            z,
+            order,
+            crate::ecs::Entity(entity_id),
+            1,
+            String::new(),
+            [0.0; 4],
+            None,
+            raw(),
+        )
+    }
+
+    fn describe(entry: &SpriteRenderEntry) -> String {
+        match &entry.kind {
+            SpriteRenderKind::Sprite { texture_key, .. } => {
+                format!("S:{texture_key}@{}", entry.sort.z)
+            }
+            SpriteRenderKind::Material { entity, .. } => {
+                format!("M:{}@{}", entity.0, entry.sort.z)
+            }
+        }
+    }
+
+    fn sprite_runs(entries: &[SpriteRenderEntry]) -> Vec<(String, usize)> {
+        let mut runs = Vec::new();
+        let mut i = 0usize;
+        while i < entries.len() {
+            match &entries[i].kind {
+                SpriteRenderKind::Sprite {
+                    texture_key,
+                    instance_offset,
+                    ..
+                } => {
+                    let run_key = texture_key.clone();
+                    let run_start_offset = *instance_offset;
+                    let mut run_len = 1usize;
+                    i += 1;
+                    while i < entries.len() {
+                        match &entries[i].kind {
+                            SpriteRenderKind::Sprite {
+                                texture_key,
+                                instance_offset,
+                                ..
+                            } if *texture_key == run_key
+                                && *instance_offset == run_start_offset + run_len =>
+                            {
+                                run_len += 1;
+                                i += 1;
+                            }
+                            _ => break,
+                        }
+                    }
+                    runs.push((run_key, run_len));
+                }
+                SpriteRenderKind::Material { .. } => i += 1,
+            }
+        }
+        runs
+    }
+
+    #[test]
+    fn sort_uses_layer_and_z_before_texture_batching() {
+        let mut entries = vec![
+            sprite(0, 2.0, 0, "tex_a"),
+            sprite(0, 1.0, 1, "tex_b"),
+            sprite(0, 0.0, 2, "tex_a"),
+            material(0, 1.5, 3, 99),
+            sprite(-1, 50.0, 4, "behind"),
+            sprite(1, -50.0, 5, "front"),
+        ];
+
+        sort_render_entries(&mut entries);
+        assign_instance_offsets(&mut entries);
+
+        let order: Vec<String> = entries.iter().map(describe).collect();
+        assert_eq!(
+            order,
+            vec![
+                "S:behind@50",
+                "S:tex_a@0",
+                "S:tex_b@1",
+                "M:99@1.5",
+                "S:tex_a@2",
+                "S:front@-50",
+            ]
+        );
+        assert_eq!(
+            sprite_runs(&entries),
+            vec![
+                ("behind".to_string(), 1),
+                ("tex_a".to_string(), 1),
+                ("tex_b".to_string(), 1),
+                ("tex_a".to_string(), 1),
+                ("front".to_string(), 1),
+            ]
+        );
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RenderSortKey {
+    layer: i32,
+    z: f32,
+    order: usize,
+}
+
+enum SpriteRenderKind {
+    Sprite {
+        texture_key: String,
+        instance: InstanceRaw,
+        instance_offset: usize,
+    },
+    Material {
+        entity: crate::ecs::Entity,
+        hash: u64,
+        frag_source: String,
+        params: [f32; 4],
+        texture_key: Option<String>,
+        instance: InstanceRaw,
+        instance_offset: usize,
+    },
+}
+
+struct SpriteRenderEntry {
+    sort: RenderSortKey,
+    kind: SpriteRenderKind,
+}
+
+impl SpriteRenderEntry {
+    fn sprite(
+        layer: i32,
+        z: f32,
+        order: usize,
+        texture_key: String,
+        instance: InstanceRaw,
+    ) -> Self {
+        Self {
+            sort: RenderSortKey { layer, z, order },
+            kind: SpriteRenderKind::Sprite {
+                texture_key,
+                instance,
+                instance_offset: 0,
+            },
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn material(
+        layer: i32,
+        z: f32,
+        order: usize,
+        entity: crate::ecs::Entity,
+        hash: u64,
+        frag_source: String,
+        params: [f32; 4],
+        texture_key: Option<String>,
+        instance: InstanceRaw,
+    ) -> Self {
+        Self {
+            sort: RenderSortKey { layer, z, order },
+            kind: SpriteRenderKind::Material {
+                entity,
+                hash,
+                frag_source,
+                params,
+                texture_key,
+                instance,
+                instance_offset: 0,
+            },
+        }
+    }
+}
+
+fn compare_render_sort_key(a: RenderSortKey, b: RenderSortKey) -> Ordering {
+    a.layer
+        .cmp(&b.layer)
+        .then_with(|| a.z.partial_cmp(&b.z).unwrap_or(Ordering::Equal))
+        .then_with(|| a.order.cmp(&b.order))
+}
+
+fn sort_render_entries(entries: &mut [SpriteRenderEntry]) {
+    entries.sort_by(|a, b| compare_render_sort_key(a.sort, b.sort));
+}
+
+fn layer_matches_mask(layer: i32, layer_mask: u32) -> bool {
+    if layer_mask == 0 {
+        return true;
+    }
+    let bit = layer.clamp(0, 31) as u32;
+    (layer_mask >> bit) & 1 == 1
+}
+
+fn assign_instance_offsets(
+    entries: &mut [SpriteRenderEntry],
+) -> (Vec<InstanceRaw>, Vec<InstanceRaw>) {
+    let mut sprite_instances = Vec::new();
+    let mut material_instances = Vec::new();
+
+    for entry in entries {
+        match &mut entry.kind {
+            SpriteRenderKind::Sprite {
+                instance,
+                instance_offset,
+                ..
+            } => {
+                *instance_offset = sprite_instances.len();
+                sprite_instances.push(*instance);
+            }
+            SpriteRenderKind::Material {
+                instance,
+                instance_offset,
+                ..
+            } => {
+                *instance_offset = material_instances.len();
+                material_instances.push(*instance);
+            }
+        }
+    }
+
+    (sprite_instances, material_instances)
 }
 
 // ─── 카메라 유니폼 ─────────────────────────────────────────────────────────────
@@ -357,16 +600,16 @@ impl SpriteRenderer {
     /// CPU-side `ImageAsset`을 GPU 텍스처로 업로드한다 (비동기 로딩 완료 시 사용).
     ///
     /// 같은 경로가 이미 캐시에 있으면 재업로드한다 (비동기 완료 → 마젠타 폴백 교체).
-    pub fn load_texture_from_image(
+    pub(crate) fn load_texture_from_image(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        path: &str,
+        key: &str,
         asset: &crate::asset::ImageAsset,
     ) {
         use crate::renderer::texture::Texture;
-        let tex = Texture::from_image_asset(device, queue, &self.texture_layout, asset, Some(path));
-        self.texture_cache.insert(path.to_string(), Arc::new(tex));
+        let tex = Texture::from_image_asset(device, queue, &self.texture_layout, asset, Some(key));
+        self.texture_cache.insert(key.to_string(), Arc::new(tex));
     }
 
     /// 캐시를 무효화하고 파일에서 GPU 텍스처를 강제 재로드한다 (핫 리로딩용).
@@ -384,11 +627,23 @@ impl SpriteRenderer {
         self.rt_cache.insert(key.to_string(), bg);
     }
 
+    fn bind_group_for_texture_key(&self, key: Option<&str>) -> &wgpu::BindGroup {
+        match key.filter(|key| !key.is_empty()) {
+            Some(key) => self
+                .rt_cache
+                .get(key)
+                .map(|bg| bg.as_ref())
+                .or_else(|| self.texture_cache.get(key).map(|tex| &tex.bind_group))
+                .unwrap_or(&self.white_texture.bind_group),
+            None => &self.white_texture.bind_group,
+        }
+    }
+
     /// 매 프레임: ECS World에서 스프라이트를 수집해 렌더링한다.
     ///
     /// # z-order
-    /// 모든 스프라이트를 z 오름차순으로 전역 정렬한 뒤, 연속으로 같은 텍스처를 쓰는
-    /// 구간마다 draw call을 한 번씩 발행한다. 텍스처가 섞이더라도 z 값이 정확히 반영된다.
+    /// 모든 스프라이트/머티리얼을 (RenderLayer, z) 오름차순으로 전역 정렬한 뒤,
+    /// 연속으로 같은 텍스처를 쓰는 일반 스프라이트 구간만 배칭한다.
     #[allow(clippy::too_many_arguments)]
     /// 스프라이트를 렌더한다.
     ///
@@ -417,10 +672,7 @@ impl SpriteRenderer {
         queue.write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&cam));
 
         // ── 컬링 설정 + 가시 영역 ──────────────────────────────────────────
-        let cull = world
-            .resource::<CullConfig>()
-            .copied()
-            .unwrap_or_default();
+        let cull = world.resource::<CullConfig>().copied().unwrap_or_default();
         let (vmin, vmax) = camera.visible_rect(width as f32, height as f32);
 
         // 회전을 고려한 보수적 AABB 교차 판정 헬퍼.
@@ -448,22 +700,23 @@ impl SpriteRenderer {
             px_w.min(px_h) >= cull.min_pixel_size
         };
 
-        // ── 전체 스프라이트 수집: (layer, tex_key, z, InstanceRaw) ──────
+        // ── 전체 스프라이트 수집: (layer, z) 전역 정렬용 엔트리 ──────
         // GlobalTransform이 있으면 계층 합성 결과를 사용하고, 없으면 Transform으로 fallback.
         // RenderLayer(i32)가 없으면 0 으로 취급한다.
-        let mut sprites: Vec<(i32, String, f32, InstanceRaw)> = Vec::new();
+        let mut draw_entries: Vec<SpriteRenderEntry> = Vec::new();
+        let mut next_order = 0usize;
         for (entity, sprite) in world.query::<Sprite>() {
+            if world.get::<ShaderMaterial>(entity).is_some() {
+                continue;
+            }
+
             let uv = world.get::<UvRect>(entity).copied().unwrap_or(UvRect::FULL);
             let layer = world
                 .get::<crate::components::RenderLayer>(entity)
                 .map(|l| l.0)
                 .unwrap_or(0);
-            // layer_mask 필터: 0 = 전체 허용, 비 0 = 해당 비트만 렌더
-            if layer_mask != 0 {
-                let bit = (layer.clamp(0, 31)) as u32;
-                if (layer_mask >> bit) & 1 == 0 {
-                    continue;
-                }
+            if !layer_matches_mask(layer, layer_mask) {
+                continue;
             }
             // image_handle이 있으면 그 경로를 우선 사용, 없으면 texture 경로 사용
             let tex_key = sprite
@@ -481,7 +734,15 @@ impl SpriteRenderer {
                     stats.sprites_culled += 1;
                     continue;
                 }
-                sprites.push((layer, tex_key, gt.z, InstanceRaw::from_global(gt, sprite, uv)));
+                let order = next_order;
+                next_order += 1;
+                draw_entries.push(SpriteRenderEntry::sprite(
+                    layer,
+                    gt.z,
+                    order,
+                    tex_key,
+                    InstanceRaw::from_global(gt, sprite, uv),
+                ));
             } else if let Some(transform) = world.get::<Transform>(entity) {
                 if !is_visible(transform.position, transform.scale, transform.rotation) {
                     stats.sprites_culled += 1;
@@ -491,10 +752,13 @@ impl SpriteRenderer {
                     stats.sprites_culled += 1;
                     continue;
                 }
-                sprites.push((
+                let order = next_order;
+                next_order += 1;
+                draw_entries.push(SpriteRenderEntry::sprite(
                     layer,
-                    tex_key,
                     transform.z,
+                    order,
+                    tex_key,
                     InstanceRaw::from(transform, sprite, uv),
                 ));
             }
@@ -521,6 +785,9 @@ impl SpriteRenderer {
                             .get::<crate::components::RenderLayer>(*entity)
                             .map(|l| l.0)
                             .unwrap_or(0);
+                        if !layer_matches_mask(layer, layer_mask) {
+                            continue;
+                        }
                         if let Some(gt) = world.get::<GlobalTransform>(*entity) {
                             if !is_visible(gt.position, gt.scale, gt.rotation) {
                                 stats.sprites_culled += 1;
@@ -530,10 +797,13 @@ impl SpriteRenderer {
                                 stats.sprites_culled += 1;
                                 continue;
                             }
-                            sprites.push((
+                            let order = next_order;
+                            next_order += 1;
+                            draw_entries.push(SpriteRenderEntry::sprite(
                                 layer,
-                                tex_key,
                                 gt.z,
+                                order,
+                                tex_key,
                                 InstanceRaw {
                                     model: gt.to_matrix().to_cols_array_2d(),
                                     color: *color,
@@ -550,10 +820,13 @@ impl SpriteRenderer {
                                 stats.sprites_culled += 1;
                                 continue;
                             }
-                            sprites.push((
+                            let order = next_order;
+                            next_order += 1;
+                            draw_entries.push(SpriteRenderEntry::sprite(
                                 layer,
-                                tex_key,
                                 tr.z,
+                                order,
+                                tex_key,
                                 InstanceRaw {
                                     model: tr.to_matrix().to_cols_array_2d(),
                                     color: *color,
@@ -567,22 +840,77 @@ impl SpriteRenderer {
             }
         }
 
-        // ── (layer, tex_key, z) 기준 안정 정렬 ──────────────────────────
-        // layer가 같으면 tex_key 기준으로 배칭 → 같은 텍스처는 항상 인접.
-        // tex_key가 같으면 z 오름차순으로 정렬.
-        sprites.sort_by(|a, b| {
-            a.0.cmp(&b.0)
-                .then_with(|| a.1.cmp(&b.1))
-                .then_with(|| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
-        });
-        stats.sprites_rendered = sprites.len() as u32;
+        let mut entries = draw_entries;
 
-        // ── 일반 스프라이트 렌더 패스 ────────────────────────────────────────
-        if !sprites.is_empty() {
-            let all_instances: Vec<InstanceRaw> = sprites.iter().map(|(_, _, _, raw)| *raw).collect();
+        // ── ShaderMaterial 수집: 일반 스프라이트와 같은 (layer, z) 스트림에 합친다.
+        let mat_ids: Vec<(crate::ecs::Entity, u64, String, [f32; 4])> = world
+            .query::<ShaderMaterial>()
+            .map(|(e, mat)| {
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                mat.frag_source.hash(&mut h);
+                (e, h.finish(), mat.frag_source.clone(), mat.params)
+            })
+            .collect();
 
-            if all_instances.len() > self.instance_capacity {
-                self.instance_capacity = all_instances.len().next_power_of_two();
+        for (entity, hash, frag_source, params) in mat_ids {
+            let uv = world.get::<UvRect>(entity).copied().unwrap_or(UvRect::FULL);
+            let sprite = match world.get::<Sprite>(entity) {
+                Some(sprite) => sprite,
+                None => continue,
+            };
+            let layer = world
+                .get::<crate::components::RenderLayer>(entity)
+                .map(|l| l.0)
+                .unwrap_or(0);
+            if !layer_matches_mask(layer, layer_mask) {
+                continue;
+            }
+            let tex_key = sprite
+                .image_handle
+                .as_ref()
+                .map(|h| h.path().to_string())
+                .or_else(|| sprite.texture.clone());
+
+            let (z, instance) = if let Some(gt) = world.get::<GlobalTransform>(entity) {
+                if !is_visible(gt.position, gt.scale, gt.rotation) || !is_above_lod(gt.scale) {
+                    stats.sprites_culled += 1;
+                    continue;
+                }
+                (gt.z, InstanceRaw::from_global(gt, sprite, uv))
+            } else if let Some(transform) = world.get::<Transform>(entity) {
+                if !is_visible(transform.position, transform.scale, transform.rotation)
+                    || !is_above_lod(transform.scale)
+                {
+                    stats.sprites_culled += 1;
+                    continue;
+                }
+                (transform.z, InstanceRaw::from(transform, sprite, uv))
+            } else {
+                continue;
+            };
+
+            entries.push(SpriteRenderEntry::material(
+                layer,
+                z,
+                next_order,
+                entity,
+                hash,
+                frag_source,
+                params,
+                tex_key,
+                instance,
+            ));
+            next_order += 1;
+        }
+
+        sort_render_entries(&mut entries);
+        stats.sprites_rendered = entries.len() as u32;
+
+        let (sprite_instances, material_instances) = assign_instance_offsets(&mut entries);
+
+        if !sprite_instances.is_empty() {
+            if sprite_instances.len() > self.instance_capacity {
+                self.instance_capacity = sprite_instances.len().next_power_of_two();
                 self.instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("instance buffer"),
                     size: (self.instance_capacity * std::mem::size_of::<InstanceRaw>()) as u64,
@@ -590,76 +918,176 @@ impl SpriteRenderer {
                     mapped_at_creation: false,
                 });
             }
-            queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&all_instances));
-
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("sprite pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                occlusion_query_set: None,
-                timestamp_writes: None,
-            });
-
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-            pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
-
-            // ── 연속된 같은 텍스처 구간마다 draw call 1회 ──────────────
-            // (layer, tex_key) 기준으로 정렬됐으므로 같은 텍스처는 항상 연속.
-            // 텍스처가 바뀔 때만 bind group을 교체한다.
-            let instance_size = std::mem::size_of::<InstanceRaw>() as u64;
-            let mut i = 0usize;
-            while i < sprites.len() {
-                let run_key = &sprites[i].1;
-                let run_start = i;
-                while i < sprites.len() && &sprites[i].1 == run_key {
-                    i += 1;
-                }
-                let run_len = i - run_start;
-                let byte_start = run_start as u64 * instance_size;
-                let byte_end = byte_start + run_len as u64 * instance_size;
-
-                let bind_group = if run_key.is_empty() {
-                    &self.white_texture.bind_group
-                } else if let Some(rt_bg) = self.rt_cache.get(run_key.as_str()) {
-                    rt_bg.as_ref()
-                } else {
-                    self.texture_cache
-                        .get(run_key.as_str())
-                        .map(|t| &t.bind_group)
-                        .unwrap_or(&self.white_texture.bind_group)
-                };
-
-                pass.set_bind_group(1, bind_group, &[]);
-                pass.set_vertex_buffer(1, self.instance_buf.slice(byte_start..byte_end));
-                pass.draw_indexed(0..INDICES.len() as u32, 0, 0..run_len as u32);
-                stats.draw_calls += 1;
-            }
-            // pass drops here → encoder 해방
+            queue.write_buffer(
+                &self.instance_buf,
+                0,
+                bytemuck::cast_slice(&sprite_instances),
+            );
         }
 
-        // ── ShaderMaterial 렌더 패스 (별도 패스, z-sort 독립) ───────────────
-        self.render_materials(device, queue, view, encoder, world, width, height);
+        if !material_instances.is_empty() {
+            if material_instances.len() > self.mat_instance_capacity {
+                self.mat_instance_capacity = material_instances.len().next_power_of_two();
+                self.mat_instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("material instance buffer"),
+                    size: (self.mat_instance_capacity * std::mem::size_of::<InstanceRaw>()) as u64,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            }
+            queue.write_buffer(
+                &self.mat_instance_buf,
+                0,
+                bytemuck::cast_slice(&material_instances),
+            );
+
+            let material_sources: Vec<(u64, String)> = entries
+                .iter()
+                .filter_map(|entry| match &entry.kind {
+                    SpriteRenderKind::Material {
+                        hash, frag_source, ..
+                    } => Some((*hash, frag_source.clone())),
+                    SpriteRenderKind::Sprite { .. } => None,
+                })
+                .collect();
+            for (hash, frag_source) in material_sources {
+                if !self.custom_pipelines.contains_key(&hash) {
+                    self.compile_material_pipeline(device, hash, &frag_source);
+                }
+            }
+
+            for entry in &entries {
+                if let SpriteRenderKind::Material { entity, params, .. } = &entry.kind {
+                    let eid = entity.0;
+                    if !self.params_buffers.contains_key(&eid) {
+                        let buf = device.create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("material params buf"),
+                            size: 16,
+                            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        });
+                        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("material params bind group"),
+                            layout: &self.params_layout,
+                            entries: &[wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: buf.as_entire_binding(),
+                            }],
+                        });
+                        self.params_buffers.insert(eid, (buf, bg));
+                    }
+                    let (buf, _) = &self.params_buffers[&eid];
+                    queue.write_buffer(buf, 0, bytemuck::cast_slice(params));
+                }
+            }
+        }
+
+        let instance_size = std::mem::size_of::<InstanceRaw>() as u64;
+        let mut i = 0usize;
+        while i < entries.len() {
+            match &entries[i].kind {
+                SpriteRenderKind::Sprite {
+                    texture_key,
+                    instance_offset,
+                    ..
+                } => {
+                    let run_key = texture_key.as_str();
+                    let run_start_offset = *instance_offset;
+                    let mut run_len = 1usize;
+                    i += 1;
+                    while i < entries.len() {
+                        match &entries[i].kind {
+                            SpriteRenderKind::Sprite {
+                                texture_key,
+                                instance_offset,
+                                ..
+                            } if texture_key == run_key
+                                && *instance_offset == run_start_offset + run_len =>
+                            {
+                                run_len += 1;
+                                i += 1;
+                            }
+                            _ => break,
+                        }
+                    }
+
+                    let byte_start = run_start_offset as u64 * instance_size;
+                    let byte_end = byte_start + run_len as u64 * instance_size;
+                    let bind_group = self.bind_group_for_texture_key(Some(run_key));
+
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("sprite pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        occlusion_query_set: None,
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(&self.pipeline);
+                    pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    pass.set_bind_group(1, bind_group, &[]);
+                    pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
+                    pass.set_vertex_buffer(1, self.instance_buf.slice(byte_start..byte_end));
+                    pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
+                    pass.draw_indexed(0..INDICES.len() as u32, 0, 0..run_len as u32);
+                    stats.draw_calls += 1;
+                }
+                SpriteRenderKind::Material {
+                    entity,
+                    hash,
+                    texture_key,
+                    instance_offset,
+                    ..
+                } => {
+                    let byte_start = *instance_offset as u64 * instance_size;
+                    let byte_end = byte_start + instance_size;
+                    let pipeline = &self.custom_pipelines[hash];
+                    let tex_bg = texture_key
+                        .as_ref()
+                        .map(|k| self.bind_group_for_texture_key(Some(k)))
+                        .unwrap_or(&self.white_texture.bind_group);
+                    let (_, params_bg) = &self.params_buffers[&entity.0];
+
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("material pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        occlusion_query_set: None,
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(pipeline);
+                    pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    pass.set_bind_group(1, tex_bg, &[]);
+                    pass.set_bind_group(2, params_bg, &[]);
+                    pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
+                    pass.set_vertex_buffer(1, self.mat_instance_buf.slice(byte_start..byte_end));
+                    pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
+                    pass.draw_indexed(0..INDICES.len() as u32, 0, 0..1);
+                    stats.draw_calls += 1;
+                    i += 1;
+                }
+            }
+        }
 
         stats
     }
 
     /// 소스 해시를 키로 커스텀 파이프라인을 컴파일·캐싱한다.
     /// 렌더 패스가 열리기 **전에** 호출해야 한다.
-    fn compile_material_pipeline(
-        &mut self,
-        device: &wgpu::Device,
-        hash: u64,
-        frag_source: &str,
-    ) {
+    fn compile_material_pipeline(&mut self, device: &wgpu::Device, hash: u64, frag_source: &str) {
         let frag_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("custom material frag"),
             source: wgpu::ShaderSource::Wgsl(frag_source.into()),
@@ -708,177 +1136,6 @@ impl SpriteRenderer {
             cache: None,
         });
         self.custom_pipelines.insert(hash, pipeline);
-    }
-
-    /// [`crate::material::ShaderMaterial`] 컴포넌트를 가진 엔티티를 렌더링한다.
-    ///
-    /// 일반 스프라이트 패스 **이후**, UI 패스 **이전**에 호출된다.
-    /// z-sort는 머티리얼 엔티티끼리만 적용된다 (일반 스프라이트와 인터리브 없음).
-    #[allow(clippy::too_many_arguments)]
-    fn render_materials(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        view: &wgpu::TextureView,
-        encoder: &mut wgpu::CommandEncoder,
-        world: &World,
-        _width: u32,
-        _height: u32,
-    ) {
-        use crate::material::ShaderMaterial;
-
-        // 1. 머티리얼 엔티티 데이터 수집 (borrow 해방 전)
-        struct MatEntry {
-            entity: crate::ecs::Entity,
-            hash: u64,
-            frag_source: String,
-            params: [f32; 4],
-            instance: InstanceRaw,
-            tex_key: Option<String>,
-            z: f32,
-        }
-
-        let mat_ids: Vec<(crate::ecs::Entity, u64, String, [f32; 4])> = world
-            .query::<ShaderMaterial>()
-            .map(|(e, mat)| {
-                let mut h = std::collections::hash_map::DefaultHasher::new();
-                mat.frag_source.hash(&mut h);
-                (e, h.finish(), mat.frag_source.clone(), mat.params)
-            })
-            .collect();
-
-        if mat_ids.is_empty() {
-            return;
-        }
-
-        let mut entries: Vec<MatEntry> = Vec::new();
-        for (e, hash, frag_source, params) in mat_ids {
-            let uv = world.get::<UvRect>(e).copied().unwrap_or(UvRect::FULL);
-            let sprite = match world.get::<Sprite>(e) {
-                Some(s) => s,
-                None => continue,
-            };
-            let tex_key = sprite
-                .image_handle
-                .as_ref()
-                .map(|h| h.path().to_string())
-                .or_else(|| sprite.texture.clone());
-
-            if let Some(gt) = world.get::<GlobalTransform>(e) {
-                entries.push(MatEntry {
-                    entity: e, hash, frag_source, params, tex_key,
-                    instance: InstanceRaw::from_global(gt, sprite, uv),
-                    z: gt.z,
-                });
-            } else if let Some(tr) = world.get::<Transform>(e) {
-                entries.push(MatEntry {
-                    entity: e, hash, frag_source, params, tex_key,
-                    instance: InstanceRaw::from(tr, sprite, uv),
-                    z: tr.z,
-                });
-            }
-        }
-
-        if entries.is_empty() {
-            return;
-        }
-
-        // 2. z 오름차순 안정 정렬
-        entries.sort_by(|a, b| a.z.partial_cmp(&b.z).unwrap_or(std::cmp::Ordering::Equal));
-
-        // 3. 파이프라인 컴파일 (렌더 패스 열기 전)
-        let hashes: Vec<(u64, String)> = entries
-            .iter()
-            .map(|e| (e.hash, e.frag_source.clone()))
-            .collect();
-        for (hash, src) in &hashes {
-            if !self.custom_pipelines.contains_key(hash) {
-                self.compile_material_pipeline(device, *hash, src);
-            }
-        }
-
-        // 4. params 유니폼 버퍼 생성/갱신 (렌더 패스 열기 전)
-        for entry in &entries {
-            let eid = entry.entity.0;
-            if !self.params_buffers.contains_key(&eid) {
-                let buf = device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("material params buf"),
-                    size: 16, // vec4<f32>
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("material params bind group"),
-                    layout: &self.params_layout,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: buf.as_entire_binding(),
-                    }],
-                });
-                self.params_buffers.insert(eid, (buf, bg));
-            }
-            let (buf, _) = &self.params_buffers[&eid];
-            queue.write_buffer(buf, 0, bytemuck::cast_slice(&entry.params));
-        }
-
-        // 5. 인스턴스 데이터 일괄 업로드 (렌더 패스 열기 전)
-        let instances: Vec<InstanceRaw> = entries.iter().map(|e| e.instance).collect();
-        if instances.len() > self.mat_instance_capacity {
-            self.mat_instance_capacity = instances.len().next_power_of_two();
-            self.mat_instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("material instance buffer"),
-                size: (self.mat_instance_capacity * std::mem::size_of::<InstanceRaw>()) as u64,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-        }
-        queue.write_buffer(&self.mat_instance_buf, 0, bytemuck::cast_slice(&instances));
-
-        // 6. 렌더 패스 — 엔티티별로 커스텀 파이프라인 적용
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("material pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            occlusion_query_set: None,
-            timestamp_writes: None,
-        });
-
-        pass.set_bind_group(0, &self.camera_bind_group, &[]);
-        pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-        pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
-
-        let instance_size = std::mem::size_of::<InstanceRaw>() as u64;
-        for (i, entry) in entries.iter().enumerate() {
-            let pipeline = &self.custom_pipelines[&entry.hash];
-            pass.set_pipeline(pipeline);
-
-            let tex_bg = entry
-                .tex_key
-                .as_ref()
-                .and_then(|k| {
-                    self.rt_cache
-                        .get(k)
-                        .map(|bg| bg.as_ref())
-                        .or_else(|| self.texture_cache.get(k).map(|t| &t.bind_group))
-                })
-                .unwrap_or(&self.white_texture.bind_group);
-            pass.set_bind_group(1, tex_bg, &[]);
-
-            let (_, params_bg) = &self.params_buffers[&entry.entity.0];
-            pass.set_bind_group(2, params_bg, &[]);
-
-            let byte_start = i as u64 * instance_size;
-            let byte_end = byte_start + instance_size;
-            pass.set_vertex_buffer(1, self.mat_instance_buf.slice(byte_start..byte_end));
-            pass.draw_indexed(0..INDICES.len() as u32, 0, 0..1);
-        }
     }
 
     /// 화면 고정(screen-space) UI 사각형을 렌더링한다.

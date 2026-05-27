@@ -166,14 +166,20 @@ mod native {
 
         pub fn send_bytes(&self, data: &[u8]) {
             if self.msg_tx.try_send(OutMsg::Binary(data.to_vec())).is_err() {
-                log::warn!("network: 송신 큐 만원 — binary 메시지 드롭 ({} bytes)", data.len());
+                log::warn!(
+                    "network: 송신 큐 만원 — binary 메시지 드롭 ({} bytes)",
+                    data.len()
+                );
             }
         }
 
         pub fn send_text(&self, text: impl Into<String>) {
             let text = text.into();
             if self.msg_tx.try_send(OutMsg::Text(text.clone())).is_err() {
-                log::warn!("network: 송신 큐 만원 — text 메시지 드롭 ({} bytes)", text.len());
+                log::warn!(
+                    "network: 송신 큐 만원 — text 메시지 드롭 ({} bytes)",
+                    text.len()
+                );
             }
         }
 
@@ -211,13 +217,13 @@ mod wasm_impl {
     use wasm_bindgen::JsCast;
 
     pub struct NetworkClient {
-        socket: web_sys::WebSocket,
+        socket: Option<web_sys::WebSocket>,
         buffer: Rc<RefCell<Vec<NetworkEvent>>>,
         // 클로저를 살아있게 유지
-        _on_open: Closure<dyn FnMut()>,
-        _on_message: Closure<dyn FnMut(web_sys::MessageEvent)>,
-        _on_error: Closure<dyn FnMut(web_sys::Event)>,
-        _on_close: Closure<dyn FnMut(web_sys::CloseEvent)>,
+        _on_open: Option<Closure<dyn FnMut()>>,
+        _on_message: Option<Closure<dyn FnMut(web_sys::MessageEvent)>>,
+        _on_error: Option<Closure<dyn FnMut(web_sys::Event)>>,
+        _on_close: Option<Closure<dyn FnMut(web_sys::CloseEvent)>>,
     }
 
     impl NetworkClient {
@@ -229,7 +235,23 @@ mod wasm_impl {
             let buffer: Rc<RefCell<Vec<NetworkEvent>>> = Rc::new(RefCell::new(Vec::new()));
             let max_message_bytes = config.max_message_bytes;
 
-            let ws = web_sys::WebSocket::new(url).expect("WebSocket::new failed");
+            let ws = match web_sys::WebSocket::new(url) {
+                Ok(ws) => ws,
+                Err(e) => {
+                    buffer.borrow_mut().push(NetworkEvent::Error(format!(
+                        "WebSocket::new failed: {}",
+                        js_value_to_string(&e)
+                    )));
+                    return Self {
+                        socket: None,
+                        buffer,
+                        _on_open: None,
+                        _on_message: None,
+                        _on_error: None,
+                        _on_close: None,
+                    };
+                }
+            };
             ws.set_binary_type(web_sys::BinaryType::Arraybuffer);
 
             let buf = buffer.clone();
@@ -284,35 +306,64 @@ mod wasm_impl {
             ws.set_onclose(Some(on_close.as_ref().unchecked_ref()));
 
             Self {
-                socket: ws,
+                socket: Some(ws),
                 buffer,
-                _on_open: on_open,
-                _on_message: on_message,
-                _on_error: on_error,
-                _on_close: on_close,
+                _on_open: Some(on_open),
+                _on_message: Some(on_message),
+                _on_error: Some(on_error),
+                _on_close: Some(on_close),
             }
         }
 
         pub fn send_bytes(&self, data: &[u8]) {
-            self.socket.send_with_u8_array(data).ok();
+            if !self.try_send_bytes(data) {
+                log::warn!("network: binary 메시지 전송 실패 ({} bytes)", data.len());
+            }
         }
 
-        pub fn send_text(&self, text: &str) {
-            self.socket.send_with_str(text).ok();
+        pub fn send_text(&self, text: impl Into<String>) {
+            let text = text.into();
+            if !self.try_send_text(text.clone()) {
+                log::warn!("network: text 메시지 전송 실패 ({} bytes)", text.len());
+            }
+        }
+
+        pub fn try_send_bytes(&self, data: &[u8]) -> bool {
+            match &self.socket {
+                Some(socket) => socket.send_with_u8_array(data).is_ok(),
+                None => false,
+            }
+        }
+
+        pub fn try_send_text(&self, text: impl Into<String>) -> bool {
+            let text = text.into();
+            match &self.socket {
+                Some(socket) => socket.send_with_str(&text).is_ok(),
+                None => false,
+            }
         }
 
         pub fn disconnect(&self) {
-            self.socket.close().ok();
+            if let Some(socket) = &self.socket {
+                socket.close().ok();
+            }
         }
 
         /// `web_sys::WebSocket::OPEN(1)` 상태인지 확인
         pub fn is_connected(&self) -> bool {
-            self.socket.ready_state() == web_sys::WebSocket::OPEN
+            match &self.socket {
+                Some(socket) => socket.ready_state() == web_sys::WebSocket::OPEN,
+                None => false,
+            }
         }
 
         pub(super) fn poll(&mut self) -> Vec<NetworkEvent> {
             std::mem::take(&mut *self.buffer.borrow_mut())
         }
+    }
+
+    fn js_value_to_string(value: &JsValue) -> String {
+        value.as_string().unwrap_or_else(|| format!("{value:?}"))
     }
 }
 
@@ -372,6 +423,9 @@ mod tests {
         // SyncSender with capacity 1: first send succeeds, second fails (full).
         let (tx, _rx) = std::sync::mpsc::sync_channel::<u8>(1);
         assert!(tx.try_send(1).is_ok());
-        assert!(tx.try_send(2).is_err(), "queue should be full after capacity is reached");
+        assert!(
+            tx.try_send(2).is_err(),
+            "queue should be full after capacity is reached"
+        );
     }
 }

@@ -1,4 +1,4 @@
-# CLAUDE.md — skeleton-engine 에이전트 참조 문서
+# AGENTS.md — skeleton-engine 에이전트 참조 문서
 
 > 버전 v1.0.0 | 패키지 `skeleton-engine`, 라이브러리 크레이트 `engine` | wgpu 기반 Rust 2D 게임 엔진  
 > WASM 지원: `cargo build --target wasm32-unknown-unknown` 통과  
@@ -220,7 +220,7 @@ world.resource_mut::<SceneChange>().unwrap().0 =
 
 | 문서 | 용도 |
 |------|------|
-| `CLAUDE.md` (이 파일) | 에이전트 빠른 참조 — 모듈 맵, 핵심 패턴, 작업 체크리스트 |
+| `AGENTS.md` (이 파일) | 에이전트 빠른 참조 — 모듈 맵, 핵심 패턴, 작업 체크리스트 |
 | `REFERENCE.md` | 전체 공개 API + 코드 예제 (상세) |
 | `HANDOFF.md` | Phase별 개발 이력, 아키텍처 결정 배경 |
 

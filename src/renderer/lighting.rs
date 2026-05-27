@@ -241,8 +241,7 @@ impl LightingRenderer {
         let (output_texture, output_view) =
             Self::create_output(device, width, height, surface_format);
 
-        let (normal_texture, normal_view) =
-            Self::create_normal_buffer(device, width, height);
+        let (normal_texture, normal_view) = Self::create_normal_buffer(device, width, height);
 
         Self {
             output_texture,

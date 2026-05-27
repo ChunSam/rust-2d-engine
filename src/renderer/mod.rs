@@ -12,7 +12,7 @@ pub mod text;
 pub mod texture;
 pub mod ui;
 
-pub use context::GpuContext;
+pub use context::{GpuContext, GpuContextError};
 pub use post_process::{PostProcessConfig, PostProcessRenderer};
 pub use render_target::RenderTarget;
 pub use sprite::SpriteRenderer;

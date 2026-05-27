@@ -118,14 +118,14 @@ impl TextQueue {
 /// ## 소유권 배치
 /// - `Cache` 를 먼저 만들고 `TextAtlas` / `Viewport` 에 공유한다.
 ///   (`TextAtlas::new` 가 `&Cache` 를 필요로 하며, `TextRenderer` 가 `Cache`
-///   소유권을 보존해야 한다 — CLAUDE.md 결정 사항.)
+///   소유권을 보존한다.)
 /// - `Viewport::update(queue, Resolution{w,h})` 로 매 프레임 GPU 유니폼을 갱신한다.
 pub struct TextRenderer {
     font_system: FontSystem,
     swash_cache: SwashCache,
     /// `Cache` を先に作り atlas / viewport と共有する (glyphon 0.6 要件).
     /// `TextAtlas` が内部で `Cache` を `clone()` するため、フィールドとして
-    /// 保持しなくても動くが、所有権を明示的に残す (CLAUDE.md 決定事項).
+    /// 保持しなくても動くが、所有権を明示的に残す.
     #[allow(dead_code)]
     cache: Cache,
     atlas: TextAtlas,

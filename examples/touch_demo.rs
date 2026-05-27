@@ -7,8 +7,8 @@
 ///
 /// 데스크톱에서는 마우스 클릭이 터치로 에뮬레이션되어 조이스틱을 조작할 수 있다.
 use engine::{
-    App, Camera, DebugDraw, Sprite, TouchState, Transform, VirtualJoystick, WindowConfig,
     ecs::{Entity, System, World},
+    App, Camera, DebugDraw, Sprite, TouchState, Transform, VirtualJoystick, WindowConfig,
 };
 use glam::Vec2;
 
@@ -33,12 +33,14 @@ impl System for TouchVisualSystem {
             .unwrap_or_default();
 
         // 스와이프 감지 로그
-        let swipe = world
-            .resource::<TouchState>()
-            .and_then(|ts| ts.swipe);
+        let swipe = world.resource::<TouchState>().and_then(|ts| ts.swipe);
         if let Some(dir) = swipe {
             let label = if dir.x.abs() > dir.y.abs() {
-                if dir.x > 0.0 { "오른쪽" } else { "왼쪽" }
+                if dir.x > 0.0 {
+                    "오른쪽"
+                } else {
+                    "왼쪽"
+                }
             } else if dir.y > 0.0 {
                 "아래"
             } else {
@@ -94,23 +96,19 @@ impl System for JoystickMoveSystem {
 
         type TouchVec = Vec<(u64, Vec2)>;
         // 1. 터치 데이터를 owned 값으로 추출 (borrow 해제)
-        let (began, ended, active): (TouchVec, TouchVec, TouchVec) =
-            world
-                .resource::<TouchState>()
-                .map(|ts| {
-                    (
-                        ts.began.clone(),
-                        ts.ended.clone(),
-                        ts.active_touches().collect(),
-                    )
-                })
-                .unwrap_or_default();
+        let (began, ended, active): (TouchVec, TouchVec, TouchVec) = world
+            .resource::<TouchState>()
+            .map(|ts| {
+                (
+                    ts.began.clone(),
+                    ts.ended.clone(),
+                    ts.active_touches().collect(),
+                )
+            })
+            .unwrap_or_default();
 
         // 2. 조이스틱 엔티티 목록 수집
-        let joy_entities: Vec<Entity> = world
-            .query::<VirtualJoystick>()
-            .map(|(e, _)| e)
-            .collect();
+        let joy_entities: Vec<Entity> = world.query::<VirtualJoystick>().map(|(e, _)| e).collect();
 
         // 3. 조이스틱 업데이트 (update_raw 사용, borrow 충돌 없음)
         for &e in &joy_entities {
@@ -128,10 +126,7 @@ impl System for JoystickMoveSystem {
 
         // 5. 플레이어 이동
         if move_dir.length() > 0.01 {
-            let player_entities: Vec<Entity> = world
-                .query::<Player>()
-                .map(|(e, _)| e)
-                .collect();
+            let player_entities: Vec<Entity> = world.query::<Player>().map(|(e, _)| e).collect();
 
             for e in player_entities {
                 if let Some(t) = world.get_mut::<Transform>(e) {

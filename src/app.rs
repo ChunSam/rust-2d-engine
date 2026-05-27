@@ -44,15 +44,16 @@ use crate::{
 };
 
 type EventHook = Box<dyn Fn(&mut World)>;
+#[cfg(not(target_arch = "wasm32"))]
 type ComponentFactory = Box<dyn Fn(&mut World, Entity) + Send + Sync>;
 type OffscreenRenderInfo = (
     String,
     crate::camera::Camera,
-    u32,    // rt_w
-    u32,    // rt_h
+    u32, // rt_w
+    u32, // rt_h
     *const wgpu::TextureView,
     Arc<wgpu::BindGroup>,
-    u32,    // layer_mask
+    u32, // layer_mask
 );
 
 // ─── 에디터 Undo/Redo ────────────────────────────────────────────────────────
@@ -303,10 +304,12 @@ pub struct App {
     /// 드래그 시작 시 (엔티티 position - 커서 월드 좌표) 오프셋.
     gizmo_drag_offset: glam::Vec2,
     /// Inspector 씬 저장 경로 (네이티브 전용).
+    #[cfg(not(target_arch = "wasm32"))]
     editor_save_path: String,
     /// 마지막 씬 저장 결과 메시지.
     editor_save_status: Option<String>,
     /// 마지막 씬 로드 결과 메시지.
+    #[cfg(not(target_arch = "wasm32"))]
     editor_load_status: Option<String>,
     /// Inspector 현재 탭 인덱스 (0: Entities, 1: Assets).
     inspector_tab: u8,
@@ -445,9 +448,7 @@ impl App {
             inspector_selected: None,
             gizmo_dragging: false,
             gizmo_drag_offset: glam::Vec2::ZERO,
-            editor_save_path: "saved_scene.ron".into(),
             editor_save_status: None,
-            editor_load_status: None,
             inspector_tab: 0,
         }
     }
@@ -524,11 +525,7 @@ impl App {
     }
 
     /// SystemSet 활성/비활성. 비활성 set의 시스템은 매 프레임 실행에서 제외된다.
-    pub fn set_enabled(
-        &mut self,
-        set: crate::ecs::schedule::SystemLabel,
-        enabled: bool,
-    ) {
+    pub fn set_enabled(&mut self, set: crate::ecs::schedule::SystemLabel, enabled: bool) {
         if enabled {
             self.disabled_sets.remove(set);
         } else {
@@ -833,9 +830,17 @@ impl App {
     /// 이벤트 루프를 시작한다. 창이 닫힐 때까지 블로킹된다.
     #[allow(unused_mut)]
     pub fn run(mut self) {
-        let event_loop = EventLoop::new().expect("이벤트 루프 생성 실패");
+        let event_loop = match EventLoop::new() {
+            Ok(event_loop) => event_loop,
+            Err(err) => {
+                log::error!("이벤트 루프 생성 실패: {err}");
+                return;
+            }
+        };
         #[cfg(not(target_arch = "wasm32"))]
-        event_loop.run_app(&mut self).expect("이벤트 루프 오류");
+        if let Err(err) = event_loop.run_app(&mut self) {
+            log::error!("이벤트 루프 오류: {err}");
+        }
         #[cfg(target_arch = "wasm32")]
         {
             use winit::platform::web::EventLoopExtWebSys;
@@ -938,7 +943,10 @@ impl App {
                         let msg = format_panic_payload(&panic);
                         log::error!("시스템 패닉 [{name}]: {msg}");
                         self.panicked_systems.insert(i);
-                        if let Some(ps) = self.world.resource_mut::<crate::resources::PanickedSystems>() {
+                        if let Some(ps) = self
+                            .world
+                            .resource_mut::<crate::resources::PanickedSystems>()
+                        {
                             ps.disabled.push(name.to_string());
                         }
                         #[cfg(not(target_arch = "wasm32"))]
@@ -1047,7 +1055,12 @@ impl App {
                     let shift = i.modifiers.shift;
                     let c = i.key_pressed(egui::Key::C);
                     let v = i.key_pressed(egui::Key::V);
-                    (ctrl && z && !shift, ctrl && z && shift, ctrl && c, ctrl && v)
+                    (
+                        ctrl && z && !shift,
+                        ctrl && z && shift,
+                        ctrl && c,
+                        ctrl && v,
+                    )
                 });
                 if want_undo {
                     let mut sel = self.inspector_selected;
@@ -1841,29 +1854,36 @@ impl App {
                             // 드래그 엔티티의 이전 위치를 구해 delta 계산 후 그룹 이동
                             #[cfg(not(target_arch = "wasm32"))]
                             {
-                                let old_pos = self.world
+                                let old_pos = self
+                                    .world
                                     .get::<crate::components::Transform>(sel)
                                     .map(|t| t.position)
                                     .unwrap_or(final_pos);
                                 let delta = final_pos - old_pos;
                                 // 주 엔티티 이동
-                                if let Some(t) = self.world.get_mut::<crate::components::Transform>(sel) {
+                                if let Some(t) =
+                                    self.world.get_mut::<crate::components::Transform>(sel)
+                                {
                                     t.position = final_pos;
                                 }
                                 // 나머지 선택 엔티티에 같은 delta 적용
-                                let others: Vec<Entity> = self.selected_entities
+                                let others: Vec<Entity> = self
+                                    .selected_entities
                                     .iter()
                                     .copied()
                                     .filter(|&e| e != sel)
                                     .collect();
                                 for other in others {
-                                    if let Some(t) = self.world.get_mut::<crate::components::Transform>(other) {
+                                    if let Some(t) =
+                                        self.world.get_mut::<crate::components::Transform>(other)
+                                    {
                                         t.position += delta;
                                     }
                                 }
                             }
                             #[cfg(target_arch = "wasm32")]
-                            if let Some(t) = self.world.get_mut::<crate::components::Transform>(sel) {
+                            if let Some(t) = self.world.get_mut::<crate::components::Transform>(sel)
+                            {
                                 t.position = final_pos;
                             }
                         }
@@ -1954,20 +1974,15 @@ impl App {
         }
 
         // 비동기 로드 완료 처리: 완료된 에셋을 GPU에 업로드하고 LoadProgress를 갱신한다.
-        let async_completed: Vec<String> = self
+        let async_completed: Vec<(String, ImageAsset)> = self
             .world
             .resource_mut::<AssetServer>()
             .map(|as_| as_.poll_async_completions())
             .unwrap_or_default();
         if !async_completed.is_empty() {
-            // GPU 텍스처 업로드 (CPU AssetServer 데이터에서)
             if let (Some(sr), Some(gpu)) = (&mut self.sprite_renderer, &self.gpu) {
-                // AssetServer에서 이미 업데이트된 CPU 데이터를 읽어 GPU에 올린다.
-                for path in &async_completed {
-                    // 이미 디코딩된 CPU 데이터가 AssetServer에 있으므로
-                    // load_texture (disk 재읽기) 대신 AssetServer 경유 업로드가 이상적이나,
-                    // 현재 SpriteRenderer는 path 기반 캐시를 사용하므로 강제 재업로드한다.
-                    sr.load_texture(&gpu.device, &gpu.queue, path);
+                for (path, asset) in &async_completed {
+                    sr.load_texture_from_image(&gpu.device, &gpu.queue, path, asset);
                 }
             }
             // LoadProgress.loaded 갱신
@@ -2108,10 +2123,7 @@ impl App {
 
             for (target_name, cam, rt_w, rt_h, view_ptr, bg, layer_mask) in rt_info {
                 // ① 카메라 교체 — 기존 카메라가 없으면 렌더 후 제거, 있으면 원복
-                let saved_cam = self
-                    .world
-                    .resource::<crate::camera::Camera>()
-                    .copied();
+                let saved_cam = self.world.resource::<crate::camera::Camera>().copied();
                 self.world.insert_resource(cam);
 
                 // ② Safety: render_targets는 이 루프에서 수정되지 않는다.
@@ -2157,7 +2169,9 @@ impl App {
                 // ⑤ 카메라 복원 — 원래 없던 경우 제거해 World 오염 방지
                 match saved_cam {
                     Some(c) => self.world.insert_resource(c),
-                    None => { self.world.remove_resource::<crate::camera::Camera>(); }
+                    None => {
+                        self.world.remove_resource::<crate::camera::Camera>();
+                    }
                 }
 
                 // ⑥ RT bind_group을 스프라이트 렌더러에 등록 (Sprite.texture 키로 샘플 가능)
@@ -2319,17 +2333,19 @@ impl App {
                 .next()
                 .is_some();
             if has_emitters && self.gpu_particle_renderer.is_none() {
-                self.gpu_particle_renderer = Some(
-                    crate::renderer::gpu_particle::GpuParticleRenderer::new(
+                self.gpu_particle_renderer =
+                    Some(crate::renderer::gpu_particle::GpuParticleRenderer::new(
                         &gpu.device,
                         gpu.config.format,
                         4096,
-                    ),
-                );
+                    ));
             }
             if let Some(gpr) = &self.gpu_particle_renderer {
-                let new_particles =
-                    crate::gpu_particle::collect_new_particles(&mut self.world, gpr.capacity(), self.last_dt);
+                let new_particles = crate::gpu_particle::collect_new_particles(
+                    &mut self.world,
+                    gpr.capacity(),
+                    self.last_dt,
+                );
                 for (slot, p) in &new_particles {
                     gpr.upload_particles(&gpu.queue, std::slice::from_ref(p), *slot);
                 }
@@ -2507,12 +2523,24 @@ impl ApplicationHandler for App {
             }
         };
 
-        let window = Arc::new(event_loop.create_window(attrs).expect("창 생성 실패"));
+        let window = match event_loop.create_window(attrs) {
+            Ok(window) => Arc::new(window),
+            Err(err) => {
+                log::error!("창 생성 실패: {err}");
+                event_loop.exit();
+                return;
+            }
+        };
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let gpu = pollster::block_on(GpuContext::new(window.clone()));
-            self.finish_init(gpu, window);
+            match pollster::block_on(GpuContext::new(window.clone())) {
+                Ok(gpu) => self.finish_init(gpu, window),
+                Err(err) => {
+                    log::error!("GPU 초기화 실패: {err}");
+                    event_loop.exit();
+                }
+            }
         }
 
         // WASM: WebGPU/WebGL2 adapter 요청이 Promise 기반이므로 spawn_local로 비동기 처리한다.
@@ -2521,10 +2549,14 @@ impl ApplicationHandler for App {
         {
             self.window = Some(window.clone());
             wasm_bindgen_futures::spawn_local(async move {
-                let gpu = GpuContext::new(window.clone()).await;
-                PENDING_GPU.with(|p| {
-                    *p.borrow_mut() = Some((gpu, window));
-                });
+                match GpuContext::new(window.clone()).await {
+                    Ok(gpu) => {
+                        PENDING_GPU.with(|p| {
+                            *p.borrow_mut() = Some((gpu, window));
+                        });
+                    }
+                    Err(err) => log::error!("GPU 초기화 실패: {err}"),
+                }
             });
         }
     }

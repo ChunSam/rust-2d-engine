@@ -67,8 +67,17 @@ enum BbEntry {
 
 #[derive(Clone)]
 enum SteeringCmd {
-    Seek { tx: f32, ty: f32, speed: f32 },
-    Flee { tx: f32, ty: f32, speed: f32, radius: f32 },
+    Seek {
+        tx: f32,
+        ty: f32,
+        speed: f32,
+    },
+    Flee {
+        tx: f32,
+        ty: f32,
+        speed: f32,
+        radius: f32,
+    },
     Stop,
 }
 
@@ -79,10 +88,10 @@ enum SteeringCmd {
 // ECS 시스템은 단일 스레드이므로 RefCell이 안전하다.
 
 struct ScriptCtx {
-    cmd_buf:   Arc<Mutex<ScriptCommands>>,
-    bb_buf:    Arc<Mutex<Vec<BbEntry>>>,
+    cmd_buf: Arc<Mutex<ScriptCommands>>,
+    bb_buf: Arc<Mutex<Vec<BbEntry>>>,
     steer_buf: Arc<Mutex<Option<SteeringCmd>>>,
-    bb_snap:   Arc<Mutex<HashMap<String, BbEntry>>>,
+    bb_snap: Arc<Mutex<HashMap<String, BbEntry>>>,
 }
 
 thread_local! {
@@ -171,7 +180,9 @@ impl ScriptingSystem {
         engine.register_fn("spawn_entity", || -> i64 {
             SCRIPT_CTX.with(|c| {
                 let borrow = c.borrow();
-                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                let ctx = borrow
+                    .as_ref()
+                    .expect("SCRIPT_CTX must be set during script execution");
                 let mut cmds = ctx.cmd_buf.lock().unwrap();
                 cmds.spawn_count += 1;
                 let handle = -(cmds.spawn_count as i64);
@@ -183,7 +194,9 @@ impl ScriptingSystem {
         engine.register_fn("despawn_entity", |id: i64| {
             SCRIPT_CTX.with(|c| {
                 let borrow = c.borrow();
-                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                let ctx = borrow
+                    .as_ref()
+                    .expect("SCRIPT_CTX must be set during script execution");
                 if id >= 0 {
                     ctx.cmd_buf.lock().unwrap().despawn.push(Entity(id as u32));
                 }
@@ -193,31 +206,48 @@ impl ScriptingSystem {
         engine.register_fn("bb_set_bool", |key: &str, val: bool| {
             SCRIPT_CTX.with(|c| {
                 let borrow = c.borrow();
-                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
-                ctx.bb_buf.lock().unwrap().push(BbEntry::Bool(key.to_string(), val));
+                let ctx = borrow
+                    .as_ref()
+                    .expect("SCRIPT_CTX must be set during script execution");
+                ctx.bb_buf
+                    .lock()
+                    .unwrap()
+                    .push(BbEntry::Bool(key.to_string(), val));
             });
         });
 
         engine.register_fn("bb_set_float", |key: &str, val: f64| {
             SCRIPT_CTX.with(|c| {
                 let borrow = c.borrow();
-                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
-                ctx.bb_buf.lock().unwrap().push(BbEntry::Float(key.to_string(), val));
+                let ctx = borrow
+                    .as_ref()
+                    .expect("SCRIPT_CTX must be set during script execution");
+                ctx.bb_buf
+                    .lock()
+                    .unwrap()
+                    .push(BbEntry::Float(key.to_string(), val));
             });
         });
 
         engine.register_fn("bb_set_int", |key: &str, val: i64| {
             SCRIPT_CTX.with(|c| {
                 let borrow = c.borrow();
-                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
-                ctx.bb_buf.lock().unwrap().push(BbEntry::Int(key.to_string(), val));
+                let ctx = borrow
+                    .as_ref()
+                    .expect("SCRIPT_CTX must be set during script execution");
+                ctx.bb_buf
+                    .lock()
+                    .unwrap()
+                    .push(BbEntry::Int(key.to_string(), val));
             });
         });
 
         engine.register_fn("bb_get_bool", |key: &str| -> bool {
             SCRIPT_CTX.with(|c| {
                 let borrow = c.borrow();
-                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                let ctx = borrow
+                    .as_ref()
+                    .expect("SCRIPT_CTX must be set during script execution");
                 let snap = ctx.bb_snap.lock().unwrap();
                 match snap.get(key) {
                     Some(BbEntry::Bool(_, v)) => *v,
@@ -229,7 +259,9 @@ impl ScriptingSystem {
         engine.register_fn("bb_get_float", |key: &str| -> f64 {
             SCRIPT_CTX.with(|c| {
                 let borrow = c.borrow();
-                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                let ctx = borrow
+                    .as_ref()
+                    .expect("SCRIPT_CTX must be set during script execution");
                 let snap = ctx.bb_snap.lock().unwrap();
                 match snap.get(key) {
                     Some(BbEntry::Float(_, v)) => *v,
@@ -241,7 +273,9 @@ impl ScriptingSystem {
         engine.register_fn("bb_get_int", |key: &str| -> i64 {
             SCRIPT_CTX.with(|c| {
                 let borrow = c.borrow();
-                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                let ctx = borrow
+                    .as_ref()
+                    .expect("SCRIPT_CTX must be set during script execution");
                 let snap = ctx.bb_snap.lock().unwrap();
                 match snap.get(key) {
                     Some(BbEntry::Int(_, v)) => *v,
@@ -253,9 +287,13 @@ impl ScriptingSystem {
         engine.register_fn("seek_target", |tx: f64, ty: f64, speed: f64| {
             SCRIPT_CTX.with(|c| {
                 let borrow = c.borrow();
-                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                let ctx = borrow
+                    .as_ref()
+                    .expect("SCRIPT_CTX must be set during script execution");
                 *ctx.steer_buf.lock().unwrap() = Some(SteeringCmd::Seek {
-                    tx: tx as f32, ty: ty as f32, speed: speed as f32,
+                    tx: tx as f32,
+                    ty: ty as f32,
+                    speed: speed as f32,
                 });
             });
         });
@@ -263,9 +301,14 @@ impl ScriptingSystem {
         engine.register_fn("flee_from", |tx: f64, ty: f64, speed: f64, radius: f64| {
             SCRIPT_CTX.with(|c| {
                 let borrow = c.borrow();
-                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                let ctx = borrow
+                    .as_ref()
+                    .expect("SCRIPT_CTX must be set during script execution");
                 *ctx.steer_buf.lock().unwrap() = Some(SteeringCmd::Flee {
-                    tx: tx as f32, ty: ty as f32, speed: speed as f32, radius: radius as f32,
+                    tx: tx as f32,
+                    ty: ty as f32,
+                    speed: speed as f32,
+                    radius: radius as f32,
                 });
             });
         });
@@ -273,7 +316,9 @@ impl ScriptingSystem {
         engine.register_fn("stop_steering", || {
             SCRIPT_CTX.with(|c| {
                 let borrow = c.borrow();
-                let ctx = borrow.as_ref().expect("SCRIPT_CTX must be set during script execution");
+                let ctx = borrow
+                    .as_ref()
+                    .expect("SCRIPT_CTX must be set during script execution");
                 *ctx.steer_buf.lock().unwrap() = Some(SteeringCmd::Stop);
             });
         });
@@ -324,10 +369,12 @@ impl System for ScriptingSystem {
             };
 
             // ── 엔티티별 버퍼 생성 ─────────────────────────────────────────────
-            let cmd_buf:   Arc<Mutex<ScriptCommands>>           = Arc::new(Mutex::new(ScriptCommands::default()));
-            let bb_buf:    Arc<Mutex<Vec<BbEntry>>>             = Arc::new(Mutex::new(Vec::new()));
-            let steer_buf: Arc<Mutex<Option<SteeringCmd>>>      = Arc::new(Mutex::new(None));
-            let bb_snap:   Arc<Mutex<HashMap<String, BbEntry>>> = Arc::new(Mutex::new(HashMap::new()));
+            let cmd_buf: Arc<Mutex<ScriptCommands>> =
+                Arc::new(Mutex::new(ScriptCommands::default()));
+            let bb_buf: Arc<Mutex<Vec<BbEntry>>> = Arc::new(Mutex::new(Vec::new()));
+            let steer_buf: Arc<Mutex<Option<SteeringCmd>>> = Arc::new(Mutex::new(None));
+            let bb_snap: Arc<Mutex<HashMap<String, BbEntry>>> =
+                Arc::new(Mutex::new(HashMap::new()));
 
             // Blackboard 스냅샷 수집
             {
@@ -336,9 +383,9 @@ impl System for ScriptingSystem {
                     let mut snap = bb_snap.lock().unwrap();
                     for (key, val) in bb.entries() {
                         let entry = match val {
-                            BlackboardValue::Bool(v)  => BbEntry::Bool(key.to_string(), *v),
+                            BlackboardValue::Bool(v) => BbEntry::Bool(key.to_string(), *v),
                             BlackboardValue::Float(v) => BbEntry::Float(key.to_string(), *v as f64),
-                            BlackboardValue::Int(v)   => BbEntry::Int(key.to_string(), *v as i64),
+                            BlackboardValue::Int(v) => BbEntry::Int(key.to_string(), *v as i64),
                             _ => continue,
                         };
                         snap.insert(key.to_string(), entry);
@@ -348,10 +395,10 @@ impl System for ScriptingSystem {
 
             // ── thread_local 컨텍스트 설정 → 스크립트 실행 → 컨텍스트 제거 ───
             set_script_ctx(ScriptCtx {
-                cmd_buf:   Arc::clone(&cmd_buf),
-                bb_buf:    Arc::clone(&bb_buf),
+                cmd_buf: Arc::clone(&cmd_buf),
+                bb_buf: Arc::clone(&bb_buf),
                 steer_buf: Arc::clone(&steer_buf),
-                bb_snap:   Arc::clone(&bb_snap),
+                bb_snap: Arc::clone(&bb_snap),
             });
 
             let (new_tx, new_ty, new_tr, new_tsx, new_tsy) = {
@@ -374,9 +421,9 @@ impl System for ScriptingSystem {
                     (dt as f64,),
                 );
 
-                let nx  = runner.scope.get_value::<f64>("x").unwrap_or(tx);
-                let ny  = runner.scope.get_value::<f64>("y").unwrap_or(ty);
-                let nr  = runner.scope.get_value::<f64>("rot").unwrap_or(tr);
+                let nx = runner.scope.get_value::<f64>("x").unwrap_or(tx);
+                let ny = runner.scope.get_value::<f64>("y").unwrap_or(ty);
+                let nr = runner.scope.get_value::<f64>("rot").unwrap_or(tr);
                 let nsx = runner.scope.get_value::<f64>("sx").unwrap_or(tsx);
                 let nsy = runner.scope.get_value::<f64>("sy").unwrap_or(tsy);
                 (nx, ny, nr, nsx, nsy)
@@ -388,9 +435,9 @@ impl System for ScriptingSystem {
             if let Some(t) = world.get_mut::<Transform>(entity) {
                 t.position.x = new_tx as f32;
                 t.position.y = new_ty as f32;
-                t.rotation   = new_tr as f32;
-                t.scale.x    = new_tsx as f32;
-                t.scale.y    = new_tsy as f32;
+                t.rotation = new_tr as f32;
+                t.scale.x = new_tsx as f32;
+                t.scale.y = new_tsy as f32;
             }
 
             // ── Commands 적용 ────────────────────────────────────────────────
@@ -414,9 +461,9 @@ impl System for ScriptingSystem {
                 if let Some(bb) = world.get_mut::<Blackboard>(entity) {
                     for entry in bb_changes {
                         match entry {
-                            BbEntry::Bool(k, v)  => bb.set_bool(&k, v),
+                            BbEntry::Bool(k, v) => bb.set_bool(&k, v),
                             BbEntry::Float(k, v) => bb.set_float(&k, v as f32),
-                            BbEntry::Int(k, v)   => bb.set_int(&k, v as i32),
+                            BbEntry::Int(k, v) => bb.set_int(&k, v as i32),
                         }
                     }
                 }
@@ -431,14 +478,32 @@ impl System for ScriptingSystem {
                         if world.get::<SteeringVelocity>(entity).is_none() {
                             world.add_component(entity, SteeringVelocity::default());
                         }
-                        world.add_component(entity, Seek { target: Vec2::new(tx, ty), max_speed: speed });
+                        world.add_component(
+                            entity,
+                            Seek {
+                                target: Vec2::new(tx, ty),
+                                max_speed: speed,
+                            },
+                        );
                     }
-                    SteeringCmd::Flee { tx, ty, speed, radius } => {
+                    SteeringCmd::Flee {
+                        tx,
+                        ty,
+                        speed,
+                        radius,
+                    } => {
                         use glam::Vec2;
                         if world.get::<SteeringVelocity>(entity).is_none() {
                             world.add_component(entity, SteeringVelocity::default());
                         }
-                        world.add_component(entity, Flee { target: Vec2::new(tx, ty), max_speed: speed, flee_radius: radius });
+                        world.add_component(
+                            entity,
+                            Flee {
+                                target: Vec2::new(tx, ty),
+                                max_speed: speed,
+                                flee_radius: radius,
+                            },
+                        );
                     }
                     SteeringCmd::Stop => {
                         if let Some(sv) = world.get_mut::<SteeringVelocity>(entity) {
@@ -482,7 +547,9 @@ mod tests {
         let ast = sys.engine.compile(script).unwrap();
         let mut scope = Scope::new();
         set_script_ctx(ctx);
-        let _ = sys.engine.eval_ast_with_scope::<rhai::Dynamic>(&mut scope, &ast);
+        let _ = sys
+            .engine
+            .eval_ast_with_scope::<rhai::Dynamic>(&mut scope, &ast);
         clear_script_ctx();
     }
 
@@ -506,7 +573,10 @@ mod tests {
         let bb_buf = Arc::new(Mutex::new(Vec::new()));
         let bb_snap = Arc::new(Mutex::new(HashMap::new()));
         // 사전에 스냅샷에 값 넣기 (get 테스트용)
-        bb_snap.lock().unwrap().insert("score".to_string(), BbEntry::Float("score".to_string(), 42.0));
+        bb_snap.lock().unwrap().insert(
+            "score".to_string(),
+            BbEntry::Float("score".to_string(), 42.0),
+        );
 
         let ctx = ScriptCtx {
             cmd_buf: Arc::new(Mutex::new(ScriptCommands::default())),
@@ -514,15 +584,23 @@ mod tests {
             steer_buf: Arc::new(Mutex::new(None)),
             bb_snap: Arc::clone(&bb_snap),
         };
-        eval_with_ctx(&sys, ctx, r#"
+        eval_with_ctx(
+            &sys,
+            ctx,
+            r#"
             bb_set_bool("active", true);
             bb_set_int("hp", 99);
             let s = bb_get_float("score");
-        "#);
+        "#,
+        );
 
         let changes = bb_buf.lock().unwrap().clone();
-        assert!(changes.iter().any(|e| matches!(e, BbEntry::Bool(k, true) if k == "active")));
-        assert!(changes.iter().any(|e| matches!(e, BbEntry::Int(k, 99) if k == "hp")));
+        assert!(changes
+            .iter()
+            .any(|e| matches!(e, BbEntry::Bool(k, true) if k == "active")));
+        assert!(changes
+            .iter()
+            .any(|e| matches!(e, BbEntry::Int(k, 99) if k == "hp")));
     }
 
     #[test]
@@ -552,9 +630,17 @@ mod tests {
         // A 버퍼에는 flag_a만, B 버퍼에는 flag_b만 있어야 한다
         let a = bb_buf_a.lock().unwrap();
         let b = bb_buf_b.lock().unwrap();
-        assert!(a.iter().any(|e| matches!(e, BbEntry::Bool(k, _) if k == "flag_a")));
-        assert!(!a.iter().any(|e| matches!(e, BbEntry::Bool(k, _) if k == "flag_b")));
-        assert!(b.iter().any(|e| matches!(e, BbEntry::Bool(k, _) if k == "flag_b")));
-        assert!(!b.iter().any(|e| matches!(e, BbEntry::Bool(k, _) if k == "flag_a")));
+        assert!(a
+            .iter()
+            .any(|e| matches!(e, BbEntry::Bool(k, _) if k == "flag_a")));
+        assert!(!a
+            .iter()
+            .any(|e| matches!(e, BbEntry::Bool(k, _) if k == "flag_b")));
+        assert!(b
+            .iter()
+            .any(|e| matches!(e, BbEntry::Bool(k, _) if k == "flag_b")));
+        assert!(!b
+            .iter()
+            .any(|e| matches!(e, BbEntry::Bool(k, _) if k == "flag_a")));
     }
 }

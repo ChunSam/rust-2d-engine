@@ -8,21 +8,21 @@ use crate::ecs::World;
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable, Debug)]
 pub struct GpuParticle {
-    pub pos:         [f32; 2],
-    pub vel:         [f32; 2],
-    pub life:        f32,
-    pub max_life:    f32,
-    pub size:        f32,
-    pub _pad:        f32,
+    pub pos: [f32; 2],
+    pub vel: [f32; 2],
+    pub life: f32,
+    pub max_life: f32,
+    pub size: f32,
+    pub _pad: f32,
     pub color_start: [f32; 4],
-    pub color_end:   [f32; 4],
+    pub color_end: [f32; 4],
 }
 
 // ─── 컴퓨트 유니폼 ────────────────────────────────────────────────────────────
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 struct ComputeUniforms {
-    dt:   f32,
+    dt: f32,
     _pad: [f32; 3],
 }
 
@@ -38,17 +38,17 @@ struct CameraUniform {
 /// `App`이 내부적으로 관리한다. 사용자는 `GpuParticleEmitter` 컴포넌트만 붙이면 된다.
 pub struct GpuParticleRenderer {
     // ── 컴퓨트 파이프라인 ──────────────────────────────────────────────────
-    compute_pipeline:    wgpu::ComputePipeline,
-    compute_bind_group:  wgpu::BindGroup,
+    compute_pipeline: wgpu::ComputePipeline,
+    compute_bind_group: wgpu::BindGroup,
     compute_uniform_buf: wgpu::Buffer,
     // ── 파티클 버퍼 (STORAGE | VERTEX 겸용) ──────────────────────────────
-    particle_buf:      wgpu::Buffer,
+    particle_buf: wgpu::Buffer,
     particle_capacity: u32,
     // ── 렌더 파이프라인 ────────────────────────────────────────────────────
-    render_pipeline:      wgpu::RenderPipeline,
-    camera_buf:           wgpu::Buffer,
-    camera_bind_group:    wgpu::BindGroup,
-    particle_bind_group:  wgpu::BindGroup,
+    render_pipeline: wgpu::RenderPipeline,
+    camera_buf: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
+    particle_bind_group: wgpu::BindGroup,
 }
 
 impl GpuParticleRenderer {
@@ -76,7 +76,10 @@ impl GpuParticleRenderer {
         // ── 컴퓨트 유니폼 ────────────────────────────────────────────────
         let compute_uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("gpu particle compute uniforms"),
-            contents: bytemuck::bytes_of(&ComputeUniforms { dt: 0.0, _pad: [0.0; 3] }),
+            contents: bytemuck::bytes_of(&ComputeUniforms {
+                dt: 0.0,
+                _pad: [0.0; 3],
+            }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -267,7 +270,12 @@ impl GpuParticleRenderer {
     }
 
     /// 컴퓨트 셰이더로 파티클 위치/수명을 업데이트한다.
-    pub fn dispatch_compute(&self, encoder: &mut wgpu::CommandEncoder, queue: &wgpu::Queue, dt: f32) {
+    pub fn dispatch_compute(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
+        dt: f32,
+    ) {
         queue.write_buffer(
             &self.compute_uniform_buf,
             0,

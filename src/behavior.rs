@@ -74,15 +74,19 @@ pub struct Blackboard {
 
 impl Blackboard {
     pub fn new() -> Self {
-        Self { values: HashMap::new() }
+        Self {
+            values: HashMap::new(),
+        }
     }
 
     pub fn set_bool(&mut self, key: &str, v: bool) {
-        self.values.insert(key.to_string(), BlackboardValue::Bool(v));
+        self.values
+            .insert(key.to_string(), BlackboardValue::Bool(v));
     }
 
     pub fn set_float(&mut self, key: &str, v: f32) {
-        self.values.insert(key.to_string(), BlackboardValue::Float(v));
+        self.values
+            .insert(key.to_string(), BlackboardValue::Float(v));
     }
 
     pub fn set_int(&mut self, key: &str, v: i32) {
@@ -90,11 +94,13 @@ impl Blackboard {
     }
 
     pub fn set_vec2(&mut self, key: &str, v: Vec2) {
-        self.values.insert(key.to_string(), BlackboardValue::Vec2(v));
+        self.values
+            .insert(key.to_string(), BlackboardValue::Vec2(v));
     }
 
     pub fn set_string(&mut self, key: &str, v: impl Into<String>) {
-        self.values.insert(key.to_string(), BlackboardValue::String(v.into()));
+        self.values
+            .insert(key.to_string(), BlackboardValue::String(v.into()));
     }
 
     pub fn get_bool(&self, key: &str) -> Option<bool> {
@@ -184,7 +190,10 @@ pub struct Sequence {
 
 impl Sequence {
     pub fn new(children: Vec<Box<dyn BehaviorNode>>) -> Self {
-        Self { children, current: 0 }
+        Self {
+            children,
+            current: 0,
+        }
     }
 }
 
@@ -224,7 +233,10 @@ pub struct Selector {
 
 impl Selector {
     pub fn new(children: Vec<Box<dyn BehaviorNode>>) -> Self {
-        Self { children, current: 0 }
+        Self {
+            children,
+            current: 0,
+        }
     }
 }
 
@@ -344,10 +356,7 @@ pub struct BehaviorSystem;
 impl System for BehaviorSystem {
     fn run(&mut self, world: &mut World, dt: f32) {
         // borrow checker 우회: 먼저 엔티티 목록을 수집
-        let entities: Vec<Entity> = world
-            .query::<BehaviorTree>()
-            .map(|(e, _)| e)
-            .collect();
+        let entities: Vec<Entity> = world.query::<BehaviorTree>().map(|(e, _)| e).collect();
 
         for entity in entities {
             // BehaviorTree를 임시로 꺼내 tick한 뒤 다시 넣는다.
@@ -407,21 +416,33 @@ mod tests {
     #[test]
     fn sequence_fails_on_failure() {
         let (mut w, e) = dummy();
-        let mut seq = Sequence::new(vec![Box::new(AlwaysOk), Box::new(AlwaysFail), Box::new(AlwaysOk)]);
+        let mut seq = Sequence::new(vec![
+            Box::new(AlwaysOk),
+            Box::new(AlwaysFail),
+            Box::new(AlwaysOk),
+        ]);
         assert_eq!(seq.tick(&mut w, e, 0.016), BehaviorStatus::Failure);
     }
 
     #[test]
     fn sequence_running_pauses() {
         let (mut w, e) = dummy();
-        let mut seq = Sequence::new(vec![Box::new(AlwaysOk), Box::new(AlwaysRun), Box::new(AlwaysOk)]);
+        let mut seq = Sequence::new(vec![
+            Box::new(AlwaysOk),
+            Box::new(AlwaysRun),
+            Box::new(AlwaysOk),
+        ]);
         assert_eq!(seq.tick(&mut w, e, 0.016), BehaviorStatus::Running);
     }
 
     #[test]
     fn selector_succeeds_on_first_success() {
         let (mut w, e) = dummy();
-        let mut sel = Selector::new(vec![Box::new(AlwaysFail), Box::new(AlwaysOk), Box::new(AlwaysFail)]);
+        let mut sel = Selector::new(vec![
+            Box::new(AlwaysFail),
+            Box::new(AlwaysOk),
+            Box::new(AlwaysFail),
+        ]);
         assert_eq!(sel.tick(&mut w, e, 0.016), BehaviorStatus::Success);
     }
 

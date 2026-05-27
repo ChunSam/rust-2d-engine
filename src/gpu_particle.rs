@@ -17,17 +17,16 @@ use crate::renderer::gpu_particle::GpuParticle;
 /// # let world = &mut app.world;
 /// # let entity = world.spawn();
 /// world.add_component(entity, Transform { position: Vec2::ZERO, ..Default::default() });
-/// world.add_component(entity, GpuParticleEmitter {
-///     spawn_rate: 100.0,
-///     lifetime: 2.0,
-///     velocity: Vec2::new(0.0, 80.0),
-///     velocity_spread: Vec2::new(30.0, 20.0),
-///     color_start: [1.0, 0.5, 0.0, 1.0],
-///     color_end: [1.0, 0.0, 0.0, 0.0],
-///     size: 6.0,
-///     emit: true,
-///     ..Default::default()
-/// });
+/// let mut emitter = GpuParticleEmitter::default();
+/// emitter.spawn_rate = 100.0;
+/// emitter.lifetime = 2.0;
+/// emitter.velocity = Vec2::new(0.0, 80.0);
+/// emitter.velocity_spread = Vec2::new(30.0, 20.0);
+/// emitter.color_start = [1.0, 0.5, 0.0, 1.0];
+/// emitter.color_end = [1.0, 0.0, 0.0, 0.0];
+/// emitter.size = 6.0;
+/// emitter.emit = true;
+/// world.add_component(entity, emitter);
 /// ```
 pub struct GpuParticleEmitter {
     /// 초당 방출 파티클 수

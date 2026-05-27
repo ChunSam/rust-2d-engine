@@ -281,7 +281,7 @@ mod tests {
     fn zoom_tween_reaches_target() {
         let mut cam = Camera::default();
         cam.zoom_to(2.0, 10.0); // speed=10/sec, gap=1.0 → needs 0.1s
-        cam.update(0.5, None);  // 0.5s well exceeds needed time
+        cam.update(0.5, None); // 0.5s well exceeds needed time
         assert_eq!(cam.zoom, 2.0);
         assert_eq!(cam.zoom_tween_speed, 0.0); // tween ended
     }
@@ -292,7 +292,7 @@ mod tests {
             zoom: 1.0,
             ..Default::default()
         };
-        cam.zoom_to(3.0, 4.0);  // speed=4/sec, gap=2.0 → needs 0.5s
+        cam.zoom_to(3.0, 4.0); // speed=4/sec, gap=2.0 → needs 0.5s
         cam.update(0.25, None); // half the time → zoom = 1.0 + 4.0*0.25 = 2.0
         assert!((cam.zoom - 2.0).abs() < 1e-5);
         assert!(cam.zoom_tween_speed > 0.0); // still tweening
@@ -325,7 +325,7 @@ mod tests {
         let mut cam = Camera::default();
         cam.shake(20.0, 1.0);
         cam.update(0.016, None); // advance timer
-        // After some time shake_timer > 0, offset should be non-zero
+                                 // After some time shake_timer > 0, offset should be non-zero
         let offset = cam.shake_offset();
         // At least one component should be non-zero (sin/cos won't both be 0 at 0.016*30~0.48)
         assert!(offset.x != 0.0 || offset.y != 0.0);

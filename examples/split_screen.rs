@@ -4,9 +4,8 @@
 /// - 화면 왼쪽 절반: "left_view" RenderTarget (P1 시점)
 /// - 화면 오른쪽 절반: "right_view" RenderTarget (P2 시점)
 use engine::{
-    App, Camera, OffscreenCamera, RenderLayer, Sprite, Transform,
     ecs::{System, World},
-    WindowConfig,
+    App, Camera, OffscreenCamera, RenderLayer, Sprite, Transform, WindowConfig,
 };
 use glam::Vec2;
 use winit::keyboard::KeyCode;
@@ -82,10 +81,7 @@ impl System for MoveSystem {
             .and_then(|&e| world.get::<Transform>(e))
             .map(|t| t.position);
 
-        let oc_entities: Vec<_> = world
-            .query::<OffscreenCamera>()
-            .map(|(e, _)| e)
-            .collect();
+        let oc_entities: Vec<_> = world.query::<OffscreenCamera>().map(|(e, _)| e).collect();
         for e in oc_entities {
             if let Some(oc) = world.get_mut::<OffscreenCamera>(e) {
                 if oc.target == "left_view" {
@@ -181,7 +177,13 @@ fn main() {
                 ..Default::default()
             },
         );
-        app.world.add_component(e, Sprite { color, ..Default::default() });
+        app.world.add_component(
+            e,
+            Sprite {
+                color,
+                ..Default::default()
+            },
+        );
     }
 
     // ─── 배경 타일 ───────────────────────────────────────────────────────────

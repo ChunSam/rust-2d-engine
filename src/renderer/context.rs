@@ -1,6 +1,30 @@
 use std::sync::Arc;
 use winit::{dpi::PhysicalSize, window::Window};
 
+/// GPU 초기화 실패 원인.
+#[derive(Debug)]
+pub enum GpuContextError {
+    Surface(wgpu::CreateSurfaceError),
+    AdapterNotFound,
+    Device(wgpu::RequestDeviceError),
+    NoSurfaceFormat,
+    NoAlphaMode,
+}
+
+impl std::fmt::Display for GpuContextError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Surface(err) => write!(f, "surface creation failed: {err}"),
+            Self::AdapterNotFound => write!(f, "no compatible GPU adapter found"),
+            Self::Device(err) => write!(f, "device creation failed: {err}"),
+            Self::NoSurfaceFormat => write!(f, "surface reported no supported formats"),
+            Self::NoAlphaMode => write!(f, "surface reported no supported alpha modes"),
+        }
+    }
+}
+
+impl std::error::Error for GpuContextError {}
+
 /// wgpu 핵심 객체를 묶은 GPU 컨텍스트
 pub struct GpuContext {
     pub surface: wgpu::Surface<'static>,
@@ -13,7 +37,7 @@ pub struct GpuContext {
 impl GpuContext {
     /// 창을 받아 wgpu Surface/Device/Queue를 초기화한다.
     /// wgpu 초기화는 async이므로 pollster::block_on으로 감싸서 호출한다.
-    pub async fn new(window: Arc<Window>) -> Self {
+    pub async fn new(window: Arc<Window>) -> Result<Self, GpuContextError> {
         // WASM: winit이 canvas를 attach한 직후 inner_size()가 1x1을 반환하는 경우가 있다.
         // canvas의 width/height 속성을 DOM에서 직접 읽어 실제 해상도를 사용한다.
         #[cfg(not(target_arch = "wasm32"))]
@@ -41,7 +65,9 @@ impl GpuContext {
         });
 
         // 2. 서피스: 창과 연결된 렌더 타겟
-        let surface = instance.create_surface(window).unwrap();
+        let surface = instance
+            .create_surface(window)
+            .map_err(GpuContextError::Surface)?;
 
         // 3. 어댑터: 물리 GPU 선택
         let adapter = instance
@@ -51,7 +77,7 @@ impl GpuContext {
                 force_fallback_adapter: false,
             })
             .await
-            .expect("어댑터를 찾지 못했습니다");
+            .ok_or(GpuContextError::AdapterNotFound)?;
 
         // 4. 논리 디바이스 + 커맨드 큐
         // wgpu 22 에서 DeviceDescriptor 에 memory_hints 필드가 추가됐다.
@@ -75,7 +101,7 @@ impl GpuContext {
                 None,
             )
             .await
-            .expect("디바이스 생성 실패");
+            .map_err(GpuContextError::Device)?;
 
         // 5. 서피스 포맷·설정
         let caps = surface.get_capabilities(&adapter);
@@ -84,7 +110,13 @@ impl GpuContext {
             .iter()
             .copied()
             .find(|f| f.is_srgb())
-            .unwrap_or(caps.formats[0]);
+            .or_else(|| caps.formats.first().copied())
+            .ok_or(GpuContextError::NoSurfaceFormat)?;
+        let alpha_mode = caps
+            .alpha_modes
+            .first()
+            .copied()
+            .ok_or(GpuContextError::NoAlphaMode)?;
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -92,19 +124,19 @@ impl GpuContext {
             width: size.width.max(1),
             height: size.height.max(1),
             present_mode: wgpu::PresentMode::AutoVsync,
-            alpha_mode: caps.alpha_modes[0],
+            alpha_mode,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
 
-        Self {
+        Ok(Self {
             surface,
             device,
             queue,
             config,
             size,
-        }
+        })
     }
 
     /// 창 크기 변경 시 서피스를 재구성한다.

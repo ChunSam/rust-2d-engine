@@ -1,5 +1,5 @@
-use std::collections::VecDeque;
 use crate::ecs::{Entity, World};
+use std::collections::VecDeque;
 
 /// ECS 엔티티 재사용 풀.
 ///
@@ -39,11 +39,7 @@ impl Pool {
     ///
     /// 사용 가능한 엔티티가 없으면 `world.spawn()`으로 새로 생성한다.
     /// `setup` 클로저에서 컴포넌트를 초기화한다.
-    pub fn acquire(
-        &mut self,
-        world: &mut World,
-        setup: impl FnOnce(&mut World, Entity),
-    ) -> Entity {
+    pub fn acquire(&mut self, world: &mut World, setup: impl FnOnce(&mut World, Entity)) -> Entity {
         // Try to reuse an existing entity
         while let Some(entity) = self.available.pop_front() {
             if world.is_alive(entity) {
@@ -106,7 +102,9 @@ mod tests {
     use crate::ecs::World;
 
     #[derive(Debug, Clone, Copy, PartialEq)]
-    struct Bullet { speed: f32 }
+    struct Bullet {
+        speed: f32,
+    }
 
     #[test]
     fn acquire_spawns_when_empty() {

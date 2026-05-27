@@ -10,6 +10,8 @@ pub mod collision;
 pub mod components;
 pub mod debug_ui;
 pub mod ecs;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod gpu_particle;
 pub mod hierarchy;
 pub mod input;
 pub mod locale;
@@ -17,8 +19,6 @@ pub mod material;
 pub mod network;
 pub mod particle;
 pub mod pathfinding;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod gpu_particle;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod physics;
 pub mod pool;
@@ -39,6 +39,9 @@ pub mod ui;
 
 // ── 편의 재수출 ────────────────────────────────────────────────────────────────
 
+pub use glam::{IVec2, Mat4, Vec2, Vec3};
+pub use winit::keyboard::KeyCode;
+
 pub use animation::{
     AnimParam, AnimState, AnimTransition, AnimationClip, AnimationPlayer, AnimationStateMachine,
     AnimationSystem, BlendEntry, BlendTree1D, BlendTreeSystem, BlendWeight, StateMachineSystem,
@@ -58,6 +61,8 @@ pub use components::{OffscreenCamera, PointLight, RenderLayer, Sprite, Transform
 pub use debug_ui::DebugUi;
 pub use ecs::schedule::{ScheduleError, SystemConfig, SystemLabel, SystemMeta};
 pub use ecs::{Commands, Entity, Events, System, World};
+#[cfg(not(target_arch = "wasm32"))]
+pub use gpu_particle::GpuParticleEmitter;
 pub use hierarchy::{attach, detach, Children, GlobalTransform, HierarchySystem, Parent};
 pub use input::{GamepadAxis, GamepadButton, GamepadState, InputMap, InputState, TouchState};
 pub use locale::{LocaleBundle, LocaleData, LocaleResource, TextDirection};
@@ -65,8 +70,6 @@ pub use material::ShaderMaterial;
 pub use network::{NetworkClient, NetworkEvent, NetworkSystem};
 pub use particle::{Particle, ParticleEmitter, ParticleSystem};
 pub use pathfinding::{find_path, PathGrid};
-#[cfg(not(target_arch = "wasm32"))]
-pub use gpu_particle::GpuParticleEmitter;
 #[cfg(not(target_arch = "wasm32"))]
 pub use physics::{
     CharacterController, CollisionEvent, CollisionGroups, ImpulseJointHandle, PhysicsBody,
@@ -80,15 +83,16 @@ pub use prefab::{
 // par_query_for_each / par_query_map / par_query2_for_each / par_query2_map 은
 // World 메서드이므로 World re-export를 통해 자동 접근 가능 (별도 re-export 불필요)
 pub use reflect::{Reflect, ReflectValue};
+pub use renderer::texture::TextureError;
 pub use renderer::{
     DrawRect, DrawText, PostProcessConfig, RenderTarget, TextAlign, TextQueue, TextRenderer,
     UiQueue,
 };
-pub use renderer::texture::TextureError;
 pub use resources::{
     AmbientLight, CullConfig, DebugDraw, DebugDrawQueue, DebugRect, DebugShape, DisplayScaleFactor,
-    FadeTransition, FontData, GameState, LoadProgress, PanickedSystems, PendingResize, ProfilerData,
-    RenderStats, SelectedEntity, ShouldQuit, SystemProfile, ViewportSize, WindowConfig,
+    FadeTransition, FontData, GameState, LoadProgress, PanickedSystems, PendingResize,
+    ProfilerData, RenderStats, SelectedEntity, ShouldQuit, SystemProfile, ViewportSize,
+    WindowConfig,
 };
 pub use scene::{Scene, SceneChange, SceneCmd};
 pub use scripting::{ScriptRunner, ScriptingSystem};

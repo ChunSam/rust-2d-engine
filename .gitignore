@@ -1,5 +1,15 @@
 target/
+dist/
+pkg/
+examples/wasm/pkg/
 ._*
 .DS_Store
 *.lock
 !Cargo.lock
+
+# Local agent/work planning notes; keep out of commits and crates.io packages.
+.claude/
+ENGINE_REVIEW_FIX_PROMPT.md
+PARALLEL_TASKS.md
+REMAINING_WORK.md
+rust_game_engine_plan.md

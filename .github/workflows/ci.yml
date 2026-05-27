@@ -25,8 +25,8 @@ jobs:
             libasound2-dev libudev-dev libxkbcommon-dev \
             libwayland-dev libx11-dev pkg-config
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust 1.88
+        uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: clippy, rustfmt
 
@@ -46,8 +46,8 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: cargo test --lib
-        run: cargo test --lib
+      - name: cargo test --all-targets
+        run: cargo test --all-targets
 
       - name: cargo build (release)
         run: cargo build --release
@@ -59,8 +59,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust stable + wasm32 target
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust 1.88 + wasm32 target
+        uses: dtolnay/rust-toolchain@1.88.0
         with:
           targets: wasm32-unknown-unknown
 
@@ -91,8 +91,8 @@ jobs:
             libasound2-dev libudev-dev libxkbcommon-dev \
             libwayland-dev libx11-dev pkg-config
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust 1.88
+        uses: dtolnay/rust-toolchain@1.88.0
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -106,3 +106,38 @@ jobs:
 
       - name: cargo doc --no-deps
         run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+
+  package:
+    name: Package dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libudev-dev libxkbcommon-dev \
+            libwayland-dev libx11-dev pkg-config
+
+      - name: Install Rust 1.88
+        uses: dtolnay/rust-toolchain@1.88.0
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-package-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-package-
+
+      - name: cargo package --locked --list
+        run: cargo package --locked --list
+
+      - name: cargo package --locked
+        run: cargo package --locked
+
+      - name: cargo publish --dry-run --locked
+        run: cargo publish --dry-run --locked

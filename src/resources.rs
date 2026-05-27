@@ -43,13 +43,30 @@ pub struct DebugDrawQueue {
 #[derive(Debug, Clone)]
 pub enum DebugShape {
     /// 축 정렬 사각형 (외곽선)
-    Rect { min: Vec2, max: Vec2, color: [f32; 4] },
+    Rect {
+        min: Vec2,
+        max: Vec2,
+        color: [f32; 4],
+    },
     /// 직선 (시작점 → 끝점, 두께 thickness px)
-    Line { start: Vec2, end: Vec2, color: [f32; 4], thickness: f32 },
+    Line {
+        start: Vec2,
+        end: Vec2,
+        color: [f32; 4],
+        thickness: f32,
+    },
     /// 원 (24각형 근사)
-    Circle { center: Vec2, radius: f32, color: [f32; 4] },
+    Circle {
+        center: Vec2,
+        radius: f32,
+        color: [f32; 4],
+    },
     /// 십자 마커 (두 직선 교차)
-    Cross { pos: Vec2, size: f32, color: [f32; 4] },
+    Cross {
+        pos: Vec2,
+        size: f32,
+        color: [f32; 4],
+    },
 }
 
 /// 매 프레임 디버그 도형을 수집하는 리소스.

@@ -72,10 +72,7 @@ impl VirtualJoystick {
         // 2. touch_id가 있으면: 해당 포인트의 현재 위치 추적
         if let Some(active_id) = self.touch_id {
             // ended 이벤트 확인
-            let is_ended = touch_state
-                .ended
-                .iter()
-                .any(|&(id, _)| id == active_id);
+            let is_ended = touch_state.ended.iter().any(|&(id, _)| id == active_id);
 
             if is_ended {
                 self.touch_id = None;

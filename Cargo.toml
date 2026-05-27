@@ -1,15 +1,33 @@
 [package]
-name        = "engine"
+name        = "skeleton-engine"
 version     = "1.0.0"
 edition     = "2021"
 description = "Lightweight 2D game engine — wgpu rendering, custom ECS, rapier2d physics"
 repository  = "https://github.com/ChunSam/rust-2d-engine"
+homepage    = "https://github.com/ChunSam/rust-2d-engine"
+documentation = "https://docs.rs/skeleton-engine"
+readme      = "README.md"
 license     = "MIT"
 keywords    = ["game", "engine", "wgpu", "ecs", "2d"]
 categories  = ["game-engines", "rendering", "wasm"]
-rust-version = "1.79"
+rust-version = "1.88"
+include     = [
+    ".cargo/config.toml",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md",
+    "REFERENCE.md",
+    "Cargo.toml",
+    "Cargo.lock",
+    "examples/*.rs",
+    "examples/wasm/build.sh",
+    "examples/wasm/index.html",
+    "scripts/**",
+    "src/**",
+]
 
 [lib]
+name = "engine"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]

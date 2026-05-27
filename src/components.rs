@@ -216,7 +216,12 @@ pub struct RenderLayer(pub i32);
 /// # let e = app.world.spawn();
 /// app.world.insert_resource(engine::AmbientLight { intensity: 0.05, ..Default::default() });
 /// app.world.add_component(e, Transform { position: Vec2::new(400.0, 300.0), ..Default::default() });
-/// app.world.add_component(e, PointLight { color: [1.0, 0.9, 0.6], radius: 300.0, intensity: 1.5 });
+/// app.world.add_component(e, PointLight {
+///     color: [1.0, 0.9, 0.6],
+///     radius: 300.0,
+///     intensity: 1.5,
+///     ..Default::default()
+/// });
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct PointLight {

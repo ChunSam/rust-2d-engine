@@ -6,15 +6,12 @@
 /// 스페이스바: 현재 이미터 방출 토글
 /// R: 모든 이미터 제거
 use engine::{
-    App, GpuParticleEmitter, InputState, System, Transform, World,
     renderer::{DrawText, TextQueue},
     resources::WindowConfig,
+    App, GpuParticleEmitter, InputState, System, Transform, World,
 };
 use glam::Vec2;
-use winit::{
-    event::MouseButton,
-    keyboard::KeyCode,
-};
+use winit::{event::MouseButton, keyboard::KeyCode};
 
 struct GpuParticleDemo {
     emitter_count: usize,
@@ -90,7 +87,10 @@ impl System for GpuParticleDemo {
                 [220, 220, 220, 230],
             ));
             tq.push(DrawText::new(
-                format!("Emitters: {}  (4096 particle slots total)", self.emitter_count),
+                format!(
+                    "Emitters: {}  (4096 particle slots total)",
+                    self.emitter_count
+                ),
                 Vec2::new(10.0, 36.0),
                 16.0,
                 [160, 200, 255, 200],
