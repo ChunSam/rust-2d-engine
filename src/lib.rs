@@ -85,8 +85,8 @@ pub use prefab::{
 pub use reflect::{Reflect, ReflectValue};
 pub use renderer::texture::TextureError;
 pub use renderer::{
-    DrawRect, DrawText, PostProcessConfig, RenderTarget, TextAlign, TextQueue, TextRenderer,
-    UiQueue,
+    DrawImage, DrawRect, DrawText, PostProcessConfig, RenderTarget, TextAlign, TextQueue,
+    TextRenderer, UiImageQueue, UiQueue,
 };
 pub use resources::{
     AmbientLight, CullConfig, DebugDraw, DebugDrawQueue, DebugRect, DebugShape, DisplayScaleFactor,

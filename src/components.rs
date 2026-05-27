@@ -97,11 +97,47 @@ impl Sprite {
             normal_handle: None,
         }
     }
+
+    /// 경로 fallback을 보존하면서, 있으면 이미지 핸들을 우선 사용한다.
+    pub fn textured_with_handle(
+        path: impl Into<String>,
+        handle: Option<Handle<ImageAsset>>,
+    ) -> Self {
+        Self {
+            texture: Some(path.into()),
+            color: [1.0; 4],
+            image_handle: handle,
+            normal_texture: None,
+            normal_handle: None,
+        }
+    }
 }
 
 impl Default for Sprite {
     fn default() -> Self {
         Self::colored(1.0, 1.0, 1.0)
+    }
+}
+
+#[cfg(test)]
+mod sprite_tests {
+    use super::*;
+
+    #[test]
+    fn textured_with_handle_keeps_path_fallback() {
+        let handle = crate::asset::AssetServer::new().load_image("__test_missing_sprite.png");
+        let sprite = Sprite::textured_with_handle("fallback.png", Some(handle));
+
+        assert_eq!(sprite.texture.as_deref(), Some("fallback.png"));
+        assert!(sprite.image_handle.is_some());
+    }
+
+    #[test]
+    fn textured_with_handle_accepts_no_handle() {
+        let sprite = Sprite::textured_with_handle("fallback.png", None);
+
+        assert_eq!(sprite.texture.as_deref(), Some("fallback.png"));
+        assert!(sprite.image_handle.is_none());
     }
 }
 

@@ -21,8 +21,21 @@ impl UvRect {
         v_size: 1.0,
     };
 
+    /// 정규화된 UV 좌표로 영역을 만든다.
+    pub const fn new(u_offset: f32, v_offset: f32, u_size: f32, v_size: f32) -> Self {
+        Self {
+            u_offset,
+            v_offset,
+            u_size,
+            v_size,
+        }
+    }
+
     /// 그리드 형태 스프라이트시트에서 특정 프레임의 UV를 계산한다.
     pub fn from_grid(col: u32, row: u32, cols: u32, rows: u32) -> Self {
+        if cols == 0 || rows == 0 {
+            return Self::FULL;
+        }
         let u_size = 1.0 / cols as f32;
         let v_size = 1.0 / rows as f32;
         Self {
@@ -31,6 +44,60 @@ impl UvRect {
             u_size,
             v_size,
         }
+    }
+
+    /// 픽셀 단위 crop 영역을 정규화된 UV로 변환한다.
+    pub fn from_pixels(
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        texture_width: f32,
+        texture_height: f32,
+    ) -> Self {
+        if texture_width <= 0.0 || texture_height <= 0.0 {
+            return Self::FULL;
+        }
+        Self {
+            u_offset: x / texture_width,
+            v_offset: y / texture_height,
+            u_size: width / texture_width,
+            v_size: height / texture_height,
+        }
+    }
+
+    /// 같은 영역을 가로 방향으로 뒤집어 샘플링한다.
+    pub fn flipped_x(mut self) -> Self {
+        self.u_offset += self.u_size;
+        self.u_size = -self.u_size;
+        self
+    }
+
+    /// 같은 영역을 세로 방향으로 뒤집어 샘플링한다.
+    pub fn flipped_y(mut self) -> Self {
+        self.v_offset += self.v_size;
+        self.v_size = -self.v_size;
+        self
+    }
+}
+
+#[cfg(test)]
+mod uv_tests {
+    use super::UvRect;
+
+    #[test]
+    fn from_pixels_normalizes_crop_rect() {
+        let uv = UvRect::from_pixels(10.0, 20.0, 30.0, 40.0, 100.0, 200.0);
+        assert_eq!(uv, UvRect::new(0.1, 0.1, 0.3, 0.2));
+    }
+
+    #[test]
+    fn flips_keep_same_sampled_area_with_negative_size() {
+        let uv = UvRect::new(0.1, 0.2, 0.3, 0.4).flipped_y();
+        assert_eq!(uv, UvRect::new(0.1, 0.6, 0.3, -0.4));
+
+        let uv = UvRect::new(0.1, 0.2, 0.3, 0.4).flipped_x();
+        assert_eq!(uv, UvRect::new(0.4, 0.2, -0.3, 0.4));
     }
 }
 

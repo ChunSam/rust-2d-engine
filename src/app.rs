@@ -34,7 +34,7 @@ use crate::{
     reflect::ReflectValue,
     renderer::{
         DrawRect, GpuContext, PostProcessConfig, PostProcessRenderer, SpriteRenderer, TextQueue,
-        TextRenderer, UiQueue,
+        TextRenderer, UiImageQueue, UiQueue,
     },
     resources::{
         DebugDraw, DebugDrawQueue, DebugRect, DisplayScaleFactor, FontData, GameState,
@@ -346,6 +346,7 @@ impl App {
         world.insert_resource(Camera::default());
         world.insert_resource(TextQueue::default());
         world.insert_resource(UiQueue::default());
+        world.insert_resource(UiImageQueue::default());
         world.insert_resource(DebugDrawQueue::default());
         world.insert_resource(DebugDraw::new());
         world.insert_resource(crate::resources::SelectedEntity::default());
@@ -648,6 +649,7 @@ impl App {
         self.world.insert_resource(Camera::default());
         self.world.insert_resource(TextQueue::default());
         self.world.insert_resource(UiQueue::default());
+        self.world.insert_resource(UiImageQueue::default());
         self.world.insert_resource(DebugDrawQueue::default());
         self.world.insert_resource(DebugDraw::new());
         self.world
@@ -2314,6 +2316,25 @@ impl App {
                     render_view,
                     &mut enc,
                     &ui_rects,
+                    logical_w,
+                    logical_h,
+                );
+            }
+        }
+
+        let ui_images = self
+            .world
+            .resource_mut::<UiImageQueue>()
+            .map(|q| std::mem::take(&mut q.items))
+            .unwrap_or_default();
+        if !ui_images.is_empty() {
+            if let Some(sr) = &mut self.sprite_renderer {
+                sr.render_ui_images_from_slice(
+                    &gpu.device,
+                    &gpu.queue,
+                    render_view,
+                    &mut enc,
+                    &ui_images,
                     logical_w,
                     logical_h,
                 );

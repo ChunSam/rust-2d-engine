@@ -23,16 +23,14 @@ impl TextureAtlas {
     ///
     /// index가 범위를 초과하면 `% (cols * rows)` 로 wrap한다.
     pub fn uv_rect(&self, index: u32) -> UvRect {
+        if self.cols == 0 || self.rows == 0 {
+            return UvRect::FULL;
+        }
         let total = self.cols * self.rows;
         let index = if total == 0 { 0 } else { index % total };
         let col = index % self.cols;
         let row = index / self.cols;
-        UvRect {
-            u_offset: col as f32 / self.cols as f32,
-            v_offset: row as f32 / self.rows as f32,
-            u_size: 1.0 / self.cols as f32,
-            v_size: 1.0 / self.rows as f32,
-        }
+        UvRect::from_grid(col, row, self.cols, self.rows)
     }
 
     /// 이 아틀라스의 이미지 파일 경로 (렌더러 텍스처 캐시 키).
@@ -79,5 +77,37 @@ impl AtlasSprite {
     pub fn with_color(mut self, color: [f32; 4]) -> Self {
         self.color = color;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn handle() -> Handle<ImageAsset> {
+        crate::asset::AssetServer::new().load_image("__test_missing_atlas.png")
+    }
+
+    #[test]
+    fn atlas_uv_rect_wraps_grid_index() {
+        let atlas = TextureAtlas {
+            handle: handle(),
+            cols: 4,
+            rows: 2,
+        };
+
+        assert_eq!(atlas.uv_rect(5), UvRect::from_grid(1, 1, 4, 2));
+        assert_eq!(atlas.uv_rect(9), UvRect::from_grid(1, 0, 4, 2));
+    }
+
+    #[test]
+    fn atlas_with_empty_grid_uses_full_uv() {
+        let atlas = TextureAtlas {
+            handle: handle(),
+            cols: 0,
+            rows: 2,
+        };
+
+        assert_eq!(atlas.uv_rect(0), UvRect::FULL);
     }
 }

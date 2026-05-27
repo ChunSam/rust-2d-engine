@@ -16,7 +16,7 @@ use crate::ecs::World;
 use crate::hierarchy::GlobalTransform;
 use crate::material::ShaderMaterial;
 use crate::renderer::texture::Texture;
-use crate::renderer::ui::DrawRect;
+use crate::renderer::ui::{DrawImage, DrawRect};
 use crate::resources::CullConfig;
 
 // ─── GPU에 올라가는 버텍스 구조체 ─────────────────────────────────────────────
@@ -779,7 +779,10 @@ impl SpriteRenderer {
             if let Some(server) = world.resource::<AssetServer>() {
                 for (entity, index, color, atlas_handle) in &atlas_entries {
                     if let Some(atlas) = server.get_atlas(atlas_handle) {
-                        let uv = atlas.uv_rect(*index);
+                        let uv = world
+                            .get::<UvRect>(*entity)
+                            .copied()
+                            .unwrap_or_else(|| atlas.uv_rect(*index));
                         let tex_key = atlas.texture_path().to_string();
                         let layer = world
                             .get::<crate::components::RenderLayer>(*entity)
@@ -1223,5 +1226,105 @@ impl SpriteRenderer {
         pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
         pass.set_vertex_buffer(1, self.ui_instance_buf.slice(..));
         pass.draw_indexed(0..INDICES.len() as u32, 0, 0..instances.len() as u32);
+    }
+
+    /// 화면 고정(screen-space) UI 이미지를 렌더링한다.
+    ///
+    /// `DrawImage`의 좌표는 논리 뷰포트 픽셀 기준이며, 카메라 영향을 받지 않는다.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_ui_images_from_slice(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        view: &wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+        images: &[DrawImage],
+        width: u32,
+        height: u32,
+    ) {
+        if images.is_empty() {
+            return;
+        }
+
+        let screen_proj = Mat4::orthographic_rh(0.0, width as f32, height as f32, 0.0, -1.0, 1.0);
+        let cam = CameraUniform {
+            view_proj: screen_proj.to_cols_array_2d(),
+        };
+        queue.write_buffer(&self.ui_camera_buf, 0, bytemuck::bytes_of(&cam));
+
+        let mut sorted: Vec<&DrawImage> = images.iter().collect();
+        sorted.sort_by(|a, b| a.z.partial_cmp(&b.z).unwrap_or(std::cmp::Ordering::Equal));
+
+        let entries: Vec<(Option<String>, InstanceRaw)> = sorted
+            .iter()
+            .map(|image| {
+                let cx = image.x + image.w * 0.5;
+                let cy = image.y + image.h * 0.5;
+                let model = Mat4::from_scale_rotation_translation(
+                    Vec3::new(image.w, image.h, 1.0),
+                    Quat::IDENTITY,
+                    Vec3::new(cx, cy, 0.0),
+                );
+                (
+                    image.texture_key(),
+                    InstanceRaw {
+                        model: model.to_cols_array_2d(),
+                        color: image.color,
+                        uv_offset: [image.uv.u_offset, image.uv.v_offset],
+                        uv_size: [image.uv.u_size, image.uv.v_size],
+                    },
+                )
+            })
+            .collect();
+        let instances: Vec<InstanceRaw> = entries.iter().map(|(_, instance)| *instance).collect();
+
+        if instances.len() > self.ui_instance_capacity {
+            self.ui_instance_capacity = instances.len().next_power_of_two();
+            self.ui_instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("ui instance buffer"),
+                size: (self.ui_instance_capacity * std::mem::size_of::<InstanceRaw>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+        queue.write_buffer(&self.ui_instance_buf, 0, bytemuck::cast_slice(&instances));
+
+        let instance_size = std::mem::size_of::<InstanceRaw>() as u64;
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("ui image pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &self.ui_camera_bind_group, &[]);
+        pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
+        pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
+
+        let mut i = 0usize;
+        while i < entries.len() {
+            let run_key = entries[i].0.as_deref();
+            let run_start = i;
+            i += 1;
+            while i < entries.len() && entries[i].0.as_deref() == run_key {
+                i += 1;
+            }
+            let run_len = i - run_start;
+            let byte_start = run_start as u64 * instance_size;
+            let byte_end = byte_start + run_len as u64 * instance_size;
+            let bind_group = self.bind_group_for_texture_key(run_key);
+            pass.set_bind_group(1, bind_group, &[]);
+            pass.set_vertex_buffer(1, self.ui_instance_buf.slice(byte_start..byte_end));
+            pass.draw_indexed(0..INDICES.len() as u32, 0, 0..run_len as u32);
+        }
     }
 }

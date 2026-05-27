@@ -18,4 +18,4 @@ pub use render_target::RenderTarget;
 pub use sprite::SpriteRenderer;
 pub use text::{DrawText, TextAlign, TextQueue, TextRenderer};
 pub use texture::Texture;
-pub use ui::{DrawRect, UiQueue};
+pub use ui::{DrawImage, DrawRect, UiImageQueue, UiQueue};
