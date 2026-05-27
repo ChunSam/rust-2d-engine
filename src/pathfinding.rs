@@ -177,7 +177,7 @@ mod tests {
         let path = find_path(&grid, IVec2::new(0, 0), IVec2::new(2, 2)).unwrap();
         // 경로가 존재하고 모든 셀이 통행 가능해야 함
         for pos in &path {
-            assert!(grid.is_walkable(pos.x, pos.y), "막힌 셀 포함: {:?}", pos);
+            assert!(grid.is_walkable(pos.x, pos.y), "막힌 셀 포함: {pos:?}");
         }
         assert_eq!(path.last(), Some(&IVec2::new(2, 2)));
         assert!(!path.contains(&IVec2::new(0, 0)));

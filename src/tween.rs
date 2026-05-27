@@ -123,7 +123,7 @@ mod tests {
     fn ease_out_faster_start() {
         let mut tw = Tween::new(0.0, 100.0, 1.0).with_easing(Easing::EaseOut);
         let v = tw.tick(0.5);
-        assert!(v > 50.0, "EaseOut at t=0.5 should be > 50, got {}", v);
+        assert!(v > 50.0, "EaseOut at t=0.5 should be > 50, got {v}");
     }
 
     #[test]

@@ -42,8 +42,8 @@ pub enum SaveError {
 impl std::fmt::Display for SaveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SaveError::Io(e) => write!(f, "IO error: {}", e),
-            SaveError::Ron(s) => write!(f, "RON error: {}", s),
+            SaveError::Io(e) => write!(f, "IO error: {e}"),
+            SaveError::Ron(s) => write!(f, "RON error: {s}"),
             SaveError::Corrupted => write!(f, "Save file is corrupted or has been tampered with"),
         }
     }
@@ -213,8 +213,7 @@ mod tests {
 
         assert!(
             matches!(result, Err(SaveError::Io(_))),
-            "expected SaveError::Io, got {:?}",
-            result
+            "expected SaveError::Io, got {result:?}"
         );
     }
 
@@ -260,8 +259,7 @@ mod tests {
         let loaded: Result<Settings, SaveError> = load(&path);
         assert!(
             matches!(loaded, Err(SaveError::Corrupted)),
-            "expected SaveError::Corrupted, got {:?}",
-            loaded
+            "expected SaveError::Corrupted, got {loaded:?}"
         );
 
         fs::remove_dir_all(&dir).ok();
@@ -286,8 +284,7 @@ mod tests {
         let wrong: Result<Settings, SaveError> = load_with_key(&path, wrong_key);
         assert!(
             matches!(wrong, Err(SaveError::Corrupted)),
-            "expected wrong key to fail authentication, got {:?}",
-            wrong
+            "expected wrong key to fail authentication, got {wrong:?}"
         );
 
         fs::remove_dir_all(&dir).ok();

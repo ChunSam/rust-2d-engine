@@ -324,8 +324,7 @@ mod tests {
         let speed = sv.length();
         assert!(
             (speed - 200.0).abs() < 1e-3,
-            "speed should equal max_speed=200, got {}",
-            speed
+            "speed should equal max_speed=200, got {speed}"
         );
     }
 
@@ -355,8 +354,7 @@ mod tests {
 
         assert!(
             sv.length() < 1e-5,
-            "velocity should be ~0 within stop_radius, got {:?}",
-            sv
+            "velocity should be ~0 within stop_radius, got {sv:?}"
         );
     }
 
@@ -385,8 +383,7 @@ mod tests {
 
         assert!(
             sv.length() < 1e-5,
-            "velocity outside flee_radius should be 0, got {:?}",
-            sv
+            "velocity outside flee_radius should be 0, got {sv:?}"
         );
     }
 

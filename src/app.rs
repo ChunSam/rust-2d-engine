@@ -189,10 +189,7 @@ fn write_crash_log(system_name: &str, message: &str) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let content = format!(
-        "[{}] 시스템 패닉: {}\n오류: {}\n\n",
-        timestamp, system_name, message
-    );
+    let content = format!("[{timestamp}] 시스템 패닉: {system_name}\n오류: {message}\n\n");
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -899,8 +896,7 @@ impl App {
                 Ok(order) => self.exec_order = order,
                 Err(crate::ecs::schedule::ScheduleError::Cycle(remaining)) => {
                     log::error!(
-                        "시스템 순서 순환 의존성 감지 — 삽입 순서로 폴백 (영향 인덱스: {:?})",
-                        remaining
+                        "시스템 순서 순환 의존성 감지 — 삽입 순서로 폴백 (영향 인덱스: {remaining:?})"
                     );
                     self.exec_order = (0..self.systems.len()).collect();
                 }
