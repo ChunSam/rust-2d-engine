@@ -31,19 +31,19 @@ struct Vertex {
 const VERTICES: &[Vertex] = &[
     Vertex {
         position: [-0.5, -0.5],
-        uv: [0.0, 1.0],
+        uv: [0.0, 0.0],
     },
     Vertex {
         position: [0.5, -0.5],
-        uv: [1.0, 1.0],
-    },
-    Vertex {
-        position: [0.5, 0.5],
         uv: [1.0, 0.0],
     },
     Vertex {
+        position: [0.5, 0.5],
+        uv: [1.0, 1.0],
+    },
+    Vertex {
         position: [-0.5, 0.5],
-        uv: [0.0, 0.0],
+        uv: [0.0, 1.0],
     },
 ];
 const INDICES: &[u16] = &[0, 1, 2, 2, 3, 0];
@@ -152,6 +152,18 @@ mod tests {
             None,
             raw(),
         )
+    }
+
+    #[test]
+    fn shared_quad_uses_top_left_uv_origin() {
+        assert_eq!(VERTICES[0].position, [-0.5, -0.5]);
+        assert_eq!(VERTICES[0].uv, [0.0, 0.0]);
+        assert_eq!(VERTICES[1].position, [0.5, -0.5]);
+        assert_eq!(VERTICES[1].uv, [1.0, 0.0]);
+        assert_eq!(VERTICES[2].position, [0.5, 0.5]);
+        assert_eq!(VERTICES[2].uv, [1.0, 1.0]);
+        assert_eq!(VERTICES[3].position, [-0.5, 0.5]);
+        assert_eq!(VERTICES[3].uv, [0.0, 1.0]);
     }
 
     fn describe(entry: &SpriteRenderEntry) -> String {

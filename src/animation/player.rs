@@ -86,13 +86,32 @@ mod uv_tests {
     use super::UvRect;
 
     #[test]
-    fn from_pixels_normalizes_crop_rect() {
+    fn from_grid_row_zero_is_top_row() {
+        assert_eq!(
+            UvRect::from_grid(0, 0, 4, 2),
+            UvRect::new(0.0, 0.0, 0.25, 0.5)
+        );
+        assert_eq!(
+            UvRect::from_grid(1, 0, 4, 2),
+            UvRect::new(0.25, 0.0, 0.25, 0.5)
+        );
+        assert_eq!(
+            UvRect::from_grid(0, 1, 4, 2),
+            UvRect::new(0.0, 0.5, 0.25, 0.5)
+        );
+    }
+
+    #[test]
+    fn from_pixels_uses_top_left_origin() {
         let uv = UvRect::from_pixels(10.0, 20.0, 30.0, 40.0, 100.0, 200.0);
         assert_eq!(uv, UvRect::new(0.1, 0.1, 0.3, 0.2));
     }
 
     #[test]
     fn flips_keep_same_sampled_area_with_negative_size() {
+        let top_row = UvRect::from_grid(1, 0, 4, 2);
+        assert_eq!(top_row.flipped_y(), UvRect::new(0.25, 0.5, 0.25, -0.5));
+
         let uv = UvRect::new(0.1, 0.2, 0.3, 0.4).flipped_y();
         assert_eq!(uv, UvRect::new(0.1, 0.6, 0.3, -0.4));
 

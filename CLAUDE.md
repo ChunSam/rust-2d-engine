@@ -2,7 +2,7 @@
 
 > 버전 v1.0.0 | 패키지 `skeleton-engine`, 라이브러리 크레이트 `engine` | wgpu 기반 Rust 2D 게임 엔진  
 > WASM 지원: `cargo build --target wasm32-unknown-unknown` 통과  
-> 상세 API: `REFERENCE.md` | 개발 이력/아키텍처 결정: `HANDOFF.md`
+> 상세 API: `REFERENCE.html` | 개발 이력/아키텍처 결정: `docs/HANDOFF.md`
 
 ---
 
@@ -208,7 +208,7 @@ world.resource_mut::<SceneChange>().unwrap().0 =
 
 | 저장소 | 경로 | 역할 |
 |--------|------|------|
-| skeleton-engine | `/Users/jkl/Projects/rust-2d-engine` | 엔진 코어 (이 저장소) |
+| skeleton-engine | `/Users/jkl/Projects/skeleton-engine` | 엔진 코어 (이 저장소) |
 | rust-survivors | `/Users/jkl/Projects/rust-survivors` | 엔진을 사용하는 게임 프로젝트 |
 
 `rust-survivors`는 `skeleton-engine` 패키지를 `engine` 크레이트명으로 사용한다.  
@@ -221,7 +221,7 @@ world.resource_mut::<SceneChange>().unwrap().0 =
 | 문서 | 용도 |
 |------|------|
 | `CLAUDE.md` (이 파일) | 에이전트 빠른 참조 — 모듈 맵, 핵심 패턴, 작업 체크리스트 |
-| `REFERENCE.md` | 전체 공개 API + 코드 예제 (상세) |
-| `HANDOFF.md` | Phase별 개발 이력, 아키텍처 결정 배경 |
+| `REFERENCE.html` | 전체 공개 API + 코드 예제 (상세) |
+| `docs/HANDOFF.md` | Phase별 개발 이력, 아키텍처 결정 배경 |
 
 > **확장 전략**: 새 서브시스템이 생기면 `docs/SUBSYSTEM.md`를 별도 작성하고, 이 파일 모듈 맵에 한 줄 참조만 추가해 200줄 이내를 유지한다.

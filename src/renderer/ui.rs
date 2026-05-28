@@ -194,4 +194,19 @@ mod tests {
         let img = DrawImage::textured(0.0, 0.0, 16.0, 16.0, "fallback.png");
         assert_eq!(img.texture_key().as_deref(), Some("fallback.png"));
     }
+
+    #[test]
+    fn draw_image_constructors_default_to_full_uv() {
+        let textured = DrawImage::textured(0.0, 0.0, 16.0, 16.0, "image.png");
+        assert_eq!(textured.uv, UvRect::FULL);
+
+        let mut server = crate::asset::AssetServer::new();
+        let handle = server.load_image("handle.png");
+        let by_handle = DrawImage::with_handle(0.0, 0.0, 16.0, 16.0, handle.clone());
+        assert_eq!(by_handle.uv, UvRect::FULL);
+
+        let textured_with_handle =
+            DrawImage::textured_with_handle(0.0, 0.0, 16.0, 16.0, "fallback.png", Some(handle));
+        assert_eq!(textured_with_handle.uv, UvRect::FULL);
+    }
 }

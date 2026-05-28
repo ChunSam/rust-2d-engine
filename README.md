@@ -129,7 +129,7 @@ python3 -m http.server --directory dist 8080
 
 ## Documentation
 
-- `REFERENCE.md` contains the public API reference and subsystem examples.
+- [`REFERENCE.html`](REFERENCE.html) in the repository root contains the public API reference and subsystem examples.
 - Contributor handoff and agent notes live in the repository, outside the crates.io package.
 
 ## License

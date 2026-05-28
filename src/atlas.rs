@@ -89,6 +89,18 @@ mod tests {
     }
 
     #[test]
+    fn atlas_row_zero_uses_top_row_uv() {
+        let atlas = TextureAtlas {
+            handle: handle(),
+            cols: 4,
+            rows: 2,
+        };
+
+        assert_eq!(atlas.uv_rect(0), UvRect::new(0.0, 0.0, 0.25, 0.5));
+        assert_eq!(atlas.uv_rect(1), UvRect::new(0.25, 0.0, 0.25, 0.5));
+    }
+
+    #[test]
     fn atlas_uv_rect_wraps_grid_index() {
         let atlas = TextureAtlas {
             handle: handle(),

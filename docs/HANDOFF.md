@@ -12,6 +12,7 @@
 wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오디오, 파티클, 타일맵, UI, 씬 시스템 등을 갖추고 있다. 별도의 게임 프로젝트(`rust-survivors`)가 이 엔진을 의존성으로 사용한다.
 
 - **저장소**: `https://github.com/ChunSam/rust-2d-engine`
+- **로컬 경로**: `/Users/jkl/Projects/skeleton-engine`
 - **브랜치**: `main`
 - **엔진 소스 규모**: 약 5,400 LOC (src/ 전체)
 
@@ -1273,6 +1274,7 @@ if let Some(refl) = world.get_reflect_mut(entity, TypeId::of::<Transform>()) {
 **렌더러 확장** (`src/renderer/sprite.rs`)
 - `AtlasSprite` 쿼리 → `AssetServer::get_atlas()` → `uv_rect()` → 기존 `sprites` Vec에 추가
 - 기존 Sprite와 동일한 z-sort + texture-group 드로우콜 흐름 그대로 사용 (하위 호환 유지)
+- `AtlasSprite` 엔티티에 `UvRect` 컴포넌트가 함께 있으면 grid UV 대신 해당 값을 사용한다. 비균일 crop, 세로 뒤집힘, packed atlas 보정은 이 override로 처리한다.
 
 **사용 패턴**
 ```rust
@@ -1292,6 +1294,12 @@ world.get_mut::<AtlasSprite>(e).unwrap().index = 6;
 - 같은 아틀라스 텍스처를 사용하는 `AtlasSprite` 엔티티들은 z-sort 후 연속 배치 시 **1개 드로우콜**
 - 아틀라스 이미지 경로가 텍스처 캐시 키이므로 기존 `Sprite(texture: path)` 경로와 공유 가능
 - `atlases` map은 `path → AtlasId` 단방향 캐시 — 같은 경로로 다른 cols/rows 호출 시 첫 번째 설정 사용
+- `AtlasSprite` public struct에 새 필드를 추가하지 않고 `UvRect` 컴포넌트 override를 사용해 기존 리터럴 초기화 호환성을 유지한다.
+
+**Follow-up API 확장**
+- `UvRect::new(...)`, `UvRect::from_pixels(...)`, `flipped_x()`, `flipped_y()` — custom crop/UV orientation helper
+- `Sprite::textured_with_handle(path, Option<Handle<ImageAsset>>)` — 런타임 핸들 우선, 테스트/작은 월드 path fallback
+- `DrawImage`, `UiImageQueue` — screen-space textured UI primitive. 좌표는 `DrawRect`처럼 논리 뷰포트 픽셀 기준이며, 스프라이트 패스 뒤/텍스트 패스 앞에 렌더링한다.
 
 ---
 
@@ -2113,14 +2121,14 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 
 | 저장소 | 역할 | 경로 |
 |---|---|---|
-| `rust-2d-engine` | 엔진 코어 (이 저장소) | `/Users/jkl/Projects/rust-2d-engine` |
+| `skeleton-engine` | 엔진 코어 (이 저장소) | `/Users/jkl/Projects/skeleton-engine` |
 | `rust-survivors` | 엔진을 사용하는 게임 프로젝트 | `/Users/jkl/Projects/rust-survivors` |
 
-두 저장소는 **독립적으로** 개발된다. 엔진 개선은 `rust-2d-engine`에서만, 게임 로직은 `rust-survivors`에서만.
+두 저장소는 **독립적으로** 개발된다. 엔진 개선은 `skeleton-engine`에서만, 게임 로직은 `rust-survivors`에서만.
 
 ---
 
 ## 참고 문서
 
-- `REFERENCE.md` — 공개 API 레퍼런스 (코드 예제 포함)
+- `REFERENCE.html` — 공개 API 레퍼런스 (코드 예제 포함)
 - `src/` 각 파일 인라인 doc comment — 세부 구현 의도 기록됨

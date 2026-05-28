@@ -13,10 +13,10 @@ categories  = ["game-engines", "rendering", "wasm"]
 rust-version = "1.88"
 include     = [
     ".cargo/config.toml",
-    "CHANGELOG.md",
+    "docs/CHANGELOG.md",
     "LICENSE",
     "README.md",
-    "REFERENCE.md",
+    "REFERENCE.html",
     "Cargo.toml",
     "Cargo.lock",
     "examples/*.rs",
