@@ -27,6 +27,15 @@ The package follows semantic versioning beginning with 1.0.0.
   Existing game-side `.flipped_y()` orientation workarounds should be removed after
   updating the engine.
 
+### Fixed
+
+- Restored the `wasm32-unknown-unknown` build: the WebSocket `wasm_impl` module called
+  `push_event_bounded` unqualified without importing it, breaking the wasm target while the
+  native build was unaffected. The function is now imported into the module scope.
+- Removed the redundant manual `unsafe impl Send/Sync for BehaviorTree`. The
+  `BehaviorNode: Send + Sync` trait bound already guarantees both, so the hand-written impl
+  was unnecessary and would have silently masked unsoundness if that bound were ever relaxed.
+
 ## [1.0.0] - 2026-05-27
 
 ### Added

@@ -10,6 +10,8 @@ This note records the security and memory-safety hardening work from the May 202
 - Updated the multiplayer server example for the `tungstenite 0.29` `Utf8Bytes` message API.
 - Hardened `PathGrid` construction and indexing against negative sizes, integer overflow, and oversized allocations.
 - Hardened `TilemapAtlas::uv_for` so zero-sized atlas grids return `UvRect::FULL` instead of panicking.
+- Removed the redundant manual `unsafe impl Send/Sync for BehaviorTree`; the `BehaviorNode: Send + Sync` trait bound already guarantees thread-safety, and the hand-written impl would have silently masked unsoundness if that bound were ever relaxed.
+- Repaired the `wasm32-unknown-unknown` build, which had regressed because the WebSocket `wasm_impl` module called `push_event_bounded` without importing it (native builds were unaffected).
 
 ## Verification
 

@@ -2127,8 +2127,9 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 40c~~ | ~~Gizmo Grid Snap — 체크박스 + 격자 크기 DragValue + snap_to_grid 헬퍼~~ | — | 완료 |
 | ~~Phase 40d~~ | ~~REFERENCE.html v0.39.0 — 컴포넌트 추가/제거 UI, register_component 문서화~~ | — | 완료 |
 | ~~코드 리뷰 7항목~~ | ~~Timeline NaN / TextureError / remove_resource / layer_mask / register_fn 1회화 / network backpressure / egui unsafe 문서화~~ | — | 완료 (`4084cee`) |
+| ~~WASM 빌드 회귀 + unsafe 정리~~ | ~~network.rs `push_event_bounded` import 누락으로 wasm32 빌드 깨짐 복구 + BehaviorTree 불필요한 `unsafe impl Send/Sync` 제거~~ | — | 완료 (`af6fc59`) |
 
-> **현재 상태**: 미해결 항목 없음. v1.0.0 릴리즈 준비 완료.
+> **현재 상태**: 미해결 항목 없음. v1.0.0 릴리즈 준비 완료. native·wasm32 빌드, 256 테스트, clippy 경고 0 확인.
 
 ---
 
