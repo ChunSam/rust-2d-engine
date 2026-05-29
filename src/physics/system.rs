@@ -11,6 +11,10 @@ use crate::physics::world::PhysicsWorld;
 
 /// 범용 물리 시스템: 매 프레임 step → Transform 동기화.
 ///
+/// `PhysicsWorld`에 바디를 만들 때의 위치/크기는 물리 단위이고, 이 시스템은 Rapier 결과에
+/// `pixels_per_unit`을 곱해 `Transform.position` 픽셀 좌표로 반영한다. 예를 들어
+/// `pixels_per_unit = 50.0`이면 물리 1 unit이 화면 50px에 해당한다.
+///
 /// 플레이어 제어 등 커스텀 로직이 필요하면 이 타입을 그대로 쓰지 않고,
 /// `PhysicsWorld`를 직접 소유하는 전용 시스템을 만드는 것을 권장한다.
 pub struct PhysicsSystem {
@@ -23,9 +27,13 @@ pub struct PhysicsSystem {
 
 impl PhysicsSystem {
     pub fn new(physics: PhysicsWorld, pixels_per_unit: f32) -> Self {
+        debug_assert!(
+            pixels_per_unit > 0.0,
+            "PhysicsSystem::new requires pixels_per_unit > 0"
+        );
         Self {
             physics,
-            pixels_per_unit,
+            pixels_per_unit: pixels_per_unit.max(f32::EPSILON),
             active_contacts: HashSet::new(),
             active_intersections: HashSet::new(),
         }
@@ -134,7 +142,7 @@ impl System for PhysicsSystem {
             .map(|(e, b)| (e, b.rigid_body_handle))
             .collect();
 
-        let scale = self.pixels_per_unit;
+        let scale = self.pixels_per_unit.max(f32::EPSILON);
         for (entity, handle) in pairs {
             if let Some(body) = self.physics.rigid_body(handle) {
                 let t = *body.translation();
@@ -186,5 +194,12 @@ mod tests {
 
         let events = world.resource::<Events<TriggerEvent>>().unwrap().read();
         assert_eq!(events, &[TriggerEvent::Entered(sensor, actor)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "PhysicsSystem::new requires pixels_per_unit > 0")]
+    fn non_positive_pixels_per_unit_is_clamped() {
+        let physics = PhysicsWorld::new(Vec2::ZERO);
+        let _ = PhysicsSystem::new(physics, 0.0);
     }
 }

@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>skeleton-engine Architecture</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --panel-2: #f2f6fb;
+      --text: #20242c;
+      --muted: #667085;
+      --border: #d8dee9;
+      --accent: #2f6feb;
+      --accent-2: #168a63;
+      --accent-3: #b65c00;
+      --accent-4: #b42318;
+      --code-bg: #111827;
+      --code-text: #e5e7eb;
+      --inline-code-bg: #eef2f7;
+      --shadow: rgba(15, 23, 42, 0.06);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101418;
+        --panel: #161b22;
+        --panel-2: #202a36;
+        --text: #e6edf3;
+        --muted: #9aa4b2;
+        --border: #30363d;
+        --accent: #74a7ff;
+        --accent-2: #54d4a0;
+        --accent-3: #ffb86b;
+        --accent-4: #ff8f8f;
+        --code-bg: #0b1020;
+        --code-text: #e5e7eb;
+        --inline-code-bg: #202a36;
+        --shadow: rgba(0, 0, 0, 0.25);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.65;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(230px, 310px) minmax(0, 1fr);
+      gap: 32px;
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+    .sidebar {
+      position: sticky;
+      top: 0;
+      align-self: start;
+      max-height: 100vh;
+      overflow: auto;
+      padding: 28px 8px 28px 0;
+      color: var(--muted);
+    }
+    .sidebar strong {
+      display: block;
+      margin-bottom: 14px;
+      color: var(--text);
+      font-size: 0.95rem;
+    }
+    .sidebar a {
+      display: block;
+      padding: 5px 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .doc {
+      min-width: 0;
+      max-width: 1040px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 40px 48px;
+      box-shadow: 0 12px 30px var(--shadow);
+    }
+    h1, h2, h3, h4 {
+      line-height: 1.25;
+      letter-spacing: 0;
+      margin: 1.6em 0 0.6em;
+    }
+    h1 { margin-top: 0; font-size: 2.35rem; }
+    h2 { border-top: 1px solid var(--border); padding-top: 1.1em; font-size: 1.7rem; }
+    h3 { font-size: 1.25rem; }
+    h4 { font-size: 1.05rem; }
+    p, ul, ol, .table-wrap, pre, .diagram, .note { margin: 0.9em 0; }
+    ul, ol { padding-left: 1.45rem; }
+    li + li { margin-top: 0.25rem; }
+    code {
+      border-radius: 5px;
+      background: var(--inline-code-bg);
+      padding: 0.12rem 0.3rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+    pre {
+      overflow: auto;
+      padding: 1rem;
+      border-radius: 8px;
+      background: var(--code-bg);
+      color: var(--code-text);
+      border: 1px solid var(--border);
+    }
+    pre code { background: transparent; color: inherit; padding: 0; }
+    .lead {
+      color: var(--muted);
+      font-size: 1.05rem;
+      margin-top: -0.2rem;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 1.2rem 0 1.7rem;
+    }
+    .pill {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.22rem 0.65rem;
+      color: var(--muted);
+      background: color-mix(in srgb, var(--accent) 5%, transparent);
+      font-size: 0.88rem;
+    }
+    .note {
+      border-left: 4px solid var(--accent);
+      padding: 0.65rem 0.9rem;
+      color: var(--muted);
+      background: color-mix(in srgb, var(--accent) 7%, transparent);
+    }
+    .diagram {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: linear-gradient(180deg, color-mix(in srgb, var(--panel-2) 78%, transparent), transparent);
+      padding: 18px;
+    }
+    .diagram-title {
+      margin: 0 0 0.8rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .flow {
+      display: grid;
+      gap: 12px;
+      min-width: 760px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(150px, 1fr));
+      gap: 12px;
+      align-items: stretch;
+    }
+    .row.three { grid-template-columns: repeat(3, minmax(180px, 1fr)); }
+    .row.two { grid-template-columns: repeat(2, minmax(260px, 1fr)); }
+    .box {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.78rem 0.85rem;
+      background: var(--panel);
+      min-height: 86px;
+    }
+    .box strong {
+      display: block;
+      margin-bottom: 0.25rem;
+      color: var(--text);
+    }
+    .box span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .box.primary { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+    .box.green { border-color: color-mix(in srgb, var(--accent-2) 55%, var(--border)); }
+    .box.orange { border-color: color-mix(in srgb, var(--accent-3) 55%, var(--border)); }
+    .box.red { border-color: color-mix(in srgb, var(--accent-4) 55%, var(--border)); }
+    .arrow {
+      text-align: center;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9rem;
+    }
+    .swimlanes {
+      display: grid;
+      grid-template-columns: 180px minmax(620px, 1fr);
+      gap: 10px 14px;
+      min-width: 840px;
+      align-items: stretch;
+    }
+    .lane {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.65rem;
+      background: color-mix(in srgb, var(--accent) 6%, transparent);
+      font-weight: 700;
+    }
+    .lane-items {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(140px, 1fr));
+      gap: 10px;
+    }
+    .mini {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.58rem 0.65rem;
+      background: var(--panel);
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .table-wrap { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.94rem;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.55rem 0.7rem;
+      vertical-align: top;
+      text-align: left;
+    }
+    th { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+    .checklist {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+      padding-left: 0;
+      list-style: none;
+    }
+    .checklist li {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 0.85rem;
+      background: var(--panel-2);
+    }
+    svg {
+      display: block;
+      width: 100%;
+      min-width: 760px;
+      height: auto;
+      color: var(--text);
+    }
+    .svg-box { fill: var(--panel); stroke: var(--border); stroke-width: 1.4; }
+    .svg-primary { stroke: var(--accent); stroke-width: 2; }
+    .svg-green { stroke: var(--accent-2); stroke-width: 2; }
+    .svg-orange { stroke: var(--accent-3); stroke-width: 2; }
+    .svg-red { stroke: var(--accent-4); stroke-width: 2; }
+    .svg-text { fill: currentColor; font: 600 14px ui-sans-serif, system-ui, sans-serif; }
+    .svg-muted { fill: var(--muted); font: 12px ui-sans-serif, system-ui, sans-serif; }
+    .svg-line { stroke: var(--muted); stroke-width: 1.5; marker-end: url(#arrow); fill: none; }
+    @media (max-width: 980px) {
+      .layout { display: block; padding: 0; }
+      .sidebar {
+        position: static;
+        max-height: none;
+        padding: 20px 24px;
+        border-bottom: 1px solid var(--border);
+      }
+      .sidebar a { display: inline-block; margin-right: 14px; }
+      .doc { border: 0; border-radius: 0; padding: 28px 22px; box-shadow: none; max-width: none; }
+      h1 { font-size: 1.85rem; }
+      h2 { font-size: 1.4rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <nav class="sidebar" aria-label="문서 섹션">
+      <strong>skeleton-engine Architecture</strong>
+      <a href="#overview">개요</a>
+      <a href="#runtime-map">전체 런타임 지도</a>
+      <a href="#frame-flow">프레임 실행 흐름</a>
+      <a href="#world-model">World 데이터 모델</a>
+      <a href="#render-pipeline">렌더 파이프라인</a>
+      <a href="#subsystems">서브시스템 지도</a>
+      <a href="#platforms">네이티브/WASM 분기</a>
+      <a href="#extension-points">확장 지점</a>
+      <a href="#maintenance-checks">유지보수 체크리스트</a>
+    </nav>
+    <main class="doc">
+      <h1 id="overview">skeleton-engine 아키텍처 구조도</h1>
+      <p class="lead">
+        이 문서는 공개 API 레퍼런스가 아니라 유지보수자가 엔진 내부 실행 흐름을 빠르게 파악하기 위한 구조 문서다.
+        API 사용법과 예제는 <a href="REFERENCE.html">REFERENCE.html</a>을 기준으로 본다.
+      </p>
+      <div class="meta">
+        <span class="pill">Rust 2D engine</span>
+        <span class="pill">custom ECS</span>
+        <span class="pill">winit + wgpu</span>
+        <span class="pill">native + WASM</span>
+      </div>
+      <p>
+        전체 구조의 중심은 <code>App</code>과 <code>World</code>다.
+        사용자 코드는 <code>App::new()</code>로 기본 리소스가 들어간 <code>World</code>를 얻고,
+        엔티티/컴포넌트/리소스/시스템/씬을 등록한 뒤 <code>App::run()</code>으로 winit 이벤트 루프에 진입한다.
+        이후 매 프레임은 입력 수집, 시스템 실행, 엔진 후처리, 렌더링 순서로 진행된다.
+      </p>
+
+      <h2 id="runtime-map">전체 런타임 지도</h2>
+      <div class="diagram">
+        <p class="diagram-title">사용자 코드에서 GPU 제출까지</p>
+        <svg viewBox="0 0 980 420" role="img" aria-labelledby="runtime-title">
+          <title id="runtime-title">skeleton-engine 전체 런타임 구조</title>
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="currentColor"></path>
+            </marker>
+          </defs>
+          <rect x="20" y="28" width="190" height="96" rx="8" class="svg-box svg-primary"></rect>
+          <text x="40" y="58" class="svg-text">Game code</text>
+          <text x="40" y="82" class="svg-muted">examples/*.rs</text>
+          <text x="40" y="104" class="svg-muted">components, systems, scenes</text>
+
+          <rect x="290" y="28" width="190" height="96" rx="8" class="svg-box svg-primary"></rect>
+          <text x="310" y="58" class="svg-text">App</text>
+          <text x="310" y="82" class="svg-muted">src/app.rs</text>
+          <text x="310" y="104" class="svg-muted">event loop orchestration</text>
+
+          <rect x="560" y="28" width="190" height="96" rx="8" class="svg-box svg-green"></rect>
+          <text x="580" y="58" class="svg-text">World</text>
+          <text x="580" y="82" class="svg-muted">src/ecs/world.rs</text>
+          <text x="580" y="104" class="svg-muted">entities, components, resources</text>
+
+          <rect x="770" y="156" width="190" height="96" rx="8" class="svg-box svg-orange"></rect>
+          <text x="790" y="186" class="svg-text">Renderer</text>
+          <text x="790" y="210" class="svg-muted">src/renderer/</text>
+          <text x="790" y="232" class="svg-muted">wgpu passes, queues, text</text>
+
+          <rect x="560" y="284" width="190" height="96" rx="8" class="svg-box"></rect>
+          <text x="580" y="314" class="svg-text">Subsystem systems</text>
+          <text x="580" y="338" class="svg-muted">physics, UI, animation</text>
+          <text x="580" y="360" class="svg-muted">tilemap, steering, scripting</text>
+
+          <rect x="290" y="284" width="190" height="96" rx="8" class="svg-box svg-red"></rect>
+          <text x="310" y="314" class="svg-text">Platform layer</text>
+          <text x="310" y="338" class="svg-muted">winit, gilrs, web-sys</text>
+          <text x="310" y="360" class="svg-muted">native/WASM differences</text>
+
+          <path d="M210 76 H290" class="svg-line"></path>
+          <path d="M480 76 H560" class="svg-line"></path>
+          <path d="M655 124 V284" class="svg-line"></path>
+          <path d="M750 332 C860 332 865 270 865 252" class="svg-line"></path>
+          <path d="M750 76 C850 76 865 130 865 156" class="svg-line"></path>
+          <path d="M385 284 V124" class="svg-line"></path>
+        </svg>
+      </div>
+      <p>
+        <code>src/lib.rs</code>는 이 구조의 공개 입구다.
+        내부 모듈을 선언하고 <code>App</code>, <code>World</code>, <code>System</code>, 주요 컴포넌트와 리소스를
+        <code>engine::*</code>로 재수출한다.
+      </p>
+
+      <h2 id="frame-flow">프레임 실행 흐름</h2>
+      <p>
+        프레임의 실제 중심은 <code>ApplicationHandler</code> 구현이다.
+        <code>about_to_wait()</code>가 매 루프마다 <code>request_redraw()</code>를 요청하고,
+        <code>WindowEvent::RedrawRequested</code>에서 <code>dt</code> 계산, <code>update()</code>, 종료/리사이즈 처리,
+        <code>render()</code> 호출이 이어진다.
+      </p>
+      <div class="diagram">
+        <p class="diagram-title">RedrawRequested 기준 프레임 순서</p>
+        <div class="flow">
+          <div class="row">
+            <div class="box primary"><strong>1. 이벤트 수집</strong><span>keyboard, mouse, touch, IME는 <code>InputState</code>/<code>TouchState</code>에 기록된다.</span></div>
+            <div class="box primary"><strong>2. dt 계산</strong><span><code>last_frame</code> 기준으로 초 단위 delta를 만들고 0.1초로 clamp한다.</span></div>
+            <div class="box green"><strong>3. App::update</strong><span>시스템 실행과 엔진 후처리가 일어나는 메인 단계다.</span></div>
+            <div class="box orange"><strong>4. App::render</strong><span>World의 렌더 데이터를 읽어 wgpu command encoder에 패스를 쌓는다.</span></div>
+          </div>
+          <div class="arrow">update() 내부 상세</div>
+          <div class="row">
+            <div class="box"><strong>change tracking clear</strong><span><code>World::clear_change_tracking()</code> 후 현재 프레임 변경 감지를 새로 시작한다.</span></div>
+            <div class="box"><strong>viewport resources</strong><span>GPU physical size와 window scale factor로 logical viewport를 갱신한다.</span></div>
+            <div class="box"><strong>egui begin</strong><span><code>DebugUi</code>가 있으면 raw input을 받아 egui pass를 시작한다.</span></div>
+            <div class="box"><strong>schedule compute</strong><span><code>SystemConfig</code> before/after를 DAG 정렬하고 cycle 시 삽입 순서로 폴백한다.</span></div>
+          </div>
+          <div class="row">
+            <div class="box green"><strong>systems run</strong><span><code>System::run(&mut World, dt)</code>를 exec order로 실행하고 set 비활성화와 panic 격리를 적용한다.</span></div>
+            <div class="box"><strong>hierarchy + camera</strong><span>사용자 시스템 뒤, 렌더 직전에 계층 변환 전파와 카메라 follow/effect를 갱신한다.</span></div>
+            <div class="box"><strong>debug/editor</strong><span>네이티브 Inspector, scene graph, gizmo, profiler UI 데이터를 준비한다.</span></div>
+            <div class="box"><strong>egui end</strong><span>egui shapes를 tessellate하고 결과를 <code>render()</code>에서 사용할 임시 버퍼에 저장한다.</span></div>
+          </div>
+          <div class="row">
+            <div class="box red"><strong>events flush</strong><span><code>register_event</code>로 등록된 <code>Events&lt;E&gt;</code> 큐를 프레임 끝에 비운다.</span></div>
+            <div class="box red"><strong>input flush</strong><span>just pressed/released, text chars, scroll 등 프레임성 입력을 정리한다.</span></div>
+            <div class="box"><strong>scene command</strong><span><code>SceneChange</code>에 요청된 Replace/Push/Pop을 적용한다.</span></div>
+            <div class="box"><strong>asset polling</strong><span>핫 리로드와 async image completion을 poll하고 GPU texture를 재업로드한다.</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="note">
+        사용자 시스템은 이벤트와 입력이 flush되기 전에 실행된다. 같은 프레임에 입력을 읽거나 이벤트를 보내고,
+        후속 시스템이 읽는 구조가 가능하다. 씬 전환은 시스템 실행 뒤에 처리되므로 전환 요청 시스템이 현재 프레임 실행을 즉시 중단하지 않는다.
+      </div>
+
+      <h2 id="world-model">World 데이터 모델</h2>
+      <p>
+        <code>World</code>는 archetype 기반 밀집 컬럼 스토리지다.
+        엔티티는 <code>Entity(u32)</code> ID이고, 컴포넌트 조합이 바뀔 때 엔티티가 다른 archetype으로 이동한다.
+        리소스는 <code>TypeId</code> 기반 싱글턴 맵으로 보관된다.
+      </p>
+      <div class="diagram">
+        <p class="diagram-title">World 내부 소유 데이터</p>
+        <div class="row two">
+          <div class="box primary">
+            <strong>Entity lifecycle</strong>
+            <span><code>next_id</code>, <code>free_ids</code>, <code>entities</code>, <code>entity_location</code>으로 생존 엔티티와 row 위치를 추적한다.</span>
+          </div>
+          <div class="box green">
+            <strong>Archetype storage</strong>
+            <span><code>type_set</code>이 같은 엔티티를 묶고 <code>columns: HashMap&lt;TypeId, Vec&lt;ComponentBox&gt;&gt;</code>에 컴포넌트를 저장한다.</span>
+          </div>
+        </div>
+        <div class="row two">
+          <div class="box orange">
+            <strong>Resources</strong>
+            <span><code>InputState</code>, <code>Camera</code>, <code>AssetServer</code>, <code>SceneChange</code>, queues 같은 전역 상태를 타입별로 저장한다.</span>
+          </div>
+          <div class="box">
+            <strong>Registries</strong>
+            <span>Reflect registry는 Inspector 필드 편집에, clone registry는 <code>clone_entity</code>류 기능에 사용된다.</span>
+          </div>
+        </div>
+      </div>
+      <p>
+        쿼리 이터레이터가 살아있는 동안 같은 <code>World</code>에서 mutable access를 다시 얻으면 borrow 충돌이 난다.
+        그래서 엔진 문서의 표준 패턴은 엔티티 목록을 먼저 <code>collect()</code>하고, 두 번째 루프에서 <code>get_mut()</code>로 수정하는 방식이다.
+      </p>
+      <pre><code>let entities: Vec&lt;Entity&gt; = world.query::&lt;Player&gt;().map(|(e, _)| e).collect();
+for entity in entities {
+    if let Some(transform) = world.get_mut::&lt;Transform&gt;(entity) {
+        transform.position.x += 10.0;
+    }
+}</code></pre>
+
+      <h2 id="render-pipeline">렌더 파이프라인</h2>
+      <p>
+        렌더링은 <code>render()</code>가 <code>World</code>를 읽고 여러 렌더 큐를 drain하면서 구성한다.
+        애니메이션, UI, 디버그 드로우 같은 서브시스템은 렌더러를 직접 호출하지 않고 컴포넌트나 queue resource에 데이터를 남긴다.
+      </p>
+      <div class="diagram">
+        <p class="diagram-title">render() 패스 순서</p>
+        <div class="swimlanes">
+          <div class="lane">오프스크린</div>
+          <div class="lane-items">
+            <div class="mini"><code>OffscreenCamera</code> 수집</div>
+            <div class="mini">RT clear</div>
+            <div class="mini">layer mask sprite render</div>
+            <div class="mini">RT bind group 등록</div>
+          </div>
+          <div class="lane">메인 씬</div>
+          <div class="lane-items">
+            <div class="mini">post/lighting target 선택</div>
+            <div class="mini">clear pass</div>
+            <div class="mini">sprite render</div>
+            <div class="mini">render stats 기록</div>
+          </div>
+          <div class="lane">오버레이</div>
+          <div class="lane-items">
+            <div class="mini"><code>DebugDrawQueue</code> to <code>UiQueue</code></div>
+            <div class="mini"><code>UiQueue</code> rects</div>
+            <div class="mini"><code>UiImageQueue</code> images</div>
+            <div class="mini">TextRenderer</div>
+          </div>
+          <div class="lane">후처리</div>
+          <div class="lane-items">
+            <div class="mini">GPU particles native</div>
+            <div class="mini">post process</div>
+            <div class="mini">lighting native</div>
+            <div class="mini">fade + egui + present</div>
+          </div>
+        </div>
+      </div>
+      <div class="note">
+        레이어 경계가 중요하다. 예를 들어 렌더러는 <code>AnimationPlayer</code>를 직접 읽지 않고,
+        <code>AnimationSystem</code>이 동기화한 <code>UvRect</code>를 읽는다.
+        디버그 시각화도 <code>DebugDraw</code>/<code>DebugDrawQueue</code>에 순수 데이터를 모은 뒤 <code>App</code>이 렌더 큐로 변환한다.
+      </div>
+
+      <h2 id="subsystems">서브시스템 지도</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>영역</th>
+              <th>대표 파일</th>
+              <th>책임</th>
+              <th>주요 접점</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>App/runtime</td>
+              <td><code>src/app.rs</code></td>
+              <td>winit 이벤트 루프, GPU 초기화, update/render orchestration, scene stack, debug editor</td>
+              <td><code>App::new</code>, <code>App::run</code>, <code>add_system</code>, <code>set_scene</code></td>
+            </tr>
+            <tr>
+              <td>ECS</td>
+              <td><code>src/ecs/</code></td>
+              <td>entity/component/resource storage, query, events, schedule ordering, commands</td>
+              <td><code>World</code>, <code>System</code>, <code>Events&lt;E&gt;</code>, <code>SystemConfig</code></td>
+            </tr>
+            <tr>
+              <td>Rendering</td>
+              <td><code>src/renderer/</code>, <code>src/components.rs</code></td>
+              <td>wgpu context, sprite/text/UI rendering, render targets, post process, lighting, GPU particles</td>
+              <td><code>Sprite</code>, <code>Camera</code>, <code>UiQueue</code>, <code>TextQueue</code>, <code>PostProcessConfig</code></td>
+            </tr>
+            <tr>
+              <td>Input/UI</td>
+              <td><code>src/input/</code>, <code>src/ui/</code></td>
+              <td>keyboard/mouse/touch/gamepad state, input maps, UI widgets, layout, interaction events</td>
+              <td><code>InputState</code>, <code>TouchState</code>, <code>GamepadState</code>, <code>UiSystem</code></td>
+            </tr>
+            <tr>
+              <td>Physics/collision</td>
+              <td><code>src/physics/</code>, <code>src/collision/</code></td>
+              <td>Rapier2D world, physics bodies, triggers, raycast/character movement, broadphase grid/debug collision</td>
+              <td><code>PhysicsSystem</code>, <code>PhysicsWorld</code>, <code>Collider</code>, <code>CollisionGridSystem</code></td>
+            </tr>
+            <tr>
+              <td>Gameplay helpers</td>
+              <td><code>src/animation/</code>, <code>src/tilemap.rs</code>, <code>src/particle.rs</code>, <code>src/steering.rs</code></td>
+              <td>animation state, tilemaps, CPU particles, steering behaviors, timelines, tweens, timers</td>
+              <td>각 시스템을 <code>App</code>이나 <code>Scene::on_enter</code>에서 명시 등록</td>
+            </tr>
+            <tr>
+              <td>Assets/data</td>
+              <td><code>src/asset.rs</code>, <code>src/atlas.rs</code>, <code>src/prefab.rs</code>, <code>src/save.rs</code></td>
+              <td>image/script load, atlas metadata, prefab/scene definitions, encrypted save/load</td>
+              <td><code>AssetServer</code>, <code>Handle&lt;T&gt;</code>, <code>Prefab</code>, <code>save/load</code></td>
+            </tr>
+            <tr>
+              <td>Tooling/debug</td>
+              <td><code>src/debug_ui.rs</code>, <code>src/reflect.rs</code>, <code>src/scripting.rs</code></td>
+              <td>egui debug overlay, inspector reflection, Rhai scripting bridge</td>
+              <td><code>DebugUi</code>, <code>Reflect</code>, <code>ScriptingSystem</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="platforms">네이티브/WASM 분기</h2>
+      <p>
+        크레이트는 <code>cdylib</code>와 <code>rlib</code>를 함께 빌드하고, 많은 기능이 <code>cfg(target_arch = "wasm32")</code>로 갈린다.
+        공개 API도 일부 re-export가 네이티브 전용이다.
+      </p>
+      <div class="diagram">
+        <p class="diagram-title">플랫폼별 차이</p>
+        <div class="row two">
+          <div class="box green">
+            <strong>Native</strong>
+            <span><code>rapier2d</code> physics, <code>rodio</code> audio, <code>gilrs</code> gamepad polling, file watching, tungstenite networking, lighting/fade/GPU particle modules.</span>
+          </div>
+          <div class="box orange">
+            <strong>WASM</strong>
+            <span><code>wasm_bindgen</code> start hook, canvas lookup by <code>game-canvas</code>, async GPU init via <code>spawn_local</code>, WebGL feature path, optional font data for text.</span>
+          </div>
+        </div>
+      </div>
+      <p>
+        WASM에서는 GPU 초기화가 async라서 <code>PENDING_GPU</code> thread-local에 결과를 넣고
+        <code>about_to_wait()</code> 또는 <code>RedrawRequested</code>에서 <code>finish_init()</code>을 호출한다.
+        네이티브에서는 <code>pollster::block_on(GpuContext::new(...))</code>로 <code>resumed()</code> 안에서 바로 초기화한다.
+      </p>
+
+      <h2 id="extension-points">확장 지점</h2>
+      <ul class="checklist">
+        <li><strong>새 시스템</strong><br><code>System</code>을 구현하고 <code>app.add_system</code> 또는 <code>add_system_labeled</code>로 등록한다. 씬 전용이면 <code>Scene::on_enter</code>에서 시스템 벡터에 추가한다.</li>
+        <li><strong>시스템 순서</strong><br><code>SystemConfig::label</code>, <code>before</code>, <code>after</code>, <code>in_set</code>을 사용한다. cycle이 있으면 로그를 남기고 삽입 순서로 폴백한다.</li>
+        <li><strong>새 컴포넌트</strong><br>해당 모듈에 타입을 정의하고 필요 시 <code>src/lib.rs</code>에서 re-export한다. Inspector 편집이 필요하면 reflect 등록 흐름을 맞춘다.</li>
+        <li><strong>새 리소스</strong><br><code>world.insert_resource</code>로 넣고 시스템에서 <code>resource</code>/<code>resource_mut</code>로 접근한다. 기본 리소스라면 <code>App::new</code>와 <code>reload_scene</code> 양쪽을 확인한다.</li>
+        <li><strong>새 이벤트</strong><br><code>app.register_event::&lt;E&gt;()</code>로 <code>Events&lt;E&gt;</code> 리소스와 프레임 flush hook을 등록한다.</li>
+        <li><strong>씬 전환</strong><br>시스템에서 <code>SceneChange::request(SceneCmd::...)</code>를 호출한다. 실제 적용은 시스템/입력/event flush 뒤에 일어난다.</li>
+        <li><strong>렌더 데이터</strong><br>렌더러를 직접 호출하기보다 컴포넌트나 <code>UiQueue</code>, <code>UiImageQueue</code>, <code>TextQueue</code>, <code>DebugDraw</code> 같은 리소스에 그릴 데이터를 남긴다.</li>
+        <li><strong>에셋</strong><br><code>App::load_image</code>, <code>load_image_async</code>, <code>load_atlas</code>, <code>load_script</code>를 통해 <code>AssetServer</code>와 GPU 업로드 경로를 함께 태운다.</li>
+      </ul>
+
+      <h2 id="maintenance-checks">유지보수 체크리스트</h2>
+      <ul>
+        <li><code>App::new</code>에 기본 리소스를 추가하면 <code>reload_scene</code>에도 같은 초기화를 반영한다.</li>
+        <li>새 공개 API는 <code>src/lib.rs</code> re-export와 <code>REFERENCE.html</code> 문서 필요 여부를 함께 확인한다.</li>
+        <li>렌더 레이어를 넘나드는 변경은 시스템이 데이터를 준비하고 렌더러가 단순히 읽는 구조를 유지한다.</li>
+        <li>입력/이벤트/씬 전환 타이밍 변경은 프레임 흐름 전체에 영향이 있으므로 예제와 UI 시스템을 같이 확인한다.</li>
+        <li>네이티브 전용 기능을 추가하면 <code>cfg(not(target_arch = "wasm32"))</code> 공개 re-export와 WASM 빌드를 확인한다.</li>
+        <li>문서 변경 뒤에는 최소한 <code>cargo package --locked --list</code>로 패키지 포함 목록을 확인한다.</li>
+      </ul>
+    </main>
+  </div>
+</body>
+</html>

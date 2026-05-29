@@ -1,7 +1,7 @@
 # AGENTS.md — skeleton-engine 에이전트 참조
 
 > 버전 v1.0.0 | 패키지 `skeleton-engine` | 라이브러리 크레이트 `engine`
-> wgpu 기반 Rust 2D 게임 엔진 | 상세 API: `REFERENCE.html` | 개발 이력: `docs/HANDOFF.md`
+> wgpu 기반 Rust 2D 게임 엔진 | 상세 API: `REFERENCE.html` | 구조도: `ARCHITECTURE.html` | 개발 이력: `docs/HANDOFF.md`
 
 ## 모듈 맵
 
@@ -181,11 +181,9 @@ world.resource_mut::<SceneChange>().unwrap().0 =
 | --- | --- |
 | `AGENTS.md` | Codex/에이전트 공통 빠른 참조: 모듈 맵, 핵심 패턴, 작업 체크리스트 |
 | `CLAUDE.md` | Claude 계열 에이전트용 빠른 참조 |
-| `README.md`, `REFERENCE.html`, `docs/HANDOFF.md` | 소개/사용법, 공개 API, Phase별 개발 이력 |
-| `docs/CHANGELOG.md`, `docs/ROADMAP.md` | 릴리스 변경 이력, 향후 개발 계획 |
+| `README.md`, `REFERENCE.html`, `ARCHITECTURE.html`, `docs/HANDOFF.md` | 소개/사용법, 공개 API, 엔진 구조, Phase별 개발 이력 |
+| `docs/CHANGELOG.md`, `docs/ROADMAP.md` | 릴리스 변경 이력, v1.0 historical roadmap |
 | `docs/AGENT_WORKFLOW.md` | 에이전트 상세 작업 규칙 |
-| `docs/REMAINING_WORK.md`, `docs/PARALLEL_TASKS.md` | 로컬 전용 과거 작업 계획(ignored) |
-| `docs/ENGINE_REVIEW_FIX_PROMPT.md` | 로컬 전용 엔진 리뷰 수정 프롬프트(ignored) |
-| `docs/rust_game_engine_plan.md` | 로컬 전용 초기/상세 개발 계획 문서(ignored) |
+| ignored 로컬 문서 | `.gitignore` 대상 작업 프롬프트/개인 계획. 공식 문서로 참조하지 않음 |
 
 > **확장 전략**: 새 서브시스템 문서는 `docs/SUBSYSTEM.md`처럼 `docs/` 아래에 추가하고, 이 파일 모듈 맵에는 한 줄 참조만 추가한다.

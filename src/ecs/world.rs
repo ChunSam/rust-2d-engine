@@ -1,6 +1,11 @@
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+/// 엔티티 ID는 despawn 후 재사용될 수 있다.
+///
+/// `Entity`는 세대 번호를 포함하지 않는 가벼운 핸들이므로, 오래 저장해 둔 값이 나중에
+/// 새로 생성된 다른 엔티티를 가리킬 수 있다. 장기 보관이 필요한 로직은 `is_alive()` 확인이나
+/// 별도 `Tag`/도메인 ID를 함께 사용한다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Entity(pub u32);
 
@@ -105,6 +110,9 @@ impl World {
     }
 
     /// 빈 엔티티를 생성하고 반환한다.
+    ///
+    /// 제거된 엔티티 ID는 재사용될 수 있으므로 `Entity` 값을 장기간 보관하는 코드는
+    /// 재사용 가능성을 고려해야 한다.
     pub fn spawn(&mut self) -> Entity {
         let id = if let Some(reused) = self.free_ids.pop_front() {
             reused
@@ -122,6 +130,8 @@ impl World {
     }
 
     /// 엔티티를 제거하고 모든 컴포넌트를 해제한다. 멱등성 보장.
+    ///
+    /// 제거된 ID는 이후 `spawn()`에서 재사용될 수 있다.
     pub fn despawn(&mut self, entity: Entity) {
         let (arch_id, row) = match self.entity_location.get(&entity) {
             Some(&loc) => loc,
@@ -253,6 +263,10 @@ impl World {
     }
 
     /// 엔티티의 컴포넌트를 가변 참조로 가져온다.
+    ///
+    /// 이 메서드로 필드를 직접 수정해도 `query_changed<T>()`에는 자동으로 기록되지 않는다.
+    /// 변경 감지가 필요한 시스템에서는 [`World::mark_changed`]를 호출하거나
+    /// [`World::get_mut_tracked`]를 사용한다.
     pub fn get_mut<T: 'static>(&mut self, entity: Entity) -> Option<&mut T> {
         let &(arch_id, row) = self.entity_location.get(&entity)?;
         self.archetypes[arch_id]
@@ -575,6 +589,30 @@ impl World {
         entities
             .into_iter()
             .filter_map(move |e| self.get::<T>(e).map(|c| (e, c)))
+    }
+
+    /// 엔티티의 컴포넌트 T를 이번 틱에 변경된 것으로 명시 표시한다.
+    ///
+    /// `get_mut<T>()`로 필드를 직접 수정한 뒤 reactive 시스템이 `query_changed<T>()`로
+    /// 감지해야 할 때 사용한다. 엔티티가 없거나 T 컴포넌트가 없으면 `false`를 반환한다.
+    pub fn mark_changed<T: 'static>(&mut self, entity: Entity) -> bool {
+        let tid = TypeId::of::<T>();
+        if !self.has_component_typeid(entity, tid) {
+            return false;
+        }
+        self.changed_this_tick.insert((entity, tid));
+        true
+    }
+
+    /// 변경 추적을 함께 기록하는 가변 컴포넌트 접근자.
+    ///
+    /// 반환된 참조를 실제로 수정하지 않아도 changed로 기록된다. 조건부 수정이 필요하면
+    /// `get_mut<T>()`로 수정한 뒤 변경이 일어난 경우에만 [`World::mark_changed`]를 호출한다.
+    pub fn get_mut_tracked<T: 'static>(&mut self, entity: Entity) -> Option<&mut T> {
+        if !self.mark_changed::<T>(entity) {
+            return None;
+        }
+        self.get_mut::<T>(entity)
     }
 
     // ── 엔티티 복제 ───────────────────────────────────────────────────────────
@@ -1154,6 +1192,45 @@ mod tests {
         let changed: Vec<_> = world.query_changed::<u32>().collect();
         assert_eq!(changed.len(), 1);
         assert_eq!(*changed[0].1, 2);
+    }
+
+    #[test]
+    fn mark_changed_tracks_direct_mutation() {
+        let mut world = World::new();
+        let e = world.spawn();
+        world.add_component(e, 1u32);
+        world.clear_change_tracking();
+
+        *world.get_mut::<u32>(e).unwrap() = 7;
+        assert_eq!(world.query_changed::<u32>().count(), 0);
+
+        assert!(world.mark_changed::<u32>(e));
+        let changed: Vec<_> = world.query_changed::<u32>().collect();
+        assert_eq!(changed.len(), 1);
+        assert_eq!(*changed[0].1, 7);
+    }
+
+    #[test]
+    fn get_mut_tracked_marks_changed() {
+        let mut world = World::new();
+        let e = world.spawn();
+        world.add_component(e, 1u32);
+        world.clear_change_tracking();
+
+        *world.get_mut_tracked::<u32>(e).unwrap() = 3;
+
+        let changed: Vec<_> = world.query_changed::<u32>().collect();
+        assert_eq!(changed.len(), 1);
+        assert_eq!(*changed[0].1, 3);
+    }
+
+    #[test]
+    fn mark_changed_missing_component_returns_false() {
+        let mut world = World::new();
+        let e = world.spawn();
+
+        assert!(!world.mark_changed::<u32>(e));
+        assert!(world.get_mut_tracked::<u32>(e).is_none());
     }
 
     #[test]

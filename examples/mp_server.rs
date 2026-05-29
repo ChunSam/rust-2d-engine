@@ -100,7 +100,7 @@ fn main() {
             // 클라이언트에게 할당 ID 전달
             let hello = serde_json::to_string(&ServerMessage::Hello { id })
                 .expect("hello message should serialize");
-            if ws.send(Message::Text(hello)).is_err() {
+            if ws.send(Message::Text(hello.into())).is_err() {
                 cleanup(&clients, id);
                 return;
             }
@@ -143,7 +143,7 @@ fn main() {
                             y: pos.y,
                         })
                         .expect("position message should serialize");
-                        let relay = Message::Text(relay);
+                        let relay = Message::Text(relay.into());
                         let guard = clients.lock().unwrap();
                         for (&cid, sender) in guard.iter() {
                             if cid != id {
@@ -170,7 +170,9 @@ fn main() {
 
 fn cleanup(clients: &BroadcastMap, id: usize) {
     let bye = Message::Text(
-        serde_json::to_string(&ServerMessage::Bye { id }).expect("bye message should serialize"),
+        serde_json::to_string(&ServerMessage::Bye { id })
+            .expect("bye message should serialize")
+            .into(),
     );
     let mut guard = clients.lock().unwrap();
     guard.remove(&id);

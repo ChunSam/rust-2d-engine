@@ -3,6 +3,8 @@ use crate::ecs::{events::Events, system::System, world::World};
 pub const DEFAULT_MAX_MESSAGE_BYTES: usize = 64 * 1024;
 /// 기본 송신 큐 최대 메시지 수. 큐가 가득 차면 새 메시지를 드롭하고 warn 로그를 남긴다.
 pub const DEFAULT_MAX_PENDING_MESSAGES: usize = 256;
+/// 기본 수신 이벤트 큐 최대 이벤트 수. 초과 시 새 수신 이벤트를 드롭한다.
+pub const DEFAULT_MAX_PENDING_EVENTS: usize = 1024;
 
 /// 매 프레임 [`NetworkSystem`]이 생성하는 ECS 이벤트.
 #[derive(Clone, Debug)]
@@ -12,6 +14,7 @@ pub enum NetworkEvent {
     BinaryMessage(Vec<u8>),
     TextMessage(String),
     MessageTooLarge { len: usize, limit: usize },
+    ReceiveQueueFull { dropped: usize, capacity: usize },
     JsonParseError { message: String },
     Error(String),
 }
@@ -21,6 +24,8 @@ pub struct NetworkConfig {
     pub max_message_bytes: usize,
     /// 송신 큐 최대 메시지 수. 초과 시 `send_text`/`send_bytes`는 메시지를 드롭한다.
     pub max_pending_messages: usize,
+    /// 수신 이벤트 큐 최대 이벤트 수. 초과 시 새 이벤트는 드롭되고 초과 이벤트가 보고된다.
+    pub max_pending_events: usize,
 }
 
 impl Default for NetworkConfig {
@@ -28,7 +33,47 @@ impl Default for NetworkConfig {
         Self {
             max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
             max_pending_messages: DEFAULT_MAX_PENDING_MESSAGES,
+            max_pending_events: DEFAULT_MAX_PENDING_EVENTS,
         }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn push_event_bounded(
+    buffer: &std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<NetworkEvent>>>,
+    event: NetworkEvent,
+    capacity: usize,
+) {
+    let mut events = match buffer.lock() {
+        Ok(events) => events,
+        Err(_) => return,
+    };
+    if events.len() < capacity {
+        events.push_back(event);
+    } else if !matches!(events.back(), Some(NetworkEvent::ReceiveQueueFull { .. })) {
+        events.pop_back();
+        events.push_back(NetworkEvent::ReceiveQueueFull {
+            dropped: 1,
+            capacity,
+        });
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn push_event_bounded(
+    buffer: &std::rc::Rc<std::cell::RefCell<Vec<NetworkEvent>>>,
+    event: NetworkEvent,
+    capacity: usize,
+) {
+    let mut events = buffer.borrow_mut();
+    if events.len() < capacity {
+        events.push(event);
+    } else if !matches!(events.last(), Some(NetworkEvent::ReceiveQueueFull { .. })) {
+        events.pop();
+        events.push(NetworkEvent::ReceiveQueueFull {
+            dropped: 1,
+            capacity,
+        });
     }
 }
 
@@ -37,6 +82,8 @@ impl Default for NetworkConfig {
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use super::{NetworkConfig, NetworkEvent};
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
 
     enum OutMsg {
         Binary(Vec<u8>),
@@ -45,7 +92,7 @@ mod native {
     }
 
     pub struct NetworkClient {
-        event_rx: std::sync::mpsc::Receiver<NetworkEvent>,
+        event_buffer: Arc<Mutex<VecDeque<NetworkEvent>>>,
         msg_tx: std::sync::mpsc::SyncSender<OutMsg>,
     }
 
@@ -57,17 +104,23 @@ mod native {
         }
 
         pub fn connect_with_config(url: &str, config: NetworkConfig) -> Self {
-            let (event_tx, event_rx) = std::sync::mpsc::channel::<NetworkEvent>();
+            let event_buffer = Arc::new(Mutex::new(VecDeque::<NetworkEvent>::new()));
+            let thread_event_buffer = Arc::clone(&event_buffer);
             let (msg_tx, msg_rx) =
                 std::sync::mpsc::sync_channel::<OutMsg>(config.max_pending_messages);
             let url = url.to_string();
             let max_message_bytes = config.max_message_bytes;
+            let max_pending_events = config.max_pending_events;
 
             std::thread::spawn(move || {
                 let (mut socket, _) = match tungstenite::connect(&url) {
                     Ok(s) => s,
                     Err(e) => {
-                        let _ = event_tx.send(NetworkEvent::Error(format!("connect failed: {e}")));
+                        super::push_event_bounded(
+                            &thread_event_buffer,
+                            NetworkEvent::Error(format!("connect failed: {e}")),
+                            max_pending_events,
+                        );
                         return;
                     }
                 };
@@ -84,27 +137,41 @@ mod native {
                     tls.sock.set_read_timeout(Some(READ_TIMEOUT)).ok();
                 }
 
-                let _ = event_tx.send(NetworkEvent::Connected);
+                super::push_event_bounded(
+                    &thread_event_buffer,
+                    NetworkEvent::Connected,
+                    max_pending_events,
+                );
 
                 loop {
                     // 발신 메시지 처리
                     loop {
                         match msg_rx.try_recv() {
                             Ok(OutMsg::Binary(data)) => {
-                                if socket.send(tungstenite::Message::Binary(data)).is_err() {
+                                if socket
+                                    .send(tungstenite::Message::Binary(data.into()))
+                                    .is_err()
+                                {
                                     return;
                                 }
                             }
                             Ok(OutMsg::Text(text)) => {
-                                if socket.send(tungstenite::Message::Text(text)).is_err() {
+                                if socket
+                                    .send(tungstenite::Message::Text(text.into()))
+                                    .is_err()
+                                {
                                     return;
                                 }
                             }
                             Ok(OutMsg::Close) => {
                                 socket.close(None).ok();
-                                let _ = event_tx.send(NetworkEvent::Disconnected {
-                                    reason: "local close".into(),
-                                });
+                                super::push_event_bounded(
+                                    &thread_event_buffer,
+                                    NetworkEvent::Disconnected {
+                                        reason: "local close".into(),
+                                    },
+                                    max_pending_events,
+                                );
                                 return;
                             }
                             Err(std::sync::mpsc::TryRecvError::Empty) => break,
@@ -116,31 +183,47 @@ mod native {
                     match socket.read() {
                         Ok(tungstenite::Message::Binary(data)) => {
                             if data.len() > max_message_bytes {
-                                let _ = event_tx.send(NetworkEvent::MessageTooLarge {
-                                    len: data.len(),
-                                    limit: max_message_bytes,
-                                });
+                                super::push_event_bounded(
+                                    &thread_event_buffer,
+                                    NetworkEvent::MessageTooLarge {
+                                        len: data.len(),
+                                        limit: max_message_bytes,
+                                    },
+                                    max_pending_events,
+                                );
                                 continue;
                             }
-                            if event_tx.send(NetworkEvent::BinaryMessage(data)).is_err() {
-                                return;
-                            }
+                            super::push_event_bounded(
+                                &thread_event_buffer,
+                                NetworkEvent::BinaryMessage(data.to_vec()),
+                                max_pending_events,
+                            );
                         }
                         Ok(tungstenite::Message::Text(text)) => {
                             if text.len() > max_message_bytes {
-                                let _ = event_tx.send(NetworkEvent::MessageTooLarge {
-                                    len: text.len(),
-                                    limit: max_message_bytes,
-                                });
+                                super::push_event_bounded(
+                                    &thread_event_buffer,
+                                    NetworkEvent::MessageTooLarge {
+                                        len: text.len(),
+                                        limit: max_message_bytes,
+                                    },
+                                    max_pending_events,
+                                );
                                 continue;
                             }
-                            if event_tx.send(NetworkEvent::TextMessage(text)).is_err() {
-                                return;
-                            }
+                            super::push_event_bounded(
+                                &thread_event_buffer,
+                                NetworkEvent::TextMessage(text.to_string()),
+                                max_pending_events,
+                            );
                         }
                         Ok(tungstenite::Message::Close(frame)) => {
-                            let reason = frame.map(|f| f.reason.into_owned()).unwrap_or_default();
-                            let _ = event_tx.send(NetworkEvent::Disconnected { reason });
+                            let reason = frame.map(|f| f.reason.to_string()).unwrap_or_default();
+                            super::push_event_bounded(
+                                &thread_event_buffer,
+                                NetworkEvent::Disconnected { reason },
+                                max_pending_events,
+                            );
                             return;
                         }
                         Ok(_) => {} // Ping / Pong / Frame — tungstenite 내부 처리
@@ -151,17 +234,28 @@ mod native {
                             // 데이터 없음 — 루프 재시작
                         }
                         Err(e) => {
-                            let _ = event_tx.send(NetworkEvent::Error(e.to_string()));
-                            let _ = event_tx.send(NetworkEvent::Disconnected {
-                                reason: "error".into(),
-                            });
+                            super::push_event_bounded(
+                                &thread_event_buffer,
+                                NetworkEvent::Error(e.to_string()),
+                                max_pending_events,
+                            );
+                            super::push_event_bounded(
+                                &thread_event_buffer,
+                                NetworkEvent::Disconnected {
+                                    reason: "error".into(),
+                                },
+                                max_pending_events,
+                            );
                             return;
                         }
                     }
                 }
             });
 
-            Self { event_rx, msg_tx }
+            Self {
+                event_buffer,
+                msg_tx,
+            }
         }
 
         pub fn send_bytes(&self, data: &[u8]) {
@@ -198,11 +292,10 @@ mod native {
         }
 
         pub(super) fn poll(&mut self) -> Vec<NetworkEvent> {
-            let mut out = Vec::new();
-            while let Ok(ev) = self.event_rx.try_recv() {
-                out.push(ev);
+            match self.event_buffer.lock() {
+                Ok(mut events) => events.drain(..).collect(),
+                Err(_) => Vec::new(),
             }
-            out
         }
     }
 }
@@ -234,14 +327,19 @@ mod wasm_impl {
         pub fn connect_with_config(url: &str, config: NetworkConfig) -> Self {
             let buffer: Rc<RefCell<Vec<NetworkEvent>>> = Rc::new(RefCell::new(Vec::new()));
             let max_message_bytes = config.max_message_bytes;
+            let max_pending_events = config.max_pending_events;
 
             let ws = match web_sys::WebSocket::new(url) {
                 Ok(ws) => ws,
                 Err(e) => {
-                    buffer.borrow_mut().push(NetworkEvent::Error(format!(
-                        "WebSocket::new failed: {}",
-                        js_value_to_string(&e)
-                    )));
+                    push_event_bounded(
+                        &buffer,
+                        NetworkEvent::Error(format!(
+                            "WebSocket::new failed: {}",
+                            js_value_to_string(&e)
+                        )),
+                        max_pending_events,
+                    );
                     return Self {
                         socket: None,
                         buffer,
@@ -256,7 +354,7 @@ mod wasm_impl {
 
             let buf = buffer.clone();
             let on_open = Closure::<dyn FnMut()>::new(move || {
-                buf.borrow_mut().push(NetworkEvent::Connected);
+                push_event_bounded(&buf, NetworkEvent::Connected, max_pending_events);
             });
             ws.set_onopen(Some(on_open.as_ref().unchecked_ref()));
 
@@ -266,23 +364,39 @@ mod wasm_impl {
                     let data = ev.data();
                     if let Some(text) = data.as_string() {
                         if text.len() > max_message_bytes {
-                            buf.borrow_mut().push(NetworkEvent::MessageTooLarge {
-                                len: text.len(),
-                                limit: max_message_bytes,
-                            });
+                            push_event_bounded(
+                                &buf,
+                                NetworkEvent::MessageTooLarge {
+                                    len: text.len(),
+                                    limit: max_message_bytes,
+                                },
+                                max_pending_events,
+                            );
                         } else {
-                            buf.borrow_mut().push(NetworkEvent::TextMessage(text));
+                            push_event_bounded(
+                                &buf,
+                                NetworkEvent::TextMessage(text),
+                                max_pending_events,
+                            );
                         }
                     } else {
                         let array = js_sys::Uint8Array::new(&data);
                         let bytes = array.to_vec();
                         if bytes.len() > max_message_bytes {
-                            buf.borrow_mut().push(NetworkEvent::MessageTooLarge {
-                                len: bytes.len(),
-                                limit: max_message_bytes,
-                            });
+                            push_event_bounded(
+                                &buf,
+                                NetworkEvent::MessageTooLarge {
+                                    len: bytes.len(),
+                                    limit: max_message_bytes,
+                                },
+                                max_pending_events,
+                            );
                         } else {
-                            buf.borrow_mut().push(NetworkEvent::BinaryMessage(bytes));
+                            push_event_bounded(
+                                &buf,
+                                NetworkEvent::BinaryMessage(bytes),
+                                max_pending_events,
+                            );
                         }
                     }
                 },
@@ -291,17 +405,24 @@ mod wasm_impl {
 
             let buf = buffer.clone();
             let on_error = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev: web_sys::Event| {
-                buf.borrow_mut()
-                    .push(NetworkEvent::Error("WebSocket error".into()));
+                push_event_bounded(
+                    &buf,
+                    NetworkEvent::Error("WebSocket error".into()),
+                    max_pending_events,
+                );
             });
             ws.set_onerror(Some(on_error.as_ref().unchecked_ref()));
 
             let buf = buffer.clone();
             let on_close =
                 Closure::<dyn FnMut(web_sys::CloseEvent)>::new(move |ev: web_sys::CloseEvent| {
-                    buf.borrow_mut().push(NetworkEvent::Disconnected {
-                        reason: ev.reason(),
-                    });
+                    push_event_bounded(
+                        &buf,
+                        NetworkEvent::Disconnected {
+                            reason: ev.reason(),
+                        },
+                        max_pending_events,
+                    );
                 });
             ws.set_onclose(Some(on_close.as_ref().unchecked_ref()));
 
@@ -416,6 +537,7 @@ mod tests {
         let cfg = NetworkConfig::default();
         assert_eq!(cfg.max_message_bytes, DEFAULT_MAX_MESSAGE_BYTES);
         assert_eq!(cfg.max_pending_messages, DEFAULT_MAX_PENDING_MESSAGES);
+        assert_eq!(cfg.max_pending_events, DEFAULT_MAX_PENDING_EVENTS);
     }
 
     #[test]
@@ -427,5 +549,20 @@ mod tests {
             tx.try_send(2).is_err(),
             "queue should be full after capacity is reached"
         );
+    }
+
+    #[test]
+    fn receive_queue_reports_full_when_capacity_reached() {
+        let buffer = std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+        push_event_bounded(&buffer, NetworkEvent::Connected, 1);
+        push_event_bounded(&buffer, NetworkEvent::TextMessage("dropped".into()), 1);
+        let events: Vec<_> = buffer.lock().unwrap().iter().cloned().collect();
+        assert!(matches!(
+            events.as_slice(),
+            [NetworkEvent::ReceiveQueueFull {
+                dropped: 1,
+                capacity: 1
+            }]
+        ));
     }
 }

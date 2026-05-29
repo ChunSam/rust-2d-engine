@@ -105,6 +105,12 @@ Run the included beginner example:
 cargo run --example basic
 ```
 
+Run the runtime policy configuration example:
+
+```sh
+cargo run --example runtime_policies
+```
+
 ## Checks
 
 ```sh
@@ -130,6 +136,7 @@ python3 -m http.server --directory dist 8080
 ## Documentation
 
 - [`REFERENCE.html`](REFERENCE.html) in the repository root contains the public API reference and subsystem examples.
+- [`ARCHITECTURE.html`](ARCHITECTURE.html) explains the maintainer-oriented engine structure and frame flow.
 - Contributor handoff and agent notes live in the repository, outside the crates.io package.
 
 ## License

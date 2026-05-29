@@ -9,10 +9,12 @@ pub struct PathGrid {
     cells: Vec<bool>,
 }
 
+const MAX_PATH_GRID_CELLS: usize = 10_000_000;
+
 impl PathGrid {
     /// 전부 통행 가능 상태로 초기화
     pub fn new(width: i32, height: i32) -> Self {
-        let size = (width * height).max(0) as usize;
+        let size = grid_cell_count(width, height);
         Self {
             width,
             height,
@@ -22,7 +24,7 @@ impl PathGrid {
 
     /// 전부 막힌 상태로 초기화
     pub fn new_blocked(width: i32, height: i32) -> Self {
-        let size = (width * height).max(0) as usize;
+        let size = grid_cell_count(width, height);
         Self {
             width,
             height,
@@ -45,7 +47,23 @@ impl PathGrid {
         if x < 0 || y < 0 || x >= self.width || y >= self.height {
             return None;
         }
-        Some((y * self.width + x) as usize)
+        let idx = y.checked_mul(self.width)?.checked_add(x)? as usize;
+        (idx < self.cells.len()).then_some(idx)
+    }
+}
+
+fn grid_cell_count(width: i32, height: i32) -> usize {
+    let Some(size) = width.checked_mul(height) else {
+        return 0;
+    };
+    if size <= 0 {
+        return 0;
+    }
+    let size = size as usize;
+    if size > MAX_PATH_GRID_CELLS {
+        0
+    } else {
+        size
     }
 }
 
@@ -201,5 +219,17 @@ mod tests {
         let pos = IVec2::new(2, 3);
         let result = find_path(&grid, pos, pos);
         assert_eq!(result, Some(vec![pos]));
+    }
+
+    #[test]
+    fn path_grid_invalid_or_overflow_size_is_empty() {
+        let overflow = PathGrid::new(i32::MAX, 2);
+        assert!(!overflow.is_walkable(0, 0));
+
+        let negative = PathGrid::new(-3, 4);
+        assert!(!negative.is_walkable(0, 0));
+
+        let blocked = PathGrid::new_blocked(i32::MAX, 2);
+        assert!(!blocked.is_walkable(0, 0));
     }
 }

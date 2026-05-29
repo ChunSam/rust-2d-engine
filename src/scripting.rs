@@ -112,6 +112,10 @@ fn clear_script_ctx() {
 
 /// ScriptRunner를 가진 모든 엔티티에 대해 매 프레임 스크립트를 실행하는 시스템.
 ///
+/// 이 시스템은 신뢰된 로컬 게임 스크립트를 실행하기 위한 기능이다. Rhai operation limit은
+/// 실수로 만든 무한 루프를 줄여 주지만, 적대적/원격 사용자 입력을 안전하게 격리하는
+/// sandbox 경계로 보장하지 않는다.
+///
 /// 스코프 변수: `x`, `y`, `rot`, `sx`, `sy`  (Transform 읽기/쓰기)
 ///
 /// 라이프사이클:
@@ -125,6 +129,10 @@ fn clear_script_ctx() {
 /// let id = spawn_entity();   // 새 엔티티 생성 → ID(i64) 반환
 /// despawn_entity(id);        // 엔티티 삭제 예약
 /// ```
+///
+/// `spawn_entity()`가 반환하는 음수 ID는 같은 스크립트 안에서 실제 엔티티를 조작할 수 있는
+/// 안정 핸들이 아니다. 실제 스폰은 스크립트 실행 후 적용된다. 또한 `despawn_entity(id)`는
+/// 세대 번호 없는 ECS ID를 사용하므로 오래 보관한 ID는 재사용된 다른 엔티티를 가리킬 수 있다.
 ///
 /// ### Blackboard
 /// ```rhai

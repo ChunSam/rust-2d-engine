@@ -148,7 +148,7 @@ cargo test
 
 Result:
 
-- Unit tests: `203 passed`
+- Historical implementation run: unit tests `203 passed`. Current release verification is tracked in `docs/PROJECT_SCAN_REPORT.md`.
 - Doc tests: `31 passed`, `19 ignored`
 
 ## Game-Side Work Left For rust-survivors

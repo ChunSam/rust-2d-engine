@@ -138,6 +138,9 @@ thread_local! {
 /// 에셋 관리자 — 이미지 로드·캐싱·핫 리로딩.
 ///
 /// ECS World에 Resource로 삽입해 사용하거나 `App::load_image`를 통해 간접적으로 접근한다.
+/// 네이티브 빌드에서는 존재하는 파일 경로를 canonical path로 정규화해 캐시 키로 사용한다.
+/// 존재하지 않는 경로는 입력 문자열을 그대로 보존해 기존 fallback 동작을 유지하고, WASM에서는
+/// URL/상대경로 의미를 보존하기 위해 정규화하지 않는다.
 ///
 /// # 핫 리로딩
 /// 파일이 변경되면 `poll_reloads()`가 변경된 경로 목록을 반환한다.
@@ -170,6 +173,17 @@ pub struct AssetServer {
     async_tx: std::sync::mpsc::SyncSender<AsyncImageResult>,
     #[cfg(not(target_arch = "wasm32"))]
     async_rx: std::sync::mpsc::Receiver<AsyncImageResult>,
+}
+
+fn asset_key(path: impl AsRef<Path>) -> Arc<str> {
+    let path = path.as_ref();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if let Ok(canonical) = path.canonicalize() {
+            return canonical.to_string_lossy().as_ref().into();
+        }
+    }
+    path.to_string_lossy().as_ref().into()
 }
 
 impl AssetServer {
@@ -241,7 +255,7 @@ impl AssetServer {
     ///
     /// 로드 실패 시 마젠타(1×1) 폴백 텍스처로 대체되며 `load_state()`로 결과를 확인할 수 있다.
     pub fn load_image(&mut self, path: impl AsRef<Path>) -> Handle<ImageAsset> {
-        let key: Arc<str> = path.as_ref().to_string_lossy().as_ref().into();
+        let key = asset_key(path.as_ref());
         if let Some(&id) = self.path_to_id.get(&key) {
             return Handle {
                 id,
@@ -327,7 +341,7 @@ impl AssetServer {
 
     /// 스크립트를 로드해 핸들을 반환한다. 같은 경로 재호출 시 캐시된 핸들 반환.
     pub fn load_script(&mut self, path: impl AsRef<Path>) -> Handle<ScriptAsset> {
-        let key: Arc<str> = path.as_ref().to_string_lossy().as_ref().into();
+        let key = asset_key(path.as_ref());
         if let Some(&id) = self.script_path_to_id.get(&key) {
             return Handle {
                 id,
@@ -364,7 +378,7 @@ impl AssetServer {
         cols: u32,
         rows: u32,
     ) -> Handle<crate::atlas::TextureAtlas> {
-        let key: Arc<str> = path.as_ref().to_string_lossy().as_ref().into();
+        let key = asset_key(path.as_ref());
         if let Some(&id) = self.atlas_path_to_id.get(&key) {
             return Handle {
                 id,
@@ -413,14 +427,12 @@ impl AssetServer {
             };
             let mut seen: Vec<String> = Vec::new();
             while let Ok(path) = rx.try_recv() {
-                if let Some(s) = path.to_str() {
-                    let key: Arc<str> = s.into();
-                    let s_str = s.to_string();
-                    let is_known = self.path_to_id.contains_key(&key)
-                        || self.script_path_to_id.contains_key(&key);
-                    if is_known && !seen.contains(&s_str) {
-                        seen.push(s_str);
-                    }
+                let key = asset_key(&path);
+                let key_str = key.to_string();
+                let is_known =
+                    self.path_to_id.contains_key(&key) || self.script_path_to_id.contains_key(&key);
+                if is_known && !seen.contains(&key_str) {
+                    seen.push(key_str);
                 }
             }
             for path_str in &seen {
@@ -446,7 +458,7 @@ impl AssetServer {
     /// - 네이티브: `std::thread::spawn` 백그라운드 스레드에서 로드
     /// - WASM: `wasm_bindgen_futures::spawn_local` + `fetch` API
     pub fn load_image_async(&mut self, path: impl AsRef<Path>) -> Handle<ImageAsset> {
-        let key: Arc<str> = path.as_ref().to_string_lossy().as_ref().into();
+        let key = asset_key(path.as_ref());
         // 캐시 확인 — 이미 로드됐거나 로딩 중이면 기존 핸들 반환
         if let Some(&id) = self.path_to_id.get(&key) {
             return Handle {
@@ -582,6 +594,42 @@ fn magenta_fallback() -> ImageAsset {
         data: Arc::new(vec![255, 0, 255, 255]),
         width: 1,
         height: 1,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_asset_key_preserves_input_path() {
+        let key = asset_key("__definitely_missing_asset__.png");
+        assert_eq!(&*key, "__definitely_missing_asset__.png");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn existing_native_paths_are_canonicalized_for_cache_keys() {
+        let dir = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!("asset-key-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("image.png");
+        std::fs::write(&path, b"not a png").unwrap();
+
+        let relative = path.strip_prefix(std::env::current_dir().unwrap()).unwrap();
+        let absolute = path.canonicalize().unwrap();
+        let mut server = AssetServer::new();
+
+        let a = server.load_image(relative);
+        let b = server.load_image(&absolute);
+
+        assert_eq!(a.id(), b.id());
+        assert_eq!(a.path(), absolute.to_string_lossy());
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
 

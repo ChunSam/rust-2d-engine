@@ -30,9 +30,23 @@ impl TilemapAtlas {
 
     /// 타일 ID(0부터 시작)의 UV 좌표를 반환한다.
     pub fn uv_for(&self, tile_id: u32) -> UvRect {
+        if self.columns == 0 || self.rows == 0 {
+            return UvRect::FULL;
+        }
         let col = tile_id % self.columns;
         let row = tile_id / self.columns;
         UvRect::from_grid(col, row, self.columns, self.rows)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tilemap_atlas_zero_grid_returns_full_uv() {
+        let atlas = TilemapAtlas::new("tiles.png", 0, 0);
+        assert_eq!(atlas.uv_for(0), UvRect::FULL);
     }
 }
 

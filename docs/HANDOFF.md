@@ -1,8 +1,8 @@
 # 핸드오프 문서 — skeleton-engine
 
-작성일: 2026-05-24 (Phase 45~53 갱신: 2026-05-26 / Phase 46~59 완료: 2026-05-26 / 코드 리뷰 7항목 수정: 2026-05-26)  
-엔진 버전: **v1.0.0** (태그: v1.0.0, main 브랜치 기준)  
-패키지: **skeleton-engine** (라이브러리 크레이트: `engine`)  
+작성일: 2026-05-24 (Phase 45~53 갱신: 2026-05-26 / Phase 46~59 완료: 2026-05-26 / 코드 리뷰 7항목 수정: 2026-05-26 / 문서 정리: 2026-05-29)
+엔진 버전: **v1.0.0** (태그: v1.0.0, main 브랜치 기준)
+패키지: **skeleton-engine** (라이브러리 크레이트: `engine`)
 작성자: ChunSam
 
 ---
@@ -11,7 +11,7 @@
 
 wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오디오, 파티클, 타일맵, UI, 씬 시스템 등을 갖추고 있다. 별도의 게임 프로젝트(`rust-survivors`)가 이 엔진을 의존성으로 사용한다.
 
-- **저장소**: `https://github.com/ChunSam/rust-2d-engine`
+- **저장소**: `https://github.com/ChunSam/skeleton-engine`
 - **로컬 경로**: `/Users/jkl/Projects/skeleton-engine`
 - **브랜치**: `main`
 - **엔진 소스 규모**: 약 5,400 LOC (src/ 전체)
@@ -67,12 +67,12 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | Phase 38a | 씬 그래프 패널 — Inspector "Scene" 탭 TreeView, Tag 이름 편집, 계층 시각화 | — |
 | Phase 38d | Rhai 스크립팅 API 확장 — spawn_entity, despawn_entity, bb_set/get_*, seek/flee/stop_steering | — |
 | Phase 39b | Inspector 컴포넌트 추가/제거 UI — 팩토리 패턴, register_component, ComboBox, ✕ 버튼 | — |
-| Phase 39d | REFERENCE.md v0.38.0 — Steering/Blackboard/Commands/SceneGraph/Rhai 섹션 추가 | — |
+| Phase 39d | REFERENCE.html v0.38.0 — Steering/Blackboard/Commands/SceneGraph/Rhai 섹션 추가 | — |
 | Phase 40c | Gizmo Grid Snap — snap_enabled/snap_size, snap_to_grid 헬퍼, Inspector 체크박스+DragValue | — |
-| Phase 40d | REFERENCE.md v0.39.0 — 컴포넌트 추가/제거 UI, register_component API 문서화 | — |
+| Phase 40d | REFERENCE.html v0.39.0 — 컴포넌트 추가/제거 UI, register_component API 문서화 | — |
 | Phase 41b | ECS 변경 감지 — query_added<T>/query_changed<T>, clear_change_tracking, HashSet 기반 | `5cf3233` |
 | Phase 41a | 2D 라이팅 — PointLight 컴포넌트, AmbientLight 리소스, LightingRenderer (WGSL, 최대 16 라이트) | `2230e31` |
-| Phase 41d | REFERENCE.md v0.41.0 — 2D 라이팅/ECS 변경 감지 섹션 추가 | — |
+| Phase 41d | REFERENCE.html v0.41.0 — 2D 라이팅/ECS 변경 감지 섹션 추가 | — |
 | Phase 42a | 2D 노멀 맵 라이팅 — Sprite.normal_texture, PointLight.light_height, 노멀 버퍼, Lambert diffuse WGSL | `bdcd5c8` |
 | Phase 42b | 카메라 이펙트 — shake(strength,duration), follow_entity/lerp_factor, zoom_to(target,speed) | `b83ff6b` |
 | Phase 42d | 오브젝트 풀 — Pool::new/acquire/release/clear, Pooled 마커 컴포넌트 | `b83ff6b` |
@@ -100,7 +100,21 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 | 코드 리뷰 | 런타임·구조 리스크 7항목 수정 — Timeline NaN, TextureError fallback, World 오염, OffscreenCamera layer_mask, ScriptingSystem register_fn 1회화, Network backpressure, egui unsafe 문서화 | `4084cee` |
 
 > Phase 46~59 모두 완료. 코드 리뷰 7항목 수정 + wss:// TLS read timeout 실제 수정 완료.
-> 검증: `cargo test` lib 196 tests + doctest 31 통과 / `cargo clippy --all-targets -- -D warnings` 통과 / `cargo build --release` 통과. **skeleton-engine v1.0.0 릴리즈 준비 완료.**
+> 최근 검증: `cargo fmt --check` 통과 / `cargo test` unit 207 + doctest 31 통과 / `cargo clippy --all-targets --locked -- -D warnings` 통과 / `cargo package --locked --allow-dirty --list` 통과 / `cargo publish --dry-run --locked --allow-dirty` 통과. 현재 변경사항은 커밋 전이므로 패키징 검증에 `--allow-dirty`를 사용했다. **skeleton-engine v1.0.0 릴리즈 준비 완료.**
+
+## post-v1.0 안정성 개선 메모
+
+분석 결과에서 확인된 "의도와 다르게 조용히 동작할 수 있는 위험"을 줄이는 호환성 유지 개선이다. 기본 런타임 동작은 v1.0과 동일하게 유지하고, 엄격한 실패 처리는 opt-in API로 제공한다.
+
+- `ScheduleErrorPolicy` / `SystemPanicPolicy`로 스케줄 순환과 시스템 panic 처리 방식을 opt-in으로 엄격하게 바꿀 수 있다. 기본값은 기존 호환 동작이다.
+- `examples/runtime_policies.rs`는 `PanicOnCycle`, `AbortAfterLog`, 기본 panic 복구 정책의 설정 형태를 짧은 커맨드라인 예제로 보여준다.
+- `World::mark_changed<T>()` / `World::get_mut_tracked<T>()`가 추가되어 직접 필드 수정 후 `query_changed<T>()`에 명시 반영할 수 있다.
+- 네이티브 `AssetServer`는 존재하는 파일 경로를 canonical path로 정규화해 상대/절대 경로 중복 캐시와 핫리로드 매칭 문제를 줄인다. WASM 경로는 URL 의미 보존을 위해 정규화하지 않는다.
+- `PhysicsSystem`은 `pixels_per_unit` 단위 규칙을 문서화하고, 릴리즈 빌드에서 비정상 값을 최소 양수로 방어한다. 디버그 빌드에서는 0 이하 입력을 `debug_assert`로 잡는다.
+- Rhai 스크립팅은 trusted local game code용이며 hostile sandbox가 아니다. `spawn_entity()`의 음수 반환값은 같은 스크립트 안에서 실제 엔티티를 조작하는 안정 핸들이 아니다.
+- `Entity(pub u32)`는 세대 번호가 없어 despawn 후 ID가 재사용될 수 있음을 rustdoc에 명시했다. 구조 변경은 v2 후보로 남긴다.
+- v2 `Entity` 세대 번호 설계는 `docs/ENTITY_GENERATION_V2_PLAN.md`에 확정안으로 정리했다. 핵심 방향은 `Entity { index, generation }`, stale handle no-op, `entity.0` 제거다.
+- 검증: `cargo fmt`, `cargo run --example runtime_policies`, `cargo test --all-targets`(library 218 tests + `mp_server` 3 tests), `cargo clippy --all-targets -- -D warnings` 통과.
 
 ---
 
@@ -170,9 +184,9 @@ src/
 
 ## 이번 세션에서 한 일 (코드 리뷰 7항목 수정 — v1.0.0 품질 강화)
 
-> 다른 작업자가 작성한 ENGINE_REVIEW_FIX_PROMPT.md의 런타임·구조 리스크 7개 항목을 우선순위 순서로 수정.  
+> 당시 ENGINE_REVIEW_FIX_PROMPT.md의 런타임·구조 리스크 7개 항목을 우선순위 순서로 수정.
 > 기존 공개 API 변경 없음.
-> 검증: `cargo test` lib 196 tests + doctest 31 통과 / `cargo clippy --all-targets -- -D warnings` 통과.
+> 당시 검증 기록: `cargo test` lib 196 tests + doctest 31 통과 / `cargo clippy --all-targets -- -D warnings` 통과. 현재 검증 기준은 상단 요약의 207 unit + 31 doctest 결과를 따른다.
 
 ### 1. Timeline NaN 샘플링 panic 제거
 
@@ -275,8 +289,8 @@ src/
 
 ## 이번 세션에서 한 일 (Phase 46~59 — v1.0.0 완성)
 
-> REMAINING_WORK.md Track A 직렬 체인(46→47→51→52→54→56) + Track B(55, 57c) + Solo(57a/b, 59)를 단일 세션에서 완료.
-> 당시 테스트 183개 통과. 현재 v1.0.0 게이트는 `cargo test` lib 196 tests + doctest 31, `cargo doc --no-deps` 경고 0개 기준.
+> 당시 REMAINING_WORK.md Track A 직렬 체인(46→47→51→52→54→56) + Track B(55, 57c) + Solo(57a/b, 59)를 단일 세션에서 완료.
+> 당시 테스트 183개 통과. 현재 v1.0.0 게이트는 `cargo test` unit 207 + doctest 31, `cargo clippy --all-targets --locked -- -D warnings`, `cargo publish --dry-run --locked --allow-dirty` 통과 기준(커밋 전 검증).
 
 ### Phase 46 — 렌더 텍스처 (Offscreen Render Targets)
 
@@ -380,9 +394,9 @@ src/
 
 **변경 파일**: `src/save.rs`, `Cargo.toml`, `src/lib.rs`
 
-- `chacha20poly1305`(XChaCha20-Poly1305 AEAD)로 RON 평문 암호화
+- `chacha20poly1305`(ChaCha20-Poly1305 AEAD)로 RON 직렬화 데이터를 암호화
 - AEAD 인증 태그로 변조 감지 → `SaveError::Corrupted` (체크섬 별도 불필요)
-- 기존 save/load API 시그니처 하위 호환 유지 (내부만 암호화 교체)
+- 기존 save/load API 시그니처 하위 호환 유지 + 앱별 키용 SaveKey/save_with_key/load_with_key 제공
 
 ---
 
@@ -1172,7 +1186,7 @@ if let Some(path) = find_path(&grid, IVec2::new(0, 0), IVec2::new(19, 14)) {
 **브라우저 실행 방법**
 ```bash
 # 의존성: cargo install wasm-pack
-cd /path/to/rust-2d-engine
+cd /path/to/skeleton-engine
 bash examples/wasm/build.sh
 python3 -m http.server 8080 --directory examples/wasm
 # 브라우저에서 http://localhost:8080 열기
@@ -1309,7 +1323,7 @@ world.get_mut::<AtlasSprite>(e).unwrap().index = 6;
 
 **배경**: `AnimationPlayer`는 클립 간 즉시 전환만 지원했다. 크로스페이드와 파라미터 기반 클립 선택을 추가해 부드러운 애니메이션 전환을 가능하게 한다.
 
-**추가된 파일**: `src/animation/blend_tree.rs`, `src/animation/blend_system.rs`  
+**추가된 파일**: `src/animation/blend_tree.rs`, `src/animation/blend_system.rs`
 **변경된 파일**: `src/animation/player.rs`, `src/animation/system.rs`, `src/animation/mod.rs`, `src/lib.rs`
 
 #### 주요 타입
@@ -1386,7 +1400,7 @@ app.add_system(Box::new(StateMachineSystem)); // 상태 머신 (기존)
 
 **배경**: 게임 로직을 Rust 재컴파일 없이 `.rhai` 스크립트로 작성할 수 있게 한다. 각 엔티티에 `ScriptRunner`를 붙이면 매 프레임 `on_update(dt)`가 실행되고, Transform이 자동 동기화된다.
 
-**추가된 파일**: `src/scripting.rs`  
+**추가된 파일**: `src/scripting.rs`
 **변경된 파일**: `Cargo.toml`, `src/asset.rs`, `src/app.rs`, `src/lib.rs`
 
 #### 주요 타입
@@ -1458,7 +1472,7 @@ rhai = { version = "1", features = ["sync"] }
 
 **배경**: 개발 중 엔티티/컴포넌트 상태를 실시간으로 확인할 수 없었다. egui를 통합해 인게임 오버레이 패널을 `System` 안에서 자유롭게 추가할 수 있게 한다.
 
-**추가된 파일**: `src/debug_ui.rs`  
+**추가된 파일**: `src/debug_ui.rs`
 **변경된 파일**: `Cargo.toml`, `src/app.rs`, `src/lib.rs`, `src/ecs/world.rs`, `src/asset.rs`
 
 #### 주요 타입
@@ -1510,7 +1524,7 @@ egui-winit = { version = "0.29", default-features = false }  # clipboard 제외 
 
 **배경**: 텍스처를 문자열 경로 대신 타입 안전한 `Handle<T>`로 참조하고, 런타임 중 파일이 변경되면 자동으로 GPU 텍스처를 재업로드한다.
 
-**추가된 파일**: `src/asset.rs`  
+**추가된 파일**: `src/asset.rs`
 **변경된 파일**: `Cargo.toml`, `src/components.rs`, `src/lib.rs`, `src/app.rs`, `src/renderer/sprite.rs`, `src/particle.rs`
 
 #### 주요 타입
@@ -1570,7 +1584,7 @@ Sprite::with_handle(handle)
 
 **배경**: RON 파일 한 장으로 레벨 전체를 저장·로드하고, 단일 엔티티 템플릿(프리팹)을 재사용할 수 있는 기반을 마련한다.
 
-**추가된 파일**: `src/prefab.rs`  
+**추가된 파일**: `src/prefab.rs`
 **변경된 파일**: `Cargo.toml`, `src/components.rs`, `src/lib.rs`
 
 #### 주요 타입
@@ -1622,8 +1636,8 @@ SceneDef(
 
 #### 설계 결정
 
-- **정적 타입 EntityDef**: Transform + Sprite만 지원. 동적 컴포넌트 레지스트리는 Phase 17 이후 고려.  
-- **save.rs 재사용**: 씬/프리팹 직렬화는 기존 `save()` / `load()` 인프라 위에 구현.  
+- **정적 타입 EntityDef**: Transform + Sprite만 지원. 동적 컴포넌트 레지스트리는 Phase 17 이후 고려.
+- **save.rs 재사용**: 씬/프리팹 직렬화는 기존 `save()` / `load()` 인프라 위에 구현.
 - **Tag 컴포넌트 분리**: 씬 로드 후 "player", "enemy" 등 역할을 쿼리로 구분하기 위한 전용 컴포넌트.
 
 ---
@@ -1634,7 +1648,7 @@ SceneDef(
 
 **배경**: 키보드/마우스만 지원하던 입력 레이어를 완성하고, 슬라이더·체크박스 UI 위젯을 추가해 설정 화면 구성 능력을 갖추는 것이 목표.
 
-**추가된 파일**: `src/input/gamepad.rs`, `src/ui/slider.rs`, `src/ui/checkbox.rs`  
+**추가된 파일**: `src/input/gamepad.rs`, `src/ui/slider.rs`, `src/ui/checkbox.rs`
 **변경된 파일**: `Cargo.toml`, `src/input/mod.rs`, `src/app.rs`, `src/ui/mod.rs`, `src/ui/system.rs`, `src/lib.rs`
 
 #### 게임패드 입력 (gilrs 0.10)
@@ -1690,7 +1704,7 @@ world.insert(e, CheckBox::new("사운드 켜기"));
 
 **배경**: `AnimationPlayer.play(clip_index)` 로만 클립을 전환하면 게임 로직이 직접 애니메이션 인덱스를 관리해야 했다. 캐릭터 상태(idle/run/jump/attack)가 많아질수록 조건 분기가 급증하므로, 상태 머신으로 전환 규칙을 선언적으로 분리할 필요가 있었다.
 
-**추가된 파일**: `src/animation/state_machine.rs`  
+**추가된 파일**: `src/animation/state_machine.rs`
 **변경된 파일**: `src/animation/mod.rs`, `src/animation/player.rs`, `src/lib.rs`
 
 #### 신규 타입
@@ -1755,7 +1769,7 @@ app.add_system(Box::new(StateMachineSystem));  // 전환 조건 평가 → play(
 
 **배경**: 시야 판정·마우스 픽킹·총기 탄착 계산 등을 위한 레이캐스트가 없었고, 경사면·계단 처리를 포함하는 게임 특화 캐릭터 이동 기능이 필요했다.
 
-**추가된 파일**: `src/physics/character.rs`  
+**추가된 파일**: `src/physics/character.rs`
 **변경된 파일**: `src/physics/world.rs`, `src/physics/mod.rs`, `src/lib.rs`
 
 #### 레이캐스트 (`PhysicsWorld`)
@@ -1863,7 +1877,7 @@ world.get_mut::<Transform>(weapon).unwrap().position = Vec2::new(30.0, 0.0);
 // → weapon의 GlobalTransform.position = player.position + (30, 0) rotated by player.rotation
 ```
 
-**검증**: `cargo build` + `cargo test` (rust-2d-engine, rust-survivors 96개 테스트 전부 통과)
+**당시 검증 기록**: `cargo build` + `cargo test` (skeleton-engine, rust-survivors 96개 테스트 통과)
 
 ---
 
@@ -2075,7 +2089,7 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 
 ---
 
-## 미해결 / 다음 Phase 후보
+## 완료된 Phase 후보 기록
 
 | Phase | 기능 | 난이도 | 비고 |
 |-------|------|--------|------|
@@ -2108,9 +2122,9 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 38a~~ | ~~씬 그래프 패널 — 에디터 TreeView + Tag 이름 편집~~ | — | 완료 |
 | ~~Phase 38d~~ | ~~Rhai 스크립팅 API 확장 — spawn/despawn/Blackboard/Steering~~ | — | 완료 |
 | ~~Phase 39b~~ | ~~Inspector 컴포넌트 추가/제거 UI — 팩토리 패턴 + ComboBox + ✕ 버튼~~ | — | 완료 |
-| ~~Phase 39d~~ | ~~REFERENCE.md v0.38.0 — Steering/Blackboard/Commands/SceneGraph/Rhai 문서화~~ | — | 완료 |
+| ~~Phase 39d~~ | ~~REFERENCE.html v0.38.0 — Steering/Blackboard/Commands/SceneGraph/Rhai 문서화~~ | — | 완료 |
 | ~~Phase 40c~~ | ~~Gizmo Grid Snap — 체크박스 + 격자 크기 DragValue + snap_to_grid 헬퍼~~ | — | 완료 |
-| ~~Phase 40d~~ | ~~REFERENCE.md v0.39.0 — 컴포넌트 추가/제거 UI, register_component 문서화~~ | — | 완료 |
+| ~~Phase 40d~~ | ~~REFERENCE.html v0.39.0 — 컴포넌트 추가/제거 UI, register_component 문서화~~ | — | 완료 |
 | ~~코드 리뷰 7항목~~ | ~~Timeline NaN / TextureError / remove_resource / layer_mask / register_fn 1회화 / network backpressure / egui unsafe 문서화~~ | — | 완료 (`4084cee`) |
 
 > **현재 상태**: 미해결 항목 없음. v1.0.0 릴리즈 준비 완료.

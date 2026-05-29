@@ -56,6 +56,32 @@ type OffscreenRenderInfo = (
     u32, // layer_mask
 );
 
+/// 시스템 순서 제약이 순환될 때의 처리 정책.
+///
+/// 기본값은 기존 동작과 같은 [`ScheduleErrorPolicy::LogAndFallback`]이다.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ScheduleErrorPolicy {
+    /// 에러를 로그에 남기고 시스템 삽입 순서로 실행한다.
+    #[default]
+    LogAndFallback,
+    /// 에러를 로그에 남기고 해당 프레임의 사용자 시스템 실행을 건너뛴다.
+    DisableRunOnCycle,
+    /// 순환 의존성을 panic으로 처리한다. 테스트/개발 환경에서 빠른 실패가 필요할 때 쓴다.
+    PanicOnCycle,
+}
+
+/// 시스템 실행 중 panic이 발생했을 때의 처리 정책.
+///
+/// 기본값은 기존 동작과 같은 [`SystemPanicPolicy::DisableSystemAndContinue`]이다.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SystemPanicPolicy {
+    /// panic을 기록하고 해당 시스템을 이후 프레임에서 비활성화한 뒤 계속 실행한다.
+    #[default]
+    DisableSystemAndContinue,
+    /// panic을 기록한 뒤 다시 panic시켜 호출자가 실패를 즉시 볼 수 있게 한다.
+    AbortAfterLog,
+}
+
 // ─── 에디터 Undo/Redo ────────────────────────────────────────────────────────
 
 /// Inspector에서 실행 취소 가능한 작업 목록.
@@ -183,19 +209,27 @@ fn format_panic_payload(payload: &Box<dyn std::any::Any + Send>) -> String {
 /// 표준 디버그 빌드(`panic = "unwind"`)에서만 동작한다.
 #[cfg(not(target_arch = "wasm32"))]
 fn write_crash_log(system_name: &str, message: &str) {
-    use std::io::Write;
-    let path = "crash.log";
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let content = format!("[{timestamp}] 시스템 패닉: {system_name}\n오류: {message}\n\n");
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
+    #[cfg(test)]
     {
-        let _ = file.write_all(content.as_bytes());
+        let _ = (system_name, message);
+    }
+
+    #[cfg(not(test))]
+    {
+        use std::io::Write;
+        let path = "crash.log";
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let content = format!("[{timestamp}] 시스템 패닉: {system_name}\n오류: {message}\n\n");
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = file.write_all(content.as_bytes());
+        }
     }
 }
 
@@ -246,6 +280,10 @@ pub struct App {
     disabled_sets: std::collections::HashSet<crate::ecs::schedule::SystemLabel>,
     /// 패닉으로 비활성화된 시스템 인덱스 집합. 해당 시스템은 이후 프레임에서 건너뛴다.
     panicked_systems: std::collections::HashSet<usize>,
+    /// 스케줄 순환 의존성 처리 정책.
+    schedule_error_policy: ScheduleErrorPolicy,
+    /// 시스템 panic 처리 정책.
+    system_panic_policy: SystemPanicPolicy,
     /// (씬, 해당 씬이 등록한 시스템 수). Push/Pop 시 시스템 복원에 사용.
     scene_stack: Vec<(Box<dyn Scene>, usize)>,
     window: Option<Arc<Window>>,
@@ -376,6 +414,8 @@ impl App {
             schedule_dirty: true,
             disabled_sets: std::collections::HashSet::new(),
             panicked_systems: std::collections::HashSet::new(),
+            schedule_error_policy: ScheduleErrorPolicy::default(),
+            system_panic_policy: SystemPanicPolicy::default(),
             scene_stack: Vec::new(),
             window: None,
             gpu: None,
@@ -427,6 +467,8 @@ impl App {
             schedule_dirty: true,
             disabled_sets: std::collections::HashSet::new(),
             panicked_systems: std::collections::HashSet::new(),
+            schedule_error_policy: ScheduleErrorPolicy::default(),
+            system_panic_policy: SystemPanicPolicy::default(),
             scene_stack: Vec::new(),
             window: None,
             gpu: None,
@@ -529,6 +571,25 @@ impl App {
         } else {
             self.disabled_sets.insert(set);
         }
+    }
+
+    /// 시스템 순서 제약이 순환될 때의 처리 정책을 설정한다.
+    ///
+    /// 기본값은 [`ScheduleErrorPolicy::LogAndFallback`]으로, 기존 버전과 같이 로그를 남기고
+    /// 삽입 순서로 폴백한다. 테스트/개발 중 잘못된 의존성을 즉시 발견하려면
+    /// [`ScheduleErrorPolicy::PanicOnCycle`]을 사용한다.
+    pub fn set_schedule_error_policy(&mut self, policy: ScheduleErrorPolicy) {
+        self.schedule_error_policy = policy;
+        self.schedule_dirty = true;
+    }
+
+    /// 시스템 panic 처리 정책을 설정한다.
+    ///
+    /// 기본값은 [`SystemPanicPolicy::DisableSystemAndContinue`]으로, panic이 발생한 시스템을
+    /// 비활성화하고 다음 프레임부터 건너뛴다. `panic = "abort"` 빌드에서는 Rust panic unwind가
+    /// 일어나지 않으므로 이 정책이 적용되기 전에 프로세스가 종료된다.
+    pub fn set_system_panic_policy(&mut self, policy: SystemPanicPolicy) {
+        self.system_panic_policy = policy;
     }
 
     /// 오프스크린 렌더 타겟을 등록한다.
@@ -897,10 +958,23 @@ impl App {
             match crate::ecs::schedule::compute_order(&self.system_meta) {
                 Ok(order) => self.exec_order = order,
                 Err(crate::ecs::schedule::ScheduleError::Cycle(remaining)) => {
-                    log::error!(
-                        "시스템 순서 순환 의존성 감지 — 삽입 순서로 폴백 (영향 인덱스: {remaining:?})"
-                    );
-                    self.exec_order = (0..self.systems.len()).collect();
+                    match self.schedule_error_policy {
+                        ScheduleErrorPolicy::LogAndFallback => {
+                            log::error!(
+                                "시스템 순서 순환 의존성 감지 — 삽입 순서로 폴백 (영향 인덱스: {remaining:?})"
+                            );
+                            self.exec_order = (0..self.systems.len()).collect();
+                        }
+                        ScheduleErrorPolicy::DisableRunOnCycle => {
+                            log::error!(
+                                "시스템 순서 순환 의존성 감지 — 사용자 시스템 실행 건너뜀 (영향 인덱스: {remaining:?})"
+                            );
+                            self.exec_order.clear();
+                        }
+                        ScheduleErrorPolicy::PanicOnCycle => {
+                            panic!("시스템 순서 순환 의존성 감지 (영향 인덱스: {remaining:?})");
+                        }
+                    }
                 }
             }
             self.schedule_dirty = false;
@@ -940,15 +1014,20 @@ impl App {
                     Err(panic) => {
                         let msg = format_panic_payload(&panic);
                         log::error!("시스템 패닉 [{name}]: {msg}");
-                        self.panicked_systems.insert(i);
-                        if let Some(ps) = self
-                            .world
-                            .resource_mut::<crate::resources::PanickedSystems>()
-                        {
-                            ps.disabled.push(name.to_string());
-                        }
                         #[cfg(not(target_arch = "wasm32"))]
                         write_crash_log(name, &msg);
+                        match self.system_panic_policy {
+                            SystemPanicPolicy::DisableSystemAndContinue => {
+                                self.panicked_systems.insert(i);
+                                if let Some(ps) = self
+                                    .world
+                                    .resource_mut::<crate::resources::PanickedSystems>()
+                                {
+                                    ps.disabled.push(name.to_string());
+                                }
+                            }
+                            SystemPanicPolicy::AbortAfterLog => std::panic::resume_unwind(panic),
+                        }
                     }
                 }
             }
@@ -2489,9 +2568,15 @@ impl App {
                 &paint_jobs,
                 &screen_desc,
             );
-            // Renderer::render<'rp>(&'rp self, &mut RenderPass<'rp>) 의 lifetime 제약 때문에
-            // 독립 함수에서 &er 와 &mut egui_enc 를 동일 lifetime 'a 로 묶는다.
-            egui_render_pass(&er, &mut egui_enc, &paint_jobs, &screen_desc, &final_view);
+            if paint_jobs_contain_callbacks(&paint_jobs) {
+                log::warn!(
+                    "egui paint callbacks are unsupported and were skipped to preserve render-pass lifetime safety"
+                );
+            } else {
+                // Renderer::render<'rp>(&'rp self, &mut RenderPass<'rp>) 의 lifetime 제약 때문에
+                // 독립 함수에서 &er 와 &mut egui_enc 를 동일 lifetime 'a 로 묶는다.
+                egui_render_pass(&er, &mut egui_enc, &paint_jobs, &screen_desc, &final_view);
+            }
             gpu.queue.submit(std::iter::once(egui_enc.finish()));
             for id in &textures_delta.free {
                 er.free_texture(id);
@@ -2892,8 +2977,8 @@ impl App {
 ///    raw pointer cast 로 `'static` 을 부여하지만 실제로는 호출자 스택 프레임보다
 ///    수명이 짧지 않으므로 dangling 이 발생하지 않는다.
 /// 2. `rpass` (→ `rpass_s`) 는 이 함수 본문 밖으로 이탈하지 않는다.
-///    `er_s.render()` 내부에서도 `PaintCallback` 을 등록하지 않으므로 `rpass_s`
-///    가 클로저나 힙에 캡처되지 않는다.
+///    호출 전 `paint_jobs_contain_callbacks()`로 `PaintCallback` 을 거부하므로
+///    `rpass_s` 가 클로저나 힙에 캡처되지 않는다.
 /// 3. `rpass_s` 가 drop 된 이후에 `enc` 를 사용하므로 CommandEncoder 이중 borrow
 ///    가 발생하지 않는다 (NLL 이 정확히 처리).
 ///
@@ -2901,6 +2986,12 @@ impl App {
 /// - [ ] `egui_wgpu::Renderer::render()` 시그니처가 `RenderPass<'_>` (generic lifetime) 로
 ///   변경되었는가?  변경되면 두 transmute 를 모두 제거하고 직접 전달하면 된다.
 /// - [ ] `PaintCallback` API 가 `'rp` lifetime 을 수용하는가?
+fn paint_jobs_contain_callbacks(paint_jobs: &[egui::ClippedPrimitive]) -> bool {
+    paint_jobs
+        .iter()
+        .any(|job| matches!(job.primitive, egui::epaint::Primitive::Callback(_)))
+}
+
 fn egui_render_pass(
     er: &egui_wgpu::Renderer,
     enc: &mut wgpu::CommandEncoder,
@@ -2927,5 +3018,111 @@ fn egui_render_pass(
         let er_s: &'static egui_wgpu::Renderer = &*(er as *const _);
         let mut rpass_s: wgpu::RenderPass<'static> = std::mem::transmute(rpass);
         er_s.render(&mut rpass_s, paint_jobs, screen_desc);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ecs::schedule::SystemConfig;
+
+    #[derive(Default)]
+    struct Counter(u32);
+
+    struct CountSystem;
+    impl System for CountSystem {
+        fn run(&mut self, world: &mut World, _dt: f32) {
+            world.resource_mut::<Counter>().unwrap().0 += 1;
+        }
+        fn name(&self) -> &'static str {
+            "count"
+        }
+    }
+
+    struct PanicSystem;
+    impl System for PanicSystem {
+        fn run(&mut self, _world: &mut World, _dt: f32) {
+            panic!("intentional test panic");
+        }
+        fn name(&self) -> &'static str {
+            "panic"
+        }
+    }
+
+    fn app_with_counter() -> App {
+        let mut app = App::new();
+        app.world.insert_resource(Counter::default());
+        app
+    }
+
+    #[test]
+    fn schedule_cycle_default_falls_back_to_insertion_order() {
+        let mut app = app_with_counter();
+        app.add_system_labeled(CountSystem, SystemConfig::new().label("a").after("b"));
+        app.add_system_labeled(CountSystem, SystemConfig::new().label("b").after("a"));
+
+        app.update(1.0 / 60.0);
+
+        assert_eq!(app.world.resource::<Counter>().unwrap().0, 2);
+    }
+
+    #[test]
+    fn schedule_cycle_can_skip_user_systems() {
+        let mut app = app_with_counter();
+        app.set_schedule_error_policy(ScheduleErrorPolicy::DisableRunOnCycle);
+        app.add_system_labeled(CountSystem, SystemConfig::new().label("a").after("b"));
+        app.add_system_labeled(CountSystem, SystemConfig::new().label("b").after("a"));
+
+        app.update(1.0 / 60.0);
+
+        assert_eq!(app.world.resource::<Counter>().unwrap().0, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "시스템 순서 순환 의존성 감지")]
+    fn schedule_cycle_can_panic() {
+        let mut app = app_with_counter();
+        app.set_schedule_error_policy(ScheduleErrorPolicy::PanicOnCycle);
+        app.add_system_labeled(CountSystem, SystemConfig::new().label("a").after("b"));
+        app.add_system_labeled(CountSystem, SystemConfig::new().label("b").after("a"));
+
+        app.update(1.0 / 60.0);
+    }
+
+    #[test]
+    fn default_panic_policy_disables_panicked_system_and_continues() {
+        let mut app = app_with_counter();
+        app.add_system(PanicSystem);
+        app.add_system(CountSystem);
+
+        app.update(1.0 / 60.0);
+        app.update(1.0 / 60.0);
+
+        assert_eq!(app.world.resource::<Counter>().unwrap().0, 2);
+        assert_eq!(app.panicked_systems.len(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "intentional test panic")]
+    fn abort_after_log_panic_policy_rethrows() {
+        let mut app = app_with_counter();
+        app.set_system_panic_policy(SystemPanicPolicy::AbortAfterLog);
+        app.add_system(PanicSystem);
+
+        app.update(1.0 / 60.0);
+    }
+
+    #[test]
+    fn egui_callback_jobs_are_detected_before_unsafe_render_pass() {
+        let callback = egui::ClippedPrimitive {
+            clip_rect: egui::Rect::EVERYTHING,
+            primitive: egui::epaint::Primitive::Callback(egui::epaint::PaintCallback {
+                rect: egui::Rect::EVERYTHING,
+                callback: std::sync::Arc::new(()),
+            }),
+        };
+
+        assert!(paint_jobs_contain_callbacks(&[callback]));
+        assert!(!paint_jobs_contain_callbacks(&[]));
     }
 }

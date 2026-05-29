@@ -27,7 +27,10 @@ pub mod reflect;
 pub mod renderer;
 pub mod resources;
 pub mod save;
-pub use save::{delete, exists, load, load_or_default, save, save_path, SaveError};
+pub use save::{
+    delete, exists, load, load_or_default, load_with_key, save, save_path, save_with_key,
+    SaveError, SaveKey,
+};
 pub mod scene;
 pub mod scripting;
 pub mod steering;
@@ -47,8 +50,10 @@ pub use animation::{
     AnimationSystem, BlendEntry, BlendTree1D, BlendTreeSystem, BlendWeight, StateMachineSystem,
     TransitionCond, UvRect,
 };
-pub use app::App;
-pub use asset::{AssetLoadState, AssetServer, Handle, ImageAsset, ImageEntry, ScriptAsset};
+pub use app::{App, ScheduleErrorPolicy, SystemPanicPolicy};
+pub use asset::{
+    AssetId, AssetLoadState, AssetServer, Handle, ImageAsset, ImageEntry, ScriptAsset,
+};
 pub use atlas::{AtlasSprite, TextureAtlas};
 #[cfg(not(target_arch = "wasm32"))]
 pub use audio::{AudioEffect, AudioManager};
@@ -176,7 +181,7 @@ pub fn run_demo() {
 
             if let Some(tq) = world.resource_mut::<TextQueue>() {
                 tq.push(DrawText::new(
-                    "rust-2d-engine  —  WASM demo  (wgpu + WebGL2)",
+                    "skeleton-engine  —  WASM demo  (wgpu + WebGL2)",
                     Vec2::new(20.0, 20.0),
                     22.0,
                     [255, 255, 255, 220],
@@ -193,7 +198,7 @@ pub fn run_demo() {
 
     let mut app = App::new();
     app.world.insert_resource(WindowConfig {
-        title: "rust-2d-engine WASM demo".to_string(),
+        title: "skeleton-engine WASM demo".to_string(),
         width: 1280,
         height: 720,
         clear_color: [0.05, 0.05, 0.10, 1.0],

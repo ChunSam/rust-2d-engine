@@ -31,6 +31,9 @@ impl DebugUi {
     }
 
     /// egui 드로 컨텍스트를 반환한다. `begin_frame`/`end_frame` 사이에만 사용해야 한다.
+    ///
+    /// Custom paint callbacks are currently unsupported by the engine renderer and are skipped
+    /// at render time to preserve the internal render-pass lifetime safety boundary.
     pub fn ctx(&self) -> &egui::Context {
         &self.ctx
     }

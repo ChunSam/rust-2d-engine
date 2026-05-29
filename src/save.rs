@@ -70,7 +70,7 @@ pub fn save_path(app_name: &str, file: &str) -> PathBuf {
     PathBuf::from(format!("{}/{}", app_name, file))
 }
 
-/// 디렉토리를 만들고 데이터를 RON 파일로 직렬화해 저장한다.
+/// 디렉토리를 만들고 데이터를 RON으로 직렬화한 뒤 AEAD 암호화해 저장한다.
 ///
 /// Uses [`SaveKey::DEFAULT`] for backwards compatibility. Prefer [`save_with_key`]
 /// when the application can provide its own stable key material.
@@ -90,7 +90,7 @@ pub fn save_with_key<T: Serialize>(path: &Path, data: &T, key: SaveKey) -> Resul
     Ok(())
 }
 
-/// RON 파일을 읽어 역직렬화한다. 파일 없으면 Err(SaveError::Io(NotFound)).
+/// 저장 파일을 복호화한 뒤 RON으로 역직렬화한다. 파일 없으면 Err(SaveError::Io(NotFound)).
 ///
 /// Uses [`SaveKey::DEFAULT`] for backwards compatibility. Prefer [`load_with_key`]
 /// when loading saves written with [`save_with_key`].
@@ -106,7 +106,7 @@ pub fn load_with_key<T: DeserializeOwned>(path: &Path, key: SaveKey) -> Result<T
     ron::from_str(s).map_err(|e| SaveError::Ron(e.to_string()))
 }
 
-/// 파일이 있으면 로드, 없으면 `T::default()` 반환. 파싱 에러는 그대로 전파.
+/// 파일이 있으면 복호화해 로드, 없으면 `T::default()` 반환. 복호화/파싱 에러는 그대로 전파.
 pub fn load_or_default<T: DeserializeOwned + Default>(path: &Path) -> Result<T, SaveError> {
     match load(path) {
         Ok(v) => Ok(v),
