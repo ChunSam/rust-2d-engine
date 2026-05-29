@@ -53,7 +53,7 @@ rhai        = { version = "1", features = ["sync"] }
 # ── 네이티브 전용 (OS API 의존) ──────────────────────────────────────────────
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rapier2d    = { version = "0.22", features = ["default"] }
-rodio       = { version = "0.19", default-features = false, features = ["wav", "vorbis"] }
+rodio       = { version = "0.19", default-features = false, features = ["wav", "vorbis", "mp3"] }
 dirs        = "5"
 gilrs       = "0.10"
 notify      = "6"

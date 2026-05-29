@@ -57,7 +57,7 @@ pub use asset::{
 };
 pub use atlas::{AtlasSprite, TextureAtlas};
 #[cfg(not(target_arch = "wasm32"))]
-pub use audio::{AudioEffect, AudioManager};
+pub use audio::{AudioChannelState, AudioEffect, AudioManager};
 pub use behavior::{Blackboard, BlackboardValue};
 pub use camera::Camera;
 pub use collision::{

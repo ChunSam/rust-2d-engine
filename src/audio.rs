@@ -101,6 +101,42 @@ impl Default for AudioEffect {
     }
 }
 
+/// Public playback state for an [`AudioManager`] channel.
+///
+/// Natural completion of a non-looping sound leaves the channel in
+/// [`Finished`](Self::Finished) until another sound is played on that channel or
+/// [`AudioManager::stop`] removes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioChannelState {
+    /// No sink exists for this channel. The channel was never played, failed to
+    /// play, or was explicitly stopped.
+    Missing,
+    /// A sink exists and still has audio queued.
+    Playing,
+    /// A sink exists, but its queue has drained.
+    Finished,
+}
+
+fn playback_state_from_sink(sink: Option<&Sink>) -> AudioChannelState {
+    match sink {
+        Some(sink) if sink.empty() => AudioChannelState::Finished,
+        Some(_) => AudioChannelState::Playing,
+        None => AudioChannelState::Missing,
+    }
+}
+
+fn is_finished_state(state: AudioChannelState) -> Option<bool> {
+    match state {
+        AudioChannelState::Missing => None,
+        AudioChannelState::Playing => Some(false),
+        AudioChannelState::Finished => Some(true),
+    }
+}
+
+fn is_playing_state(state: AudioChannelState) -> bool {
+    state == AudioChannelState::Playing
+}
+
 // ─── 페이드 상태 ──────────────────────────────────────────────────────────────
 
 struct Fade {
@@ -201,6 +237,28 @@ impl AudioManager {
         if let Some(sink) = self.sinks.remove(channel) {
             sink.stop();
         }
+    }
+
+    /// Returns the playback state for a channel.
+    ///
+    /// A missing channel reports [`AudioChannelState::Missing`]. A non-looping
+    /// sound that naturally reaches the end remains queryable as
+    /// [`AudioChannelState::Finished`] until the channel is stopped or reused.
+    pub fn playback_state(&self, channel: &str) -> AudioChannelState {
+        playback_state_from_sink(self.sinks.get(channel))
+    }
+
+    /// Returns whether a channel has finished playback.
+    ///
+    /// `None` means the channel has no sink. `Some(false)` means it still has
+    /// audio queued. `Some(true)` means it exists and has drained.
+    pub fn is_finished(&self, channel: &str) -> Option<bool> {
+        is_finished_state(self.playback_state(channel))
+    }
+
+    /// Returns true when a channel exists and still has queued audio.
+    pub fn is_playing(&self, channel: &str) -> bool {
+        is_playing_state(self.playback_state(channel))
     }
 
     /// 채널 재생을 `duration_secs` 초에 걸쳐 페이드아웃 후 정지한다.
@@ -593,6 +651,52 @@ impl AudioManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_sink_maps_to_missing_state() {
+        assert_eq!(playback_state_from_sink(None), AudioChannelState::Missing);
+        assert_eq!(is_finished_state(AudioChannelState::Missing), None);
+        assert!(!is_playing_state(AudioChannelState::Missing));
+    }
+
+    #[test]
+    fn playback_state_helpers_map_finished_and_playing() {
+        assert_eq!(is_finished_state(AudioChannelState::Playing), Some(false));
+        assert_eq!(is_finished_state(AudioChannelState::Finished), Some(true));
+        assert!(is_playing_state(AudioChannelState::Playing));
+        assert!(!is_playing_state(AudioChannelState::Finished));
+    }
+
+    #[test]
+    fn play_tone_reports_playing_then_finished_when_audio_device_exists() {
+        let Some(mut audio) = AudioManager::new() else {
+            return;
+        };
+
+        assert_eq!(audio.playback_state("test"), AudioChannelState::Missing);
+        assert_eq!(audio.is_finished("test"), None);
+        assert!(!audio.is_playing("test"));
+
+        audio.play_tone("test", 440.0, 0.02, 0.01);
+        assert_eq!(audio.playback_state("test"), AudioChannelState::Playing);
+        assert_eq!(audio.is_finished("test"), Some(false));
+        assert!(audio.is_playing("test"));
+
+        let start = std::time::Instant::now();
+        while audio.playback_state("test") != AudioChannelState::Finished
+            && start.elapsed() < Duration::from_secs(2)
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert_eq!(audio.playback_state("test"), AudioChannelState::Finished);
+        assert_eq!(audio.is_finished("test"), Some(true));
+        assert!(!audio.is_playing("test"));
+
+        audio.stop("test");
+        assert_eq!(audio.playback_state("test"), AudioChannelState::Missing);
+        assert_eq!(audio.is_finished("test"), None);
+    }
 
     #[test]
     fn spatial_params_center_is_full_volume() {

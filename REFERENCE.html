@@ -731,8 +731,8 @@ app.add_system(CollisionDebugSystem);</code></pre>
 <h3 id="재생">재생</h3>
 <pre><code class="language-rust">fn run(&amp;mut self, world: &amp;mut World, _dt: f32) {
     if let Some(audio) = world.resource_mut::&lt;AudioManager&gt;() {
-        // 파일 재생 (WAV 권장)
-        audio.play(&quot;bgm&quot;, &quot;assets/bgm.wav&quot;, true);   // repeat=true → 무한 반복
+        // 파일 재생 (MP3 / OGG / WAV)
+        audio.play(&quot;bgm&quot;, &quot;assets/bgm.mp3&quot;, true);   // repeat=true → 무한 반복
         audio.play(&quot;sfx_jump&quot;, &quot;assets/jump.wav&quot;, false);
 
         // 정지
@@ -749,6 +749,21 @@ app.add_system(CollisionDebugSystem);</code></pre>
     }
 }</code></pre>
 <ul><li>같은 채널에 <code>play</code>를 다시 호출하면 이전 소리를 <strong>즉시 중단</strong>하고 새 소리를 재생한다.</li><li><code>set_pan</code>은 <strong>다음 <code>play()</code> 호출부터</strong> 적용된다.</li></ul>
+<h3 id="채널-재생-상태">채널 재생 상태</h3>
+<p><code>AudioManager::playback_state</code>로 채널이 없는지, 재생 중인지, 자연 종료됐는지 구분할 수 있다. <code>stop(channel)</code>은 채널을 제거하므로 <code>Missing</code>이 되고, 반복하지 않는 사운드가 끝까지 재생되면 <code>Finished</code>로 남는다.</p>
+<pre><code class="language-rust">use engine::AudioChannelState;
+
+if let Some(audio) = world.resource_mut::&lt;AudioManager&gt;() {
+    match audio.playback_state(&quot;bgm&quot;) {
+        AudioChannelState::Missing =&gt; audio.play(&quot;bgm&quot;, &quot;assets/track1.mp3&quot;, false),
+        AudioChannelState::Playing =&gt; {}
+        AudioChannelState::Finished =&gt; audio.play(&quot;bgm&quot;, &quot;assets/track2.mp3&quot;, false),
+    }
+
+    if audio.is_finished(&quot;bgm&quot;) == Some(true) {
+        audio.play(&quot;bgm&quot;, &quot;assets/next_track.mp3&quot;, false);
+    }
+}</code></pre>
 <hr>
 <h2 id="파티클">파티클</h2>
 <p><code>ParticleEmitter</code> 컴포넌트를 엔티티에 붙이고 <code>ParticleSystem</code>을 등록한다.</p>

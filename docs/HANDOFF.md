@@ -1960,7 +1960,23 @@ am.fade_volume("sfx", 0.3, 1.5);                  // 1.5초 동안 0.3으로
 world.resource_mut::<AudioManager>().map(|am| am.update(dt));
 ```
 
-**Tests**: 4 spatial-audio parameter computations (`spatial_params_*`)
+#### Channel playback state
+```rust
+match am.playback_state("bgm") {
+    AudioChannelState::Missing => { /* never played, failed, or stopped */ }
+    AudioChannelState::Playing => { /* still queued */ }
+    AudioChannelState::Finished => { /* non-looping sink drained naturally */ }
+}
+
+if am.is_finished("bgm") == Some(true) {
+    am.play("bgm", "next_track.mp3", false);
+}
+```
+- `stop(channel)` removes the sink, so the state becomes `Missing`.
+- Natural completion keeps the sink queryable as `Finished` until the channel is stopped or reused.
+- Native builds enable MP3, OGG/Vorbis, and WAV decoding through `rodio`.
+
+**Tests**: spatial-audio parameter computations, audio-effect defaults, playback-state helper mapping, and guarded live `play_tone` drain behavior when an audio device exists.
 
 ---
 
