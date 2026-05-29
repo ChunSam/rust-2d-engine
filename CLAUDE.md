@@ -6,6 +6,22 @@
 
 ---
 
+## Project direction (read `docs/VISION.md`)
+
+This engine is a **skeleton**: a hackable, MIT-licensed, genre-agnostic 2D engine meant
+to be forked and extended. Priorities — (1) open-source skeleton others can fork,
+(2) personal foundation for 2D games, (3) learning vehicle.
+
+When doing feature work, follow the core loop from `docs/VISION.md`:
+
+- **A new feature is not done until a small, playable example game in `examples/`
+  exercises it in real play.** The example is the acceptance test.
+- **If the API feels awkward while writing that example, fix the API before release.**
+- Keep new code fork-friendly: clear module boundaries and extension points. Breadth
+  first, but not by leaving an unreadable mess.
+
+---
+
 ## 모듈 맵
 
 무엇을 찾으려면 어디를 읽어야 하는가:

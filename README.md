@@ -4,6 +4,23 @@
 
 The package name is `skeleton-engine`; the library crate name is intentionally `engine`, so examples use `use engine::*`.
 
+## Why skeleton-engine
+
+The name is the thesis: a **skeleton** — a clean, MIT-licensed 2D engine meant to be
+forked and fleshed out. It favors being hackable and readable over being a sealed black
+box, so you can take the source, modify engine code directly, and grow it into your own
+engine.
+
+Goals, in priority order:
+
+1. **An open-source skeleton others can fork and extend.**
+2. **A personal foundation for building 2D games.**
+3. **A learning vehicle for how a 2D engine works from the ground up.**
+
+Scope is **genre-agnostic 2D**: platformers, shooters, RPGs, puzzles, top-down action.
+New features are validated through small, playable example games rather than in
+isolation. See [`docs/VISION.md`](docs/VISION.md) for the full rationale.
+
 ## Requirements
 
 - Rust 1.88 or newer

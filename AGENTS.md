@@ -3,6 +3,14 @@
 > 버전 v1.0.0 | 패키지 `skeleton-engine` | 라이브러리 크레이트 `engine`
 > wgpu 기반 Rust 2D 게임 엔진 | 상세 API: `REFERENCE.html` | 구조도: `ARCHITECTURE.html` | 개발 이력: `docs/HANDOFF.md`
 
+## Project direction (read `docs/VISION.md`)
+
+A **skeleton**: a hackable, MIT-licensed, genre-agnostic 2D engine meant to be forked
+and extended. Core feature-work loop: **a new feature is not done until a small,
+playable example game in `examples/` exercises it in real play**; if the API feels
+awkward while writing that example, fix the API before release. Keep new code
+fork-friendly (clear module boundaries, extension points). See `docs/VISION.md`.
+
 ## 모듈 맵
 
 | 찾는 것 | 파일 |
