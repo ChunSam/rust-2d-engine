@@ -58,6 +58,9 @@ screen, networking); it has **no actual playable game**. Closing that gap is the
 - **Post-v1.0.0 honors semver.** Breaking changes wait for v2.0.0 (see
   `docs/ENTITY_GENERATION_V2_PLAN.md`).
 
+Concrete next-work candidates and how the previously "planned" items map to this vision
+live in `docs/NEXT_WORK.md`.
+
 ## Non-goals (for now)
 
 - 3D, or competing with Unity/Unreal/Godot on feature surface.
