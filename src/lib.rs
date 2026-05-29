@@ -33,6 +33,7 @@ pub use save::{
 };
 pub mod scene;
 pub mod scripting;
+pub mod skeletal;
 pub mod steering;
 pub mod tilemap;
 pub mod timeline;
@@ -84,6 +85,10 @@ pub use pool::{Pool, Pooled};
 pub use prefab::{
     break_prefab_instance, spawn_entity_def, spawn_scene_def, topological_sort_entities, EntityDef,
     Prefab, PrefabInstance, SceneDef, Tag, SCENE_DEF_VERSION,
+};
+pub use skeletal::{
+    BoneKeyframe, BoneTrack, SkeletalAnimationSystem, SkeletalAnimator, SkeletalClip,
+    SkeletonBuilder,
 };
 // par_query_for_each / par_query_map / par_query2_for_each / par_query2_map 은
 // World 메서드이므로 World re-export를 통해 자동 접근 가능 (별도 re-export 불필요)

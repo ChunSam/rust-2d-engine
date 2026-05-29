@@ -38,6 +38,7 @@ fork-friendly (clear module boundaries, extension points). See `docs/VISION.md`.
 | `AnimationPlayer`, `AnimationClip`, `AnimationSystem`, `BlendWeight` | `src/animation/player.rs`, `src/animation/system.rs` |
 | `AnimationStateMachine`, `StateMachineSystem`, `TransitionCond`, `AnimParam` | `src/animation/state_machine.rs` |
 | `BlendTree1D`, `BlendEntry`, `BlendTreeSystem` | `src/animation/blend_tree.rs`, `src/animation/blend_system.rs` |
+| `SkeletalAnimator`, `SkeletalClip`, `BoneTrack`, `SkeletonBuilder`, `SkeletalAnimationSystem` (2D 컷아웃) | `src/skeletal.rs` (상세: `docs/SKELETAL.md`) |
 | UI: `UiNode`, `Button`, `Label`, `TextInput`, `ScrollView`, `Panel`, `LayoutSystem`, `UiEvent` | `src/ui/` |
 | `Slider`, `CheckBox` | `src/ui/slider.rs`, `src/ui/checkbox.rs` |
 | `Tag`, `EntityDef`, `SceneDef`, `Prefab`, prefab spawn 함수 | `src/prefab.rs` |

@@ -1,7 +1,13 @@
 # Entity Generation v2 Plan
 
+> **Status: Cancelled / archived (2026-05-29).** Removed from the planned/scheduled work
+> during the vision reset (`docs/VISION.md`): it is a v2-only breaking change, not breadth
+> and not example-validated, so it does not match the current direction. The design below
+> is preserved for reference in case generation-checked handles are revisited for a future
+> v2.0.0.
+
 작성일: 2026-05-29
-상태: v2 후보 설계 확정안
+상태: Cancelled / archived (원래: v2 후보 설계 확정안)
 
 ## 요약
 

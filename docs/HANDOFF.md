@@ -2128,8 +2128,10 @@ Rust borrow checker 제약상 쿼리 중 `get_mut`을 바로 섞을 수 없다. 
 | ~~Phase 40d~~ | ~~REFERENCE.html v0.39.0 — 컴포넌트 추가/제거 UI, register_component 문서화~~ | — | 완료 |
 | ~~코드 리뷰 7항목~~ | ~~Timeline NaN / TextureError / remove_resource / layer_mask / register_fn 1회화 / network backpressure / egui unsafe 문서화~~ | — | 완료 (`4084cee`) |
 | ~~WASM 빌드 회귀 + unsafe 정리~~ | ~~network.rs `push_event_bounded` import 누락으로 wasm32 빌드 깨짐 복구 + BehaviorTree 불필요한 `unsafe impl Send/Sync` 제거~~ | — | 완료 (`af6fc59`) |
+| ~~비전 재설정~~ | ~~`docs/VISION.md` 신설(포크 가능한 범용 2D skeleton, 폭 우선 + 예제 검증 루프), `docs/NEXT_WORK.md` 후보 목록~~ | — | 완료 |
+| ~~2D 스켈레탈 애니메이션~~ | ~~컷아웃 모델: `src/skeletal.rs` + `SkeletonBuilder` + `examples/skeletal_puppet.rs`. HierarchySystem 임의 깊이 전파로 개선~~ | — | 완료 |
 
-> **현재 상태**: 미해결 항목 없음. v1.0.0 릴리즈 준비 완료. native·wasm32 빌드, 256 테스트, clippy 경고 0 확인.
+> **현재 상태**: post-v1.0 폭 확장 단계 진입. 비전(`docs/VISION.md`) = 포크 가능한 범용 2D skeleton, 기능은 작은 플레이 예제로 검증. 다음 후보는 `docs/NEXT_WORK.md`. native·wasm32 빌드, 264 테스트, clippy 경고 0 확인.
 
 ---
 

@@ -84,44 +84,41 @@ pub fn detach(world: &mut World, child: Entity) {
 ///
 /// `App`이 자동으로 유저 시스템 직후에 실행하므로 별도로 등록할 필요 없다.
 ///
-/// # 깊이 제한
-/// 내부적으로 2회 패스를 실행해 최대 깊이 3(루트→자식→손자)을 지원한다.
+/// # 깊이
+/// 위상 정렬(루트→자식 순)로 단일 패스 전파하므로 **임의 깊이**의 계층을 지원한다.
+/// (스켈레탈 애니메이션처럼 hip→torso→upper_arm→forearm→hand 같은 깊은 본 체인도 동작.)
 pub struct HierarchySystem;
 
 impl System for HierarchySystem {
     fn run(&mut self, world: &mut World, _dt: f32) {
-        // 1단계: 루트 엔티티(Parent 없음) → GlobalTransform = local Transform
-        let roots: Vec<(Entity, GlobalTransform)> = world
-            .query_opt2::<Transform, Parent>()
-            .filter_map(|(e, t, p_opt)| {
-                if p_opt.is_none() {
-                    Some((e, GlobalTransform::from_transform(t)))
-                } else {
-                    None
+        // Transform을 가진 모든 엔티티를 루트→자식 순으로 위상 정렬한다.
+        // 부모가 항상 자식보다 먼저 처리되므로 한 번의 패스로 임의 깊이를 전파할 수 있다.
+        let all: Vec<Entity> = world.query::<Transform>().map(|(e, _)| e).collect();
+        let ordered = crate::prefab::topological_sort_entities(&all, world);
+
+        for entity in ordered {
+            let gt = match world.get::<Parent>(entity).map(|p| p.0) {
+                // 부모가 있으면 부모의 GlobalTransform(이미 계산됨)과 합성
+                Some(parent) => {
+                    match (
+                        world.get::<GlobalTransform>(parent).copied(),
+                        world.get::<Transform>(entity),
+                    ) {
+                        (Some(pgt), Some(lt)) => compose(&pgt, lt),
+                        // 부모에 Transform/GlobalTransform이 없으면 로컬을 그대로 사용
+                        _ => match world.get::<Transform>(entity) {
+                            Some(lt) => GlobalTransform::from_transform(lt),
+                            None => continue,
+                        },
+                    }
                 }
-            })
-            .collect();
-        for (e, gt) in roots {
-            world.add_component(e, gt);
-        }
-
-        // 2단계: 자식 엔티티 → 부모 GlobalTransform과 합성 (2회 반복으로 깊이 3 지원)
-        for _ in 0..2 {
-            let children: Vec<(Entity, Entity)> =
-                world.query::<Parent>().map(|(e, p)| (e, p.0)).collect();
-
-            let updates: Vec<(Entity, GlobalTransform)> = children
-                .into_iter()
-                .filter_map(|(child, parent)| {
-                    let pgt = world.get::<GlobalTransform>(parent).copied()?;
-                    let lt = world.get::<Transform>(child)?;
-                    Some((child, compose(&pgt, lt)))
-                })
-                .collect();
-
-            for (e, gt) in updates {
-                world.add_component(e, gt);
-            }
+                // 루트: 로컬 Transform 복사
+                None => match world.get::<Transform>(entity) {
+                    Some(lt) => GlobalTransform::from_transform(lt),
+                    None => continue,
+                },
+            };
+            world.add_component(entity, gt);
         }
     }
 }
@@ -135,5 +132,73 @@ fn compose(parent: &GlobalTransform, local: &Transform) -> GlobalTransform {
         scale: Vec2::new(scale.x, scale.y),
         rotation: rot_quat.to_euler(EulerRot::ZYX).0,
         z: parent.z + local.z,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ecs::World;
+
+    fn pos(world: &World, e: Entity) -> Vec2 {
+        world.get::<GlobalTransform>(e).unwrap().position
+    }
+
+    #[test]
+    fn propagates_arbitrary_depth_chain() {
+        // hip→torso→upper_arm→forearm→hand : 깊이 5 (기존 2패스로는 불가능했던 깊이)
+        let mut world = World::new();
+        let names = ["hip", "torso", "upper_arm", "forearm", "hand"];
+        let mut prev: Option<Entity> = None;
+        let mut bones = Vec::new();
+        for _ in names {
+            let e = world.spawn();
+            // 각 본은 부모 기준 +10 만큼 오른쪽으로, 회전/스케일 없음
+            world.add_component(
+                e,
+                Transform {
+                    position: Vec2::new(10.0, 0.0),
+                    scale: Vec2::ONE,
+                    rotation: 0.0,
+                    z: 0.0,
+                },
+            );
+            if let Some(p) = prev {
+                attach(&mut world, e, p);
+            }
+            prev = Some(e);
+            bones.push(e);
+        }
+
+        HierarchySystem.run(&mut world, 0.0);
+
+        // 누적 위치: 본 i는 (i+1)*10
+        for (i, &e) in bones.iter().enumerate() {
+            assert!(
+                (pos(&world, e).x - (i as f32 + 1.0) * 10.0).abs() < 1e-3,
+                "bone {i} expected x={}, got {}",
+                (i as f32 + 1.0) * 10.0,
+                pos(&world, e).x
+            );
+        }
+    }
+
+    #[test]
+    fn root_without_parent_copies_local() {
+        let mut world = World::new();
+        let e = world.spawn();
+        world.add_component(
+            e,
+            Transform {
+                position: Vec2::new(5.0, 7.0),
+                scale: Vec2::ONE,
+                rotation: 0.0,
+                z: 2.0,
+            },
+        );
+        HierarchySystem.run(&mut world, 0.0);
+        let gt = world.get::<GlobalTransform>(e).unwrap();
+        assert_eq!(gt.position, Vec2::new(5.0, 7.0));
+        assert_eq!(gt.z, 2.0);
     }
 }

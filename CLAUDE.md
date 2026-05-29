@@ -51,6 +51,7 @@ When doing feature work, follow the core loop from `docs/VISION.md`:
 | AnimationPlayer, AnimationClip, AnimationSystem, BlendWeight | `src/animation/player.rs`, `src/animation/system.rs` |
 | AnimationStateMachine, StateMachineSystem, TransitionCond, AnimParam | `src/animation/state_machine.rs` |
 | BlendTree1D, BlendEntry, BlendTreeSystem (1D 파라미터 기반 자동 전환 + 크로스페이드) | `src/animation/blend_tree.rs`, `src/animation/blend_system.rs` |
+| SkeletalAnimator, SkeletalClip, BoneTrack, BoneKeyframe, SkeletalAnimationSystem, SkeletonBuilder (2D 컷아웃 스켈레탈 애니메이션) | `src/skeletal.rs` (상세: `docs/SKELETAL.md`) |
 | UI (UiNode, Button, Label, TextInput, ScrollView, Panel, LayoutSystem, UiEvent) | `src/ui/` |
 | Slider (수평 슬라이더), CheckBox (토글 체크박스) | `src/ui/slider.rs`, `src/ui/checkbox.rs` |
 | Tag, EntityDef, SceneDef, Prefab, spawn_entity_def, spawn_scene_def | `src/prefab.rs` |

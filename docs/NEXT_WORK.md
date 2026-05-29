@@ -25,7 +25,7 @@ the API gaps it is likely to surface.
 | **C** | Puzzle (match-grid / Sokoban) | grid logic, `Tween`/`Easing`, `save`/`load`, UI | grid movement, undo, progress-save API friction |
 | **D** | Simple shooter (bullets, waves) | `ParticleEmitter`, `Timer`, collision layers, audio buses | pooling/spawn bursts, perf; complements rust-survivors |
 | **E** | Scene-flow game (menu → play → result) | `SceneCmd` Push/Replace/Pop, UI buttons, `GameState` | resource cleanup across scene transitions |
-| **F** | Skeletal-animation showcase character | NEW: 2D skeletal animation (see below) | rig/bone API design, blends with existing `AnimationStateMachine` |
+| **F** | Skeletal-animation showcase character ✅ done | NEW: 2D cutout skeletal animation (`src/skeletal.rs`, `examples/skeletal_puppet.rs`) | surfaced + fixed `HierarchySystem` depth-3 cap; scale-vs-attachment-size rule noted in `docs/SKELETAL.md` |
 
 ## Recommended order
 
@@ -44,11 +44,11 @@ Vision criteria: (1) fork-friendly skeleton, (2) genre-agnostic 2D, breadth-firs
 
 | Planned item | Nature | Alignment | Verdict |
 |--------------|--------|-----------|---------|
-| **Entity Generation v2** (`docs/ENTITY_GENERATION_V2_PLAN.md`) | correctness/safety, breaking | Fits the fork-friendly/learning goal, but it is neither breadth nor example-validated; it is a v2-only breaking change | **Deferred** — aligned in spirit, not the current priority. Bundle into v2. |
-| **Dependency security follow-up** (glyphon→lru `RUSTSEC-2026-0002`, `paste` unmaintained) | maintenance/hygiene | Needed for a trustworthy forkable engine, but it is a renderer/wgpu-major migration: high-risk, non-breadth, non-example | **Trigger-based maintenance** — handle when it blocks or during a deliberate renderer upgrade. |
-| **2D skeletal animation** | new feature | Directly fits genre-agnostic 2D breadth and is naturally validated by a playable example | **Aligned** — adopted as candidate **F** above. |
+| **Entity Generation v2** (`docs/ENTITY_GENERATION_V2_PLAN.md`) | correctness/safety, breaking | Fits the fork-friendly/learning goal, but it is neither breadth nor example-validated; it is a v2-only breaking change | **Cancelled (archived)** — removed from planned work; design preserved in the archived doc for a possible future v2.0.0. |
+| **Dependency security follow-up** (glyphon→lru `RUSTSEC-2026-0002`, `paste` unmaintained) | maintenance/hygiene | Needed for a trustworthy forkable engine, but it is a renderer/wgpu-major migration: high-risk, non-breadth, non-example | **Cancelled (archived)** — removed from planned work; recorded as accepted/known risk in `docs/SECURITY_HARDENING_2026_05.md`. |
+| **2D skeletal animation** | new feature | Directly fits genre-agnostic 2D breadth and is naturally validated by a playable example | **Done** — implemented as candidate **F** (`src/skeletal.rs`, `examples/skeletal_puppet.rs`). |
 
-**Takeaway:** of the three pre-existing planned items, only skeletal animation matches the
-current breadth-first + dogfooding priority. The other two serve the long-term
-"trustworthy, forkable skeleton" value but are not next: keep v2 bundled for v2.0.0, and
-keep the dependency security work as trigger-based maintenance.
+**Takeaway:** of the three pre-existing planned items, only skeletal animation matched the
+current breadth-first + dogfooding priority and is now done. The other two were cancelled
+from planned work and archived: Entity Generation v2's design is preserved for a possible
+v2.0.0, and the dependency advisories are recorded as accepted/known risk.

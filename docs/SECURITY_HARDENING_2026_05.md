@@ -20,7 +20,13 @@ This note records the security and memory-safety hardening work from the May 202
 - `cargo tree -i rustls-webpki` confirms `rustls-webpki v0.103.13`.
 - OSV batch query no longer reports the previous `rustls-webpki` advisories.
 
-## Remaining Risk
+## Remaining Risk — accepted / not scheduled
+
+> Status (2026-05-29): the dependency security follow-up was **removed from planned work**
+> during the vision reset (`docs/VISION.md`). These advisories are **acknowledged and
+> accepted as known risk**, not actively scheduled. They are recorded here (not deleted)
+> because the underlying advisories still exist; revisit if one becomes exploitable in
+> practice or during a deliberate renderer/`wgpu` upgrade.
 
 - `glyphon 0.6.0` still depends on `lru 0.12.5`, which is affected by `RUSTSEC-2026-0002`.
 - `lru >= 0.16.3` cannot be resolved under the current `glyphon 0.6` requirement.
