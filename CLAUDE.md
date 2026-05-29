@@ -65,130 +65,16 @@ Where to read to find a given thing:
 
 ---
 
-## Core architecture patterns
+## Core patterns & task recipes
 
-### ECS query API
+Detailed in **`docs/PATTERNS.md`**:
 
-```rust
-// Single component
-for (entity, comp) in world.query::<MyComp>() { ... }
-
-// Multiple components (query2 / query3 / query4)
-for (e, a, b) in world.query2::<A, B>() { ... }
-
-// A required, B optional
-for (e, a, b_opt) in world.query_opt2::<A, B>() { ... }
-
-// System signature
-impl System for MySystem {
-    fn run(&mut self, world: &mut World, dt: f32) { ... }
-}
-```
-
-### Borrow checker workaround pattern (required)
-
-You cannot call `get_mut` on the same World while a query iterator is alive. Standard pattern:
-
-```rust
-// First collect the entity list, then iterate and get_mut
-let entities: Vec<Entity> = world.query::<Foo>().map(|(e, _)| e).collect();
-for entity in entities {
-    world.get_mut::<Foo>(entity).unwrap().update();
-}
-```
-
-### Render layer separation
-
-- `AnimationSystem` → syncs the `UvRect` component → the renderer reads only `UvRect`  
-  (the renderer referencing `AnimationPlayer` directly is a layer violation)
-- `DebugDrawQueue` = pure data (`DebugRect`) → converted to `DrawRect` in the `App` render stage
-- Render order: Systems → Events flush → Input flush → Scene command handling → Render (sprites → UI → text)
-
-### UI system registration order
-
-When using `Panel`, register `LayoutSystem` **before** `UiSystem`:
-
-```rust
-app.add_system(Box::new(LayoutSystem));  // recomputes child UiNode.offset
-app.add_system(Box::new(UiSystem));      // reads positions and renders
-```
-
-`UiEvent` implements `Clone` but not `Copy` (TextChanged/TextSubmitted carry a String).  
-`InputState::text_chars()` — this frame's char slice. `'\x08'`=Backspace, `'\n'`=Enter.
-
-### Animation state machine registration order
-
-Register `StateMachineSystem` **after** `AnimationSystem` so `is_finished()` is reflected in the same frame:
-
-```rust
-app.add_system(Box::new(AnimationSystem));     // frame advance + UvRect sync
-app.add_system(Box::new(StateMachineSystem));  // evaluate transition conditions → call play()
-```
-
-Manipulate parameters inside a system via `world.get_mut::<AnimationStateMachine>(entity)`:
-
-```rust
-sm.set_bool("is_running", true);   // for BoolEq conditions
-sm.set_float("speed", 3.5);        // for FloatGt / FloatLt conditions
-sm.fire_trigger("jump");           // for Trigger conditions (auto-consumed each frame)
-```
-
-`TransitionCond::AnimationEnd` becomes true when a non-looping clip reaches its last frame.
-
-### PhysicsWorld encapsulation
-
-Internal rapier2d fields are `pub(crate)`. Do not access them directly from outside. Available accessors:
-
-```
-rigid_body() / rigid_body_mut()
-get_collider() / get_collider_mut()
-add_dynamic_circle() / add_dynamic_box() / add_static_box()
-remove_body()
-```
-
----
-
-## Common task patterns
-
-### Add a new component
-
-1. Define the struct in `src/components.rs` or the relevant module file
-2. Add a re-export in `src/lib.rs`
-
-### Add a new system
-
-1. Implement the `System` trait
-2. Register with `app.add_system(Box::new(MySystem))` or in `Scene::on_enter`
-
-### Add a new resource
-
-1. Define the struct in `src/resources.rs`
-2. Register with `app.world.insert_resource(MyResource { ... })`
-3. Add a re-export in `src/lib.rs` if needed
-
-### Add a new event
-
-```rust
-// 1. Define the type (needs Clone + 'static)
-#[derive(Clone)]
-struct MyEvent { pub data: f32 }
-
-// 2. Register during App setup
-app.register_event::<MyEvent>();
-
-// 3. Use inside a system
-world.resource_mut::<Events<MyEvent>>().unwrap().send(MyEvent { data: 1.0 });
-for ev in world.resource::<Events<MyEvent>>().unwrap().read() { ... }
-```
-
-### Scene transitions
-
-```rust
-world.resource_mut::<SceneChange>().unwrap().0 =
-    Some(SceneCmd::Replace(Box::new(MyScene)));
-// SceneCmd::Push(Box::new(MyScene)) — push onto the stack
-// SceneCmd::Pop                      — return to the previous scene
-```
+- **Architecture patterns** — ECS query API (`query2`/`query_opt2`), borrow-checker
+  workaround (collect entities then `get_mut`), render-layer separation
+  (`AnimationSystem` → `UvRect` → renderer), UI system order (`LayoutSystem` before
+  `UiSystem`), animation state-machine order (`StateMachineSystem` after
+  `AnimationSystem`), `PhysicsWorld` encapsulation accessors.
+- **Task recipes** — adding a component / system / resource / event, and scene transitions.
 
 ---
 
@@ -229,8 +115,10 @@ A subagent starts without knowing the current conversation context. Always inclu
 - **Exceptions kept in Korean**: the beginner glossary (`docs/ENGINE_TERMS_FOR_BEGINNERS.md`)
   and personal/gitignored one-off prompt or plan docs.
 - New `docs/HANDOFF.md` entries are written in English.
-- Prefer concision over completeness; keep `CLAUDE.md` / `AGENTS.md` ≤200 lines (spin a
-  new `docs/SUBSYSTEM.md` out and leave only a one-line reference here).
+- **Length**: keep `CLAUDE.md` / `AGENTS.md` ≤200 lines. Prefer concision, but **do not
+  drop needed content to hit the limit** — when trimming would risk losing information,
+  move the detail into a new `docs/*.md` (e.g. `docs/PATTERNS.md`, `docs/SUBSYSTEM.md`)
+  and leave a one-line reference here.
 
 ---
 
@@ -250,9 +138,11 @@ On breaking changes to the engine's public API, check the impact on the game sid
 
 | Document | Purpose |
 |------|------|
-| `CLAUDE.md` (this file) | Agent quick reference — module map, core patterns, task checklists |
+| `CLAUDE.md` (this file) | Agent quick reference — module map, task checklists |
+| `docs/PATTERNS.md` | Core architecture patterns + task recipes (extracted from this file) |
 | `REFERENCE.html` | Full public API + code examples (detailed) |
 | `docs/HANDOFF.md` | Per-phase dev history, background on architecture decisions |
 
-> **Growth strategy**: when a new subsystem appears, write a separate `docs/SUBSYSTEM.md`
-> and add only a one-line reference to the module map here, keeping this file under 200 lines.
+> **Growth strategy**: when content would push this file past 200 lines, move detail into
+> a `docs/*.md` (a new subsystem doc, or `docs/PATTERNS.md`) and leave only a one-line
+> reference here. Never drop needed content just to stay under the limit.

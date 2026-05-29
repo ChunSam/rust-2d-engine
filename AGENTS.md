@@ -50,123 +50,23 @@ fork-friendly (clear module boundaries, extension points). See `docs/VISION.md`.
 | `PostProcessConfig`, `PostProcessRenderer` | `src/renderer/post_process.rs` |
 | wgpu render pipeline | `src/renderer/` |
 
-## Core architecture patterns
+## Core patterns & task recipes
 
-### ECS query API
+Detailed in **`docs/PATTERNS.md`**:
 
-```rust
-// Single component
-for (entity, comp) in world.query::<MyComp>() { ... }
-
-// Multiple components: query2 / query3 / query4
-for (e, a, b) in world.query2::<A, B>() { ... }
-
-// A required, B optional
-for (e, a, b_opt) in world.query_opt2::<A, B>() { ... }
-
-// System signature
-impl System for MySystem {
-    fn run(&mut self, world: &mut World, dt: f32) { ... }
-}
-```
-
-### Borrow checker workaround pattern
-
-You cannot call `get_mut` on the same `World` while a query iterator is alive. Collect the entity list first, then mutate.
-
-```rust
-let entities: Vec<Entity> = world.query::<Foo>().map(|(e, _)| e).collect();
-for entity in entities {
-    world.get_mut::<Foo>(entity).unwrap().update();
-}
-```
-
-### Render layer separation
-
-- `AnimationSystem` → syncs the `UvRect` component → the renderer reads only `UvRect`
-- The renderer referencing `AnimationPlayer` directly is a layer violation
-- `DebugDrawQueue` holds pure data (`DebugRect`) only, converted to `DrawRect` in the `App` render stage
-- Render order: Systems → Events flush → Input flush → Scene command handling → Render (sprites → UI → text)
-
-### UI system registration order
-
-When using `Panel`, register `LayoutSystem` before `UiSystem`.
-
-```rust
-app.add_system(Box::new(LayoutSystem)); // recomputes child UiNode.offset
-app.add_system(Box::new(UiSystem));     // reads positions and renders
-```
-
-- `UiEvent` implements `Clone` but not `Copy`. `TextChanged`/`TextSubmitted` carry a `String`.
-- `InputState::text_chars()` is this frame's char slice. `'\x08'` = Backspace, `'\n'` = Enter.
-
-### Animation state machine registration order
-
-Register `StateMachineSystem` after `AnimationSystem` so `is_finished()` is reflected in the same frame.
-
-```rust
-app.add_system(Box::new(AnimationSystem));    // frame advance + UvRect sync
-app.add_system(Box::new(StateMachineSystem)); // evaluate transition conditions -> call play()
-```
-
-Access parameters inside a system via `world.get_mut::<AnimationStateMachine>(entity)`.
-
-```rust
-sm.set_bool("is_running", true); // for BoolEq conditions
-sm.set_float("speed", 3.5);      // for FloatGt / FloatLt conditions
-sm.fire_trigger("jump");         // for Trigger conditions, auto-consumed each frame
-```
-
-`TransitionCond::AnimationEnd` is true when a non-looping clip reaches its last frame.
-
-### PhysicsWorld encapsulation
-
-Internal rapier2d fields are `pub(crate)`, so do not access them directly from outside. Available accessors:
-
-```text
-rigid_body() / rigid_body_mut()
-get_collider() / get_collider_mut()
-add_dynamic_circle() / add_dynamic_box() / add_static_box()
-remove_body()
-```
-
-## Common task patterns
-| Task | Steps |
-| --- | --- |
-| New component | Define the struct in `src/components.rs` or the relevant module → re-export in `src/lib.rs` |
-| New system | Implement the `System` trait → register via `app.add_system(Box::new(MySystem))` or in `Scene::on_enter` |
-| New resource | Define the struct in `src/resources.rs` → register via `app.world.insert_resource(MyResource { ... })` → re-export if needed |
-
-### Add a new event
-
-```rust
-// 1. Define the type: needs Clone + 'static
-#[derive(Clone)]
-struct MyEvent { pub data: f32 }
-
-// 2. Register during App setup
-app.register_event::<MyEvent>();
-
-// 3. Use inside a system
-world.resource_mut::<Events<MyEvent>>().unwrap().send(MyEvent { data: 1.0 });
-for ev in world.resource::<Events<MyEvent>>().unwrap().read() { ... }
-```
-
-### Scene transitions
-
-```rust
-world.resource_mut::<SceneChange>().unwrap().0 =
-    Some(SceneCmd::Replace(Box::new(MyScene)));
-
-// SceneCmd::Push(Box::new(MyScene)) - push onto the stack
-// SceneCmd::Pop                     - return to the previous scene
-```
+- **Architecture patterns** — ECS query API (`query2`/`query_opt2`), borrow-checker
+  workaround (collect entities then `get_mut`), render-layer separation
+  (`AnimationSystem` → `UvRect` → renderer), UI system order (`LayoutSystem` before
+  `UiSystem`), animation state-machine order (`StateMachineSystem` after
+  `AnimationSystem`), `PhysicsWorld` encapsulation accessors.
+- **Task recipes** — adding a component / system / resource / event, and scene transitions.
 
 ## Agent working notes
 
 Follow `docs/AGENT_WORKFLOW.md` for detailed operating rules. `AGENTS.md` is a quick
-reference, so keep it **under 200 lines**. If important content would exceed 200 lines,
-create a new `docs/*.md` and leave only a summary and link here.
+reference, so keep it **under 200 lines**. Never drop needed content just to hit the
+limit — when it would overflow, move detail into a `docs/*.md` (e.g. `docs/PATTERNS.md`)
+and leave only a summary and link here.
 
 ### Default flow
 
@@ -190,8 +90,9 @@ Instruction files that agents must auto-detect live at the repo root. General do
 
 | Location | Purpose |
 | --- | --- |
-| `AGENTS.md` | Codex/agent shared quick reference: module map, core patterns, task checklists |
+| `AGENTS.md` | Codex/agent shared quick reference: module map, task checklists |
 | `CLAUDE.md` | Quick reference for Claude-family agents |
+| `docs/PATTERNS.md` | Core architecture patterns + task recipes (extracted from the quick refs) |
 | `README.md`, `REFERENCE.html`, `ARCHITECTURE.html`, `docs/HANDOFF.md` | Intro/usage, public API, engine structure, per-phase dev history |
 | `docs/CHANGELOG.md`, `docs/ROADMAP.md` | Release change log, v1.0 historical roadmap |
 | `docs/AGENT_WORKFLOW.md` | Detailed agent operating rules |
@@ -203,5 +104,6 @@ API names stay as written. Exceptions kept in Korean: the beginner glossary
 (`docs/ENGINE_TERMS_FOR_BEGINNERS.md`) and personal/gitignored one-off prompt or plan
 docs. New `docs/HANDOFF.md` entries are written in English. Prefer concision.
 
-> **Growth strategy**: add new subsystem docs under `docs/` (e.g. `docs/SUBSYSTEM.md`)
-> and add only a one-line reference to the module map here.
+> **Growth strategy**: when content would push `CLAUDE.md`/`AGENTS.md` past 200 lines,
+> move detail into a `docs/*.md` (a new subsystem doc, or `docs/PATTERNS.md`) and leave
+> only a one-line reference here. Never drop needed content just to stay under the limit.
