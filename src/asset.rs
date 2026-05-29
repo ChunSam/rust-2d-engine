@@ -175,7 +175,7 @@ pub struct AssetServer {
     async_rx: std::sync::mpsc::Receiver<AsyncImageResult>,
 }
 
-fn asset_key(path: impl AsRef<Path>) -> Arc<str> {
+pub(crate) fn asset_key(path: impl AsRef<Path>) -> Arc<str> {
     let path = path.as_ref();
     #[cfg(not(target_arch = "wasm32"))]
     {

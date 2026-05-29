@@ -632,7 +632,7 @@ impl App {
     /// AssetServer를 통해 이미지를 로드하고 `Handle<ImageAsset>`을 반환한다.
     ///
     /// - CPU-side 이미지 데이터와 파일 감시를 등록한다.
-    /// - GPU 텍스처 업로드는 `resumed()` 이후 또는 즉시(GPU 준비된 경우) 처리된다.
+    /// - GPU 텍스처 업로드는 `resumed()` 시점에 처리된다.
     /// - 같은 경로를 다시 호출하면 캐시된 핸들이 반환된다.
     pub fn load_image(&mut self, path: impl Into<String>) -> Handle<ImageAsset> {
         let path = path.into();

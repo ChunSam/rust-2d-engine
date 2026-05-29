@@ -122,4 +122,16 @@ mod tests {
 
         assert_eq!(atlas.uv_rect(0), UvRect::FULL);
     }
+
+    #[test]
+    fn atlas_texture_path_uses_image_handle_path() {
+        let handle = handle();
+        let atlas = TextureAtlas {
+            handle: handle.clone(),
+            cols: 4,
+            rows: 2,
+        };
+
+        assert_eq!(atlas.texture_path(), handle.path());
+    }
 }

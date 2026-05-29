@@ -140,6 +140,34 @@ mod tests {
         SpriteRenderEntry::sprite(layer, z, order, texture_key.to_string(), raw())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn file_texture_aliases_include_requested_and_canonical_paths() {
+        let dir = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!("texture-alias-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("image.png");
+        std::fs::write(&path, b"not a png").unwrap();
+
+        let relative = path.strip_prefix(std::env::current_dir().unwrap()).unwrap();
+        let relative = relative.to_string_lossy().to_string();
+        let canonical = path.canonicalize().unwrap().to_string_lossy().to_string();
+        let aliases = file_texture_aliases(&relative);
+
+        assert_eq!(aliases, vec![relative, canonical]);
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn file_texture_aliases_preserve_missing_or_synthetic_keys() {
+        let aliases = file_texture_aliases("__missing_or_synthetic_texture_key__");
+        assert_eq!(aliases, vec!["__missing_or_synthetic_texture_key__"]);
+    }
+
     fn material(layer: i32, z: f32, order: usize, entity_id: u32) -> SpriteRenderEntry {
         SpriteRenderEntry::material(
             layer,
@@ -413,6 +441,18 @@ pub struct SpriteRenderer {
     rt_cache: HashMap<String, Arc<wgpu::BindGroup>>,
 }
 
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.contains(&value) {
+        values.push(value);
+    }
+}
+
+fn file_texture_aliases(path: &str) -> Vec<String> {
+    let mut aliases = vec![path.to_string()];
+    push_unique(&mut aliases, crate::asset::asset_key(path).to_string());
+    aliases
+}
+
 impl SpriteRenderer {
     pub fn texture_layout(&self) -> &wgpu::BindGroupLayout {
         &self.texture_layout
@@ -603,9 +643,27 @@ impl SpriteRenderer {
     ///
     /// 같은 경로를 두 번 호출하면 첫 번째 로드 결과를 그대로 사용한다 (중복 로드 방지).
     pub fn load_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, path: &str) {
-        if !self.texture_cache.contains_key(path) {
-            let tex = Texture::from_path(device, queue, &self.texture_layout, path);
-            self.texture_cache.insert(path.to_string(), Arc::new(tex));
+        let aliases = file_texture_aliases(path);
+        if let Some(existing) = aliases
+            .iter()
+            .find_map(|key| self.texture_cache.get(key).cloned())
+        {
+            for alias in aliases {
+                self.texture_cache
+                    .entry(alias)
+                    .or_insert_with(|| Arc::clone(&existing));
+            }
+            return;
+        }
+
+        let tex = Arc::new(Texture::from_path(
+            device,
+            queue,
+            &self.texture_layout,
+            path,
+        ));
+        for alias in aliases {
+            self.texture_cache.insert(alias, Arc::clone(&tex));
         }
     }
 
@@ -626,9 +684,23 @@ impl SpriteRenderer {
 
     /// 캐시를 무효화하고 파일에서 GPU 텍스처를 강제 재로드한다 (핫 리로딩용).
     pub fn reload_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, path: &str) {
-        self.texture_cache.remove(path);
-        let tex = Texture::from_path(device, queue, &self.texture_layout, path);
-        self.texture_cache.insert(path.to_string(), Arc::new(tex));
+        let reload_key = crate::asset::asset_key(path).to_string();
+        let mut aliases = file_texture_aliases(path);
+        for key in self.texture_cache.keys() {
+            if crate::asset::asset_key(key).as_ref() == reload_key.as_str() {
+                push_unique(&mut aliases, key.clone());
+            }
+        }
+
+        let tex = Arc::new(Texture::from_path(
+            device,
+            queue,
+            &self.texture_layout,
+            path,
+        ));
+        for alias in aliases {
+            self.texture_cache.insert(alias, Arc::clone(&tex));
+        }
         log::info!("텍스처 핫 리로드: {path}");
     }
 

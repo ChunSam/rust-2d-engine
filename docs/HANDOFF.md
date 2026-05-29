@@ -110,11 +110,12 @@ wgpu 기반 Rust 2D 게임 엔진. ECS 아키텍처 위에 물리(Rapier2D), 오
 - `examples/runtime_policies.rs`는 `PanicOnCycle`, `AbortAfterLog`, 기본 panic 복구 정책의 설정 형태를 짧은 커맨드라인 예제로 보여준다.
 - `World::mark_changed<T>()` / `World::get_mut_tracked<T>()`가 추가되어 직접 필드 수정 후 `query_changed<T>()`에 명시 반영할 수 있다.
 - 네이티브 `AssetServer`는 존재하는 파일 경로를 canonical path로 정규화해 상대/절대 경로 중복 캐시와 핫리로드 매칭 문제를 줄인다. WASM 경로는 URL 의미 보존을 위해 정규화하지 않는다.
+- `SpriteRenderer`는 파일 텍스처를 원 요청 경로와 canonical handle 경로 양쪽 키로 캐시한다. 상대 경로로 `App::load_image()` 후 `Sprite::textured_with_handle(...)`, `DrawImage::textured_with_handle(...)`, `AtlasSprite`가 handle 경로를 우선해도 흰색 fallback으로 빠지지 않는다. 게임 측 임시 workaround 제거 안내는 `docs/RUST_SURVIVORS_TEXTURE_CACHE_KEY_PROMPT.md`에 정리했다.
 - `PhysicsSystem`은 `pixels_per_unit` 단위 규칙을 문서화하고, 릴리즈 빌드에서 비정상 값을 최소 양수로 방어한다. 디버그 빌드에서는 0 이하 입력을 `debug_assert`로 잡는다.
 - Rhai 스크립팅은 trusted local game code용이며 hostile sandbox가 아니다. `spawn_entity()`의 음수 반환값은 같은 스크립트 안에서 실제 엔티티를 조작하는 안정 핸들이 아니다.
 - `Entity(pub u32)`는 세대 번호가 없어 despawn 후 ID가 재사용될 수 있음을 rustdoc에 명시했다. 구조 변경은 v2 후보로 남긴다.
 - v2 `Entity` 세대 번호 설계는 `docs/ENTITY_GENERATION_V2_PLAN.md`에 확정안으로 정리했다. 핵심 방향은 `Entity { index, generation }`, stale handle no-op, `entity.0` 제거다.
-- 검증: `cargo fmt`, `cargo run --example runtime_policies`, `cargo test --all-targets`(library 218 tests + `mp_server` 3 tests), `cargo clippy --all-targets -- -D warnings` 통과.
+- 검증: `cargo fmt`, `cargo run --example runtime_policies`, `cargo test --all-targets`(library 218 tests + `mp_server` 3 tests), `cargo clippy --all-targets -- -D warnings` 통과. 텍스처 캐시 키 수정 후 별도 `cargo test`도 unit 225 통과 + doctest 31 통과/19 ignored.
 
 ---
 

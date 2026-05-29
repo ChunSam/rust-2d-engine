@@ -204,9 +204,14 @@ mod tests {
         let handle = server.load_image("handle.png");
         let by_handle = DrawImage::with_handle(0.0, 0.0, 16.0, 16.0, handle.clone());
         assert_eq!(by_handle.uv, UvRect::FULL);
+        assert_eq!(by_handle.texture_key().as_deref(), Some(handle.path()));
 
         let textured_with_handle =
             DrawImage::textured_with_handle(0.0, 0.0, 16.0, 16.0, "fallback.png", Some(handle));
         assert_eq!(textured_with_handle.uv, UvRect::FULL);
+        assert_eq!(
+            textured_with_handle.texture_key().as_deref(),
+            Some("handle.png")
+        );
     }
 }
