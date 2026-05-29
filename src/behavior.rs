@@ -321,10 +321,6 @@ pub struct BehaviorTree {
     root: Box<dyn BehaviorNode>,
 }
 
-// BehaviorNode: Send + Sync 이므로 BehaviorTree도 동일 보장
-unsafe impl Send for BehaviorTree {}
-unsafe impl Sync for BehaviorTree {}
-
 impl BehaviorTree {
     pub fn new(root: Box<dyn BehaviorNode>) -> Self {
         Self { root }

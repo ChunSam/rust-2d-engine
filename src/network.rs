@@ -304,7 +304,7 @@ mod native {
 
 #[cfg(target_arch = "wasm32")]
 mod wasm_impl {
-    use super::{NetworkConfig, NetworkEvent};
+    use super::{push_event_bounded, NetworkConfig, NetworkEvent};
     use std::{cell::RefCell, rc::Rc};
     use wasm_bindgen::prelude::*;
     use wasm_bindgen::JsCast;
