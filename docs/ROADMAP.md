@@ -1,334 +1,334 @@
-# skeleton-engine v1.0 완료 로드맵
+# skeleton-engine v1.0 completion roadmap
 
-> 작성일: 2026-05-25 | 문서 상태: historical roadmap
-> 목표였던 **v1.0.0 공식 릴리즈 준비** 범위와 완료 기준을 보존한 기록 문서다. post-v1.0 신규 계획은 별도 문서에서 다룬다.
-
----
-
-## 당시 원칙
-
-- **세부 계획은 각 Phase 직전에 수립** — 이 문서는 당시 목표·범위·우선순위를 보존
-- **병렬 처리 우선** — 파일 충돌 없는 작업은 항상 동시 진행
-- **완료 기준 명시** — 각 Phase는 정량적 기준을 충족해야 완료로 간주
-- **하위 호환 유지** — v1.0.0 이전까지는 파괴적 변경 허용, 이후 semver 엄수
+> Written: 2026-05-25 | Document status: historical roadmap
+> A record preserving the scope and completion criteria of the once-targeted **v1.0.0 official-release preparation**. Post-v1.0 new plans are covered in separate documents.
 
 ---
 
-## 마일스톤 개요
+## Principles at the time
+
+- **Detailed plans drafted just before each Phase** — this document preserves the goals, scope, and priorities of the time
+- **Parallelism first** — work without file conflicts always proceeds concurrently
+- **Explicit completion criteria** — each Phase counts as done only when it meets quantitative criteria
+- **Backward compatibility** — breaking changes allowed until v1.0.0, strict semver afterward
+
+---
+
+## Milestone overview
 
 ```
-v0.44  ████████████████████████ 완료
+v0.44  ████████████████████████ done
          │
-v0.50  ──┤ Milestone 1 — 게임 제작 가능 완료
-         │  필수 렌더/물리/입력 기능 완비
+v0.50  ──┤ Milestone 1 — game-making capable, done
+         │  essential render/physics/input features complete
          │
-v0.57  ──┤ Milestone 2 — 상용 배포 가능 완료
-         │  품질·안정성·플랫폼·배포 완성
+v0.57  ──┤ Milestone 2 — commercial-shippable, done
+         │  quality, stability, platform, packaging complete
          │
-v1.0.0 █─┤ Milestone 3 — 릴리즈 준비 완료
-            문서·API freeze·생태계
+v1.0.0 █─┤ Milestone 3 — release-ready
+            docs, API freeze, ecosystem
 ```
 
 ---
 
-## Milestone 1 — 게임 제작 가능 (v0.45 ~ v0.50)
+## Milestone 1 — game-making capable (v0.45 ~ v0.50)
 
-> 당시 목표: 장르 제한 없이 완성된 인디 게임을 제작할 수 있는 수준
+> Goal at the time: a level able to make a finished indie game in any genre
 
-### Phase 44 — 물리 확장 + 오디오 이펙트
+### Phase 44 — physics extension + audio effects
 
-**우선순위**: 높음 | **병렬 처리**: 44b + 44c 가능
+**Priority**: high | **Parallel**: 44b + 44c possible
 
-| 서브 | 기능 | 완료 기준 |
+| Sub | Feature | Completion criteria |
 |------|------|-----------|
-| 44b | 물리 조인트 (`DistanceJoint`, `RevoluteJoint`, `PrismaticJoint`) | Rapier2D joint API 래핑, 단위 테스트 |
-| 44c | 오디오 이펙트 (`LowPassFilter`, 피치 시프트, 볼륨 엔벨로프) | 런타임 적용, 파라미터 실시간 변경 |
+| 44b | Physics joints (`DistanceJoint`, `RevoluteJoint`, `PrismaticJoint`) | Wrap the Rapier2D joint API, unit tests |
+| 44c | Audio effects (`LowPassFilter`, pitch shift, volume envelope) | Applied at runtime, parameters changeable in real time |
 
-**당시 배경**: 플랫포머·퍼즐 장르는 조인트 없이 구현 불가. 오디오 이펙트는 게임 피드백 품질 직결.
+**Background**: platformer/puzzle genres are impossible without joints. Audio effects directly affect game-feedback quality.
 
 ---
 
-### Phase 45 — 시스템 실행 순서 명시
+### Phase 45 — explicit system execution order
 
-**우선순위**: 매우 높음 (구조적 기반) | **단독 실행**
+**Priority**: very high (structural foundation) | **Standalone**
 
-| 서브 | 기능 | 완료 기준 |
+| Sub | Feature | Completion criteria |
 |------|------|-----------|
-| 45a | `SystemLabel` + `before/after` 의존성 선언 | DAG 정렬, 순환 감지 에러 |
-| 45b | `SystemSet` (그룹 단위 on/off) | 디버그 모드 시스템 일괄 비활성화 |
+| 45a | `SystemLabel` + `before/after` dependency declarations | DAG ordering, cycle-detection error |
+| 45b | `SystemSet` (group-level on/off) | Bulk-disable debug-mode systems |
 
-**당시 배경**: `add_system` 호출 순서에 의존 — 씬 교체 후 순서 역전 버그 발생 가능. 엔진 성숙도의 핵심 지표.
+**Background**: relied on `add_system` call order — a scene swap could flip ordering and cause bugs. A core indicator of engine maturity.
 
 ---
 
-### Phase 46 — 렌더 텍스처
+### Phase 46 — render textures
 
-**우선순위**: 높음 | **단독 실행**
+**Priority**: high | **Standalone**
 
-| 서브 | 기능 | 완료 기준 |
+| Sub | Feature | Completion criteria |
 |------|------|-----------|
-| 46a | `RenderTarget` 리소스 — 오프스크린 렌더 | 미니맵 예제 동작 |
-| 46b | 렌더 텍스처 → Sprite로 사용 | 분할 화면(split-screen) 예제 |
+| 46a | `RenderTarget` resource — offscreen rendering | Minimap example works |
+| 46b | Render texture → used as a Sprite | Split-screen example |
 
-**당시 배경**: 미니맵, 포탈, UI 카메라, 분할 화면 없으면 전략·액션 장르 제한.
+**Background**: without minimap, portals, UI cameras, and split screen, strategy/action genres are limited.
 
 ---
 
-### Phase 47 — 터치 입력 + 모바일 지원
+### Phase 47 — touch input + mobile support
 
-**우선순위**: 높음 | **병렬 처리**: 47a + 47b 가능
+**Priority**: high | **Parallel**: 47a + 47b possible
 
-| 서브 | 기능 | 완료 기준 |
+| Sub | Feature | Completion criteria |
 |------|------|-----------|
-| 47a | `TouchState` — 멀티터치, 스와이프, 핀치줌 | Android/iOS 시뮬레이터 동작 |
-| 47b | 가상 조이스틱 UI 위젯 | 모바일 게임 데모 동작 |
+| 47a | `TouchState` — multitouch, swipe, pinch-zoom | Works on Android/iOS simulators |
+| 47b | Virtual joystick UI widget | Mobile game demo works |
 
-**당시 배경**: 인디 게임 수익의 상당 부분이 모바일. 터치 없으면 iOS/Android App Store 출시 불가.
+**Background**: a large share of indie-game revenue is mobile. Without touch, you cannot ship to the iOS/Android App Store.
 
 ---
 
-### Phase 48 — 물리 레이어/마스크 + 트리거
+### Phase 48 — physics layers/masks + triggers
 
-**우선순위**: 중간 | **병렬 처리**: 48a + 48b 가능
+**Priority**: medium | **Parallel**: 48a + 48b possible
 
-| 서브 | 기능 | 완료 기준 |
+| Sub | Feature | Completion criteria |
 |------|------|-----------|
-| 48a | `CollisionGroups` (비트마스크) — 선택적 충돌 | 레이어별 충돌 무시 동작 |
-| 48b | 센서(trigger zone) — 충돌 없는 영역 진입 감지 | `TriggerEvent` 발생 확인 |
+| 48a | `CollisionGroups` (bitmask) — selective collision | Per-layer collision-ignore works |
+| 48b | Sensor (trigger zone) — detect entry into a non-colliding area | `TriggerEvent` confirmed to fire |
 
-**당시 배경**: 모든 물체가 서로 충돌 — 복잡한 게임에서 성능·로직 문제 발생.
+**Background**: all objects colliding with each other causes performance/logic problems in complex games.
 
 ---
 
-### Phase 49 — 텍스트 완성
+### Phase 49 — text completion
 
-**우선순위**: 중간 | **병렬 처리**: 49a + 49b + 49c 가능 (49a/b는 Track B, 49c는 Track A)
+**Priority**: medium | **Parallel**: 49a + 49b + 49c possible (49a/b are Track B, 49c is Track A)
 
-| 서브 | 기능 | 완료 기준 |
+| Sub | Feature | Completion criteria |
 |------|------|-----------|
-| 49a | 멀티라인 텍스트 + 자동 줄바꿈 + 정렬 | 다국어 단락 정상 렌더링 |
-| 49b | 리치 텍스트 (`[color]...[/color]`, 볼드, 이탤릭) | 인게임 다이얼로그 박스 예제 |
-| 49c | IME 조합 입력 (한/일/중) — winit `Ime` 이벤트 처리, 조합 중 미리보기(preedit) 렌더 | 한글 직접 입력으로 닉네임/채팅 입력 동작 |
+| 49a | Multiline text + word wrap + alignment | Multilingual paragraphs render correctly |
+| 49b | Rich text (`[color]...[/color]`, bold, italic) | In-game dialogue-box example |
+| 49c | IME composition input (KR/JP/CN) — handle winit `Ime` events, render preedit preview during composition | Nickname/chat input via direct Hangul entry works |
 
-**당시 배경**: 텍스트가 단일 폰트·크기·색상만 지원 — 다이얼로그·UI 퀄리티 병목. 또한 `TextInput`이 ASCII char 단위만 처리해 아시아권 출시 시 닉네임/채팅 입력 불가 → winit IME 조합 이벤트 필수(49c).
+**Background**: text supported only a single font/size/color — a bottleneck for dialogue/UI quality. Also, `TextInput` handled only ASCII chars, so nickname/chat input was impossible for an Asian release → winit IME composition events are essential (49c).
 
 ---
 
-## Milestone 2 — 상용 배포 가능 (v0.51 ~ v0.57)
+## Milestone 2 — commercial-shippable (v0.51 ~ v0.57)
 
-> 당시 목표: 실제 스토어(Steam/iOS/Android) 배포에 필요한 품질·안정성 달성
+> Goal at the time: reach the quality and stability needed for actual store (Steam/iOS/Android) distribution
 
-### Phase 50 — 로컬라이제이션 (i18n)
+### Phase 50 — localization (i18n)
 
-**우선순위**: 높음 | **단독 실행**
+**Priority**: high | **Standalone**
 
-| 서브 | 기능 | 완료 기준 |
+| Sub | Feature | Completion criteria |
 |------|------|-----------|
-| 50a | `LocaleResource` — `.ftl` 또는 `.json` 번역 파일 로드 | 한/영/일 전환 동작 |
-| 50b | `t!("key")` 매크로 or API + 폰트 per-locale | RTL 언어(아랍어) 기본 지원 |
+| 50a | `LocaleResource` — load `.ftl` or `.json` translation files | KR/EN/JP switching works |
+| 50b | `t!("key")` macro or API + per-locale fonts | Basic RTL-language (Arabic) support |
 
-**당시 배경**: 글로벌 출시 전에 i18n 붙이면 UI 전면 재작성 필요. 초기 설계가 필수.
+**Background**: bolting on i18n before a global launch would require rewriting the whole UI. Designing it early is essential.
 
 ---
 
-### Phase 51 — 에셋 비동기 로딩
+### Phase 51 — async asset loading
 
-**우선순위**: 높음 | **병렬 처리**: 51a + 51b 가능
+**Priority**: high | **Parallel**: 51a + 51b possible
 
-| 서브 | 기능 | 완료 기준 |
+| Sub | Feature | Completion criteria |
 |------|------|-----------|
-| 51a | 비동기 씬 로드 — `LoadingScene` + 진행률 리소스 | 로딩 바 예제 동작 (프리징 없음) |
-| 51b | WASM `fetch` API 연동 — 브라우저에서 에셋 비동기 다운로드 | WASM 빌드에서 외부 에셋 로드 |
+| 51a | Async scene load — `LoadingScene` + progress resource | Loading-bar example works (no freezing) |
+| 51b | WASM `fetch` API integration — async asset download in the browser | Loads external assets in a WASM build |
 
-**당시 배경**: 동기 로딩 → 대용량 씬에서 수 초 프리징. 스토어 리뷰에서 치명적.
+**Background**: synchronous loading → multi-second freezes on large scenes. Fatal in store reviews.
 
 ---
 
-### Phase 52 — 안정성 + 패닉 복구
+### Phase 52 — stability + panic recovery
 
-**우선순위**: 매우 높음 | **병렬 처리**: 52a + 52b 가능
+**Priority**: very high | **Parallel**: 52a + 52b possible
 
-| 서브 | 기능 | 완료 기준 |
+| Sub | Feature | Completion criteria |
 |------|------|-----------|
-| 52a | `std::panic::catch_unwind` 래퍼 — 시스템 패닉 격리 | 시스템 크래시 시 엔진 생존 |
-| 52b | 에러 로그 파일 기록 + 크래시 리포트 형식 | `crash.log` 자동 생성 |
+| 52a | `std::panic::catch_unwind` wrapper — isolate system panics | Engine survives a system crash |
+| 52b | Error-log file writing + crash-report format | `crash.log` generated automatically |
 
-**당시 배경**: 에셋 없음, 잘못된 씬 파일 등 런타임 오류가 즉시 크래시 → 상용 불가.
+**Background**: runtime errors like missing assets or a bad scene file crashed immediately → not commercial-ready.
 
 ---
 
-### Phase 53 — 저장 데이터 보안
+### Phase 53 — save-data security
 
-**우선순위**: 중간 | **병렬 처리**: 53a + 53b 가능
+**Priority**: medium | **Parallel**: 53a + 53b possible
 
-| 서브 | 기능 | 완료 기준 |
+| Sub | Feature | Completion criteria |
 |------|------|-----------|
-| 53a | 저장 파일 암호화 (ChaCha20-Poly1305 AEAD) | 평문 RON 대체, 복호화 로드 |
-| 53b | 체크섬 검증 — 파일 변조 감지 | 변조 시 `SaveError::Corrupted` |
+| 53a | Save-file encryption (ChaCha20-Poly1305 AEAD) | Replaces plaintext RON, loads with decryption |
+| 53b | Checksum verification — detect file tampering | `SaveError::Corrupted` on tampering |
 
-**당시 배경**: 세이브가 평문 RON이면 쉽게 조작될 수 있어, v1.0 준비 과정에서 AEAD 암호화와 변조 감지를 계획했다.
+**Background**: a plaintext RON save can be easily manipulated, so AEAD encryption and tamper detection were planned during v1.0 prep.
 
 ---
 
-### Phase 54 — 에디터 완성
+### Phase 54 — editor completion
 
-**우선순위**: 중간 | **병렬 처리**: 54a + 54b 가능
+**Priority**: medium | **Parallel**: 54a + 54b possible
 
-| 서브 | 기능 | 완료 기준 |
+| Sub | Feature | Completion criteria |
 |------|------|-----------|
-| 54a | 멀티 선택 + 그룹 이동 + Ctrl+C/V | 여러 엔티티 동시 편집 |
-| 54b | 프리팹 시스템 개선 — 인스턴스 오버라이드, 프리팹 브레이크 | 레벨 디자인 워크플로 완성 |
+| 54a | Multi-select + group move + Ctrl+C/V | Edit multiple entities at once |
+| 54b | Prefab system improvements — instance override, prefab break | Complete level-design workflow |
 
 ---
 
-### Phase 55 — 배포 패키징
+### Phase 55 — distribution packaging
 
-**우선순위**: 매우 높음 (출시 전제) | **Track B** (빌드 인프라, app.rs 무관 → 다른 세션 병렬 가능)
+**Priority**: very high (release prerequisite) | **Track B** (build infra, unrelated to app.rs → parallelizable in another session)
 
-| 서브 | 기능 | 완료 기준 |
+| Sub | Feature | Completion criteria |
 |------|------|-----------|
-| 55a | 데스크톱 번들링 — 실행 바이너리 + `assets/` 동봉, 상대경로 에셋 로딩 | Win/Mac/Linux 압축 해제 후 즉시 실행 |
-| 55b | 에셋 패킹(선택) + WASM 배포 번들 — `index.html` + wasm + 에셋 묶음 | itch.io 업로드용 zip, 정적 호스팅 동작 |
+| 55a | Desktop bundling — executable binary + bundled `assets/`, relative-path asset loading | Win/Mac/Linux run immediately after unzip |
+| 55b | Asset packing (optional) + WASM distribution bundle — `index.html` + wasm + assets | itch.io-upload zip, static hosting works |
 
-**당시 배경**: `crate-type = ["cdylib", "rlib"]` + `wasm-pack` 빌드만 존재하던 상태. 네이티브 게임을 itch.io/Steam에 올릴 패키징 경로가 전무 — "상용 배포 가능"(Milestone 2)의 미충족 핵심.
+**Background**: only `crate-type = ["cdylib", "rlib"]` + `wasm-pack` builds existed. There was no packaging path to get a native game onto itch.io/Steam — a core gap for "commercial-shippable" (Milestone 2).
 
 ---
 
-## Milestone 3 — 공식 출시 (v0.58 ~ v1.0.0)
+## Milestone 3 — official release (v0.58 ~ v1.0.0)
 
-> 당시 목표: 외부 개발자가 독립적으로 사용할 수 있는 수준의 문서·안정성·생태계
+> Goal at the time: docs, stability, and ecosystem at a level external developers can use independently
 
-### Phase 56 — 고급 렌더링
+### Phase 56 — advanced rendering
 
-**우선순위**: 낮음 | **병렬 처리**: 56a + 56b 가능
+**Priority**: low | **Parallel**: 56a + 56b possible
 
-| 서브 | 기능 |
+| Sub | Feature |
 |------|------|
-| 56a | GPU 파티클 (컴퓨트 셰이더, 기존 CPU 파티클 보완/대체) |
-| 56b | 색상 그레이딩 (LUT 기반 포스트 프로세싱) |
+| 56a | GPU particles (compute shader, complementing/replacing existing CPU particles) |
+| 56b | Color grading (LUT-based post-processing) |
 
 ---
 
-### Phase 57 — Rustdoc 완성 + CI
+### Phase 57 — rustdoc completion + CI
 
-**우선순위**: 매우 높음 (외부 사용자 진입점) | **57a/b는 단독(Solo), 57c는 Track B**
+**Priority**: very high (entry point for external users) | **57a/b are Solo, 57c is Track B**
 
-| 서브 | 기능 | 완료 기준 |
+| Sub | Feature | Completion criteria |
 |------|------|-----------|
-| 57a | 전체 공개 API rustdoc 작성 | `cargo doc --no-deps` 경고 0개 |
-| 57b | 모듈별 `#[doc = include_str!("...")]` 가이드 | 각 서브시스템 개요 + 예제 포함 |
-| 57c | GitHub Actions CI — `cargo build`/`test`/`fmt --check`/`clippy` 워크플로 | PR마다 자동 통과 게이트 (`.github/workflows/ci.yml`) |
+| 57a | Rustdoc for the whole public API | `cargo doc --no-deps` with 0 warnings |
+| 57b | Per-module `#[doc = include_str!("...")]` guides | Each subsystem includes overview + examples |
+| 57c | GitHub Actions CI — `cargo build`/`test`/`fmt --check`/`clippy` workflow | Auto-pass gate per PR (`.github/workflows/ci.yml`) |
 
 ---
 
-### Phase 58 — 예제 + 샘플 게임
+### Phase 58 — examples + sample game
 
-**우선순위**: 높음 | **병렬 처리**: 58a + 58b 가능 (Track B — examples/만 수정)
+**Priority**: high | **Parallel**: 58a + 58b possible (Track B — edits only examples/)
 
-| 서브 | 기능 | 완료 기준 |
+| Sub | Feature | Completion criteria |
 |------|------|-----------|
-| 58a | `examples/` 10개 — 각 서브시스템별 최소 예제 | `cargo run --example <name>` 전부 동작 |
-| 58b | 샘플 미니게임 1개 (플랫포머 or 탑다운 RPG) | 실제 게임 완성도 수준 |
+| 58a | 10 `examples/` — a minimal example per subsystem | All `cargo run --example <name>` work |
+| 58b | 1 sample minigame (platformer or top-down RPG) | Actual finished-game quality |
 
 ---
 
-### Phase 59 — API Freeze + v1.0.0 출시
+### Phase 59 — API freeze + v1.0.0 release
 
-**우선순위**: 최고 | **단독 진행 (Solo, 최후)**
+**Priority**: top | **Solo (last)**
 
-| 항목 | 내용 |
+| Item | Content |
 |------|------|
-| API 감사 | 공개 API 전체 검토 — 명명 일관성, 불필요 노출 제거 |
-| Semver 선언 | 이후 파괴적 변경은 v2.0.0 — CHANGELOG 형식 도입 |
-| 성능 벤치마크 | 엔티티 10,000개 60fps 기준선 문서화 |
-| 보안 감사 | unsafe 블록 전수 검토, 메모리 안전성 확인 |
-| 릴리즈 게이트 | CI 녹색 + `cargo publish --dry-run` 통과를 전제 조건으로 확인 |
-| 공식 릴리즈 | GitHub Release + crates.io publish 준비 |
+| API audit | Full public-API review — naming consistency, remove unnecessary exposure |
+| Semver declaration | Breaking changes afterward go to v2.0.0 — introduce CHANGELOG format |
+| Performance benchmark | Document the 10,000-entity 60fps baseline |
+| Security audit | Full review of unsafe blocks, confirm memory safety |
+| Release gate | Confirm green CI + `cargo publish --dry-run` passing as preconditions |
+| Official release | Prepare GitHub Release + crates.io publish |
 
 ---
 
-## 우선순위 매트릭스
+## Priority matrix
 
 ```
-                 임팩트 높음          임팩트 낮음
-구현 쉬움    시스템 오더링 (45)    저장 암호화 (53)
-             물리 레이어 (48)      색상 그레이딩 (56b)
-             배포 패키징 (55)
-구현 어려움  렌더 텍스처 (46)      GPU 파티클 (56a)
-             터치 입력 (47)        2D 스켈레탈 애니메이션 (v1.0 이후)
-             로컬라이제이션 (50)
+                 high impact            low impact
+easy to build  system ordering (45)   save encryption (53)
+               physics layers (48)     color grading (56b)
+               distribution pkg (55)
+hard to build  render textures (46)    GPU particles (56a)
+               touch input (47)        2D skeletal animation (post-v1.0)
+               localization (50)
 ```
 
-**당시 권장 시작 순서**: Phase 44 → 45 → 46 (이 세 개가 이후 모든 기능의 기반)
+**Recommended starting order at the time**: Phase 44 → 45 → 46 (these three are the foundation for all later features)
 
 ---
 
-## 동시 진행 가이드 (멀티 세션)
+## Concurrency guide (multi-session)
 
-> 여러 Claude Code 세션에 작업을 분배하기 위한 기준. 핵심 충돌 병목은 **`src/app.rs`(약 2160줄)** — 모든 렌더 패스 체인(1501–1832), 입력 디스패치(window_event 1893–2042), 시스템 업데이트 루프(630–651), 에디터 UI(668–1458)가 한 파일에 모여 있다.
+> Criteria for distributing work across multiple Claude Code sessions. The key conflict bottleneck is **`src/app.rs` (~2160 lines)** — the whole render-pass chain (1501–1832), input dispatch (window_event 1893–2042), system update loop (630–651), and editor UI (668–1458) are all in one file.
 
-### 트랙 모델
+### Track model
 
-- **Track A (app.rs 직렬)** — app.rs의 특정 영역을 수정. 한 번에 **하나만**, 순차 진행.
-- **Track B (격리·병렬)** — app.rs를 안 건드림(신규 모듈/독립 파일/빌드 인프라). 활성 Track A 1개 + Track B 여러 개를 **다른 세션에서 동시** 진행 가능.
-- **Solo (단독)** — 전 파일에 doc comment/네이밍 변경. 다른 작업과 무조건 충돌 → 마지막에 혼자.
+- **Track A (app.rs serial)** — modifies a specific region of app.rs. Only **one at a time**, sequential.
+- **Track B (isolated/parallel)** — does not touch app.rs (new modules/independent files/build infra). One active Track A + multiple Track B can run **concurrently in different sessions**.
+- **Solo** — doc comment/naming changes across all files. Always conflicts with other work → done alone, last.
 
-### 페이즈별 파일 footprint
+### Per-phase file footprint
 
-| Phase | 주요 파일 | app.rs 영역 | 트랙 | 동시 가능 상대 |
+| Phase | Main files | app.rs region | Track | Concurrent with |
 |-------|-----------|------------|------|----------------|
-| 45 시스템 오더링 | `ecs/system.rs`, `ecs/world.rs`, `app.rs` | 업데이트 루프(630–651) | A | 48, 50, 53, 55, 57c |
-| 46 렌더 텍스처 | `renderer/*`(신규), `app.rs` | 렌더 루프(1501–1832) | A | 48, 50, 53, 55, 57c |
-| 47 터치 입력 | `input/*`, `ui/`, `app.rs` | window_event(1893–2042) | A | 48, 50, 53, 55, 57c |
-| 48 물리 레이어/센서 | `physics/*`, `collision/*` | 없음 | **B** | 거의 전부 |
-| 49a/b 텍스트 | `renderer/text.rs`, `ui/` | 없음/소량 | B | 거의 전부 |
+| 45 system ordering | `ecs/system.rs`, `ecs/world.rs`, `app.rs` | update loop (630–651) | A | 48, 50, 53, 55, 57c |
+| 46 render textures | `renderer/*` (new), `app.rs` | render loop (1501–1832) | A | 48, 50, 53, 55, 57c |
+| 47 touch input | `input/*`, `ui/`, `app.rs` | window_event (1893–2042) | A | 48, 50, 53, 55, 57c |
+| 48 physics layers/sensors | `physics/*`, `collision/*` | none | **B** | almost all |
+| 49a/b text | `renderer/text.rs`, `ui/` | none/minor | B | almost all |
 | 49c IME | `input/state.rs`, `ui/text_input.rs`, `app.rs` | window_event | A | 48, 50, 53, 55, 57c |
-| 50 i18n | `locale.rs`(신규), `ui/` | 없음 | **B** | 거의 전부 |
-| 51 비동기 로딩 | `asset.rs`, `scene.rs`, `app.rs` | 씬/에셋 배선 | A | 48, 50, 53, 55, 57c |
-| 52 패닉 복구 | `app.rs`, `ecs/` | 업데이트 루프(630–651) | A | 48, 50, 53, 55, 57c |
-| 53 저장 암호화 | `save.rs` | 없음 | **B** | 전부 (완전 격리) |
-| 54 에디터 | `app.rs`, `debug_ui.rs` | 에디터 UI(668–1458) | A | 48, 50, 53, 55, 57c |
-| 55 배포 패키징 | `Cargo.toml`, 빌드 스크립트, `examples/` | 없음 | **B** | 거의 전부 |
-| 56 고급 렌더링 | `particle.rs`, `renderer/*`, `app.rs` | 렌더 루프 | A | 48, 50, 53, 55, 57c |
-| 57c CI | `.github/workflows/` | 없음 | **B** | 전부 (코드 무관) |
-| 57a/b Rustdoc | 전 파일 doc comment | 광범위 | **Solo** | — |
-| 58 예제+샘플 | `examples/` | 없음 | B | 거의 전부 (API 안정 후) |
-| 59 API Freeze | 전 파일 | 광범위 | **Solo** | — |
+| 50 i18n | `locale.rs` (new), `ui/` | none | **B** | almost all |
+| 51 async loading | `asset.rs`, `scene.rs`, `app.rs` | scene/asset wiring | A | 48, 50, 53, 55, 57c |
+| 52 panic recovery | `app.rs`, `ecs/` | update loop (630–651) | A | 48, 50, 53, 55, 57c |
+| 53 save encryption | `save.rs` | none | **B** | all (fully isolated) |
+| 54 editor | `app.rs`, `debug_ui.rs` | editor UI (668–1458) | A | 48, 50, 53, 55, 57c |
+| 55 distribution pkg | `Cargo.toml`, build scripts, `examples/` | none | **B** | almost all |
+| 56 advanced rendering | `particle.rs`, `renderer/*`, `app.rs` | render loop | A | 48, 50, 53, 55, 57c |
+| 57c CI | `.github/workflows/` | none | **B** | all (code-independent) |
+| 57a/b rustdoc | doc comments across all files | broad | **Solo** | — |
+| 58 examples+sample | `examples/` | none | B | almost all (after API is stable) |
+| 59 API freeze | all files | broad | **Solo** | — |
 
-### 운용 규칙
+### Operating rules
 
-1. **활성 Track A 페이즈는 항상 1개.** app.rs 영역이 달라도(렌더 루프 vs window_event) git 자동 병합 실패 위험이 커 직렬 권장.
-2. **Track B(48·50·53·55·57c)는 활성 Track A와 + 서로 동시** — 다른 세션에 자유 분배.
-3. **57a/b(Rustdoc)·59(API Freeze)는 전 파일 수정 → 무조건 단독, 최후.**
-4. **위험 쌍**: 45와 52는 둘 다 업데이트 루프(630–651)를 수정 → 순차에서도 충돌. **45 먼저(루프 재구성) → 52(루프 래핑)** 순서 고정.
-5. lib.rs 충돌은 re-export 한 줄 수준 → 수동 병합 trivial, 병렬 차단 사유 아님.
+1. **Always exactly one active Track A phase.** Even with different app.rs regions (render loop vs window_event), git auto-merge failure risk is high, so serial is recommended.
+2. **Track B (48, 50, 53, 55, 57c) runs concurrently with an active Track A + with each other** — distribute freely across sessions.
+3. **57a/b (rustdoc) and 59 (API freeze) edit all files → always solo, last.**
+4. **Risky pair**: 45 and 52 both modify the update loop (630–651) → conflict even when sequential. Fix the order **45 first (loop restructure) → 52 (loop wrapping)**.
+5. lib.rs conflicts are at the level of a one-line re-export → trivial manual merge, not a reason to block parallelism.
 
-### 권장 동시 실행 배치 예시
+### Example recommended concurrent layout
 
 ```
-세션1 (Track A): 45 → 46 → 47 → 49c → 51 → 52 → 54 → 56   (순차)
-세션2 (Track B): 48 → 50 → 53                             (독립 병렬)
-세션3 (Track B): 55 → 57c → 58                            (독립 병렬)
-       (모두 끝난 뒤) 57a/b Rustdoc → 59 API Freeze         (단독, 최후)
+session1 (Track A): 45 → 46 → 47 → 49c → 51 → 52 → 54 → 56   (sequential)
+session2 (Track B): 48 → 50 → 53                             (independent parallel)
+session3 (Track B): 55 → 57c → 58                            (independent parallel)
+       (after all done) 57a/b rustdoc → 59 API freeze         (solo, last)
 ```
 
 ---
 
-## 버전별 체크리스트 (요약)
+## Per-version checklist (summary)
 
-| 버전 | 완료 조건 |
+| Version | Completion condition |
 |------|-----------|
-| v0.46 | Phase 44 + 45 완료. 시스템 순서 보장, 조인트 동작 |
-| v0.48 | Phase 46 + 47 완료. 렌더 텍스처, 터치 입력 |
-| v0.50 | Phase 48 + 49 완료 (IME 포함). Milestone 1 달성 |
-| v0.52 | Phase 50 + 51 완료. 로컬라이제이션, 비동기 로딩 |
-| v0.54 | Phase 52 + 53 완료. 안정성, 저장 보안 |
-| v0.57 | Phase 54 + 55 완료. 에디터, 배포 패키징. Milestone 2 달성 |
-| v0.59 | Phase 56 + 57 완료. 고급 렌더링, 문서, CI |
-| v0.60 | Phase 58 완료. 예제 + 샘플 게임 |
-| **v1.0.0** | Phase 59 완료. API freeze, crates.io publish dry-run 통과 및 릴리즈 준비 |
+| v0.46 | Phase 44 + 45 done. System order guaranteed, joints work |
+| v0.48 | Phase 46 + 47 done. Render textures, touch input |
+| v0.50 | Phase 48 + 49 done (incl. IME). Milestone 1 reached |
+| v0.52 | Phase 50 + 51 done. Localization, async loading |
+| v0.54 | Phase 52 + 53 done. Stability, save security |
+| v0.57 | Phase 54 + 55 done. Editor, distribution packaging. Milestone 2 reached |
+| v0.59 | Phase 56 + 57 done. Advanced rendering, docs, CI |
+| v0.60 | Phase 58 done. Examples + sample game |
+| **v1.0.0** | Phase 59 done. API freeze, crates.io publish dry-run passing and release-ready |
 
 ---
 
-*각 Phase의 세부 구현 계획은 해당 Phase 시작 직전에 별도 수립한다.*
-*이 문서는 v1.0 준비 과정의 방향과 우선순위를 보존하는 historical roadmap이다.*
+*Each Phase's detailed implementation plan is drafted separately just before that Phase starts.*
+*This document is a historical roadmap preserving the direction and priorities of the v1.0 prep process.*

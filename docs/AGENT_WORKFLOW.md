@@ -1,102 +1,104 @@
-# 에이전트 작업 상세 규칙
+# Detailed agent operating rules
 
-이 문서는 `AGENTS.md`의 빠른 체크리스트를 보완하는 상세 운영 규칙이다. `AGENTS.md`는 항상 200줄 이내로 유지하고, 세부 규칙이 길어질 때는 이 문서나 별도 `docs/*.md` 문서로 분리한다.
+This document supplements the quick checklist in `AGENTS.md` with detailed operating
+rules. Keep `AGENTS.md` under 200 lines; when detailed rules grow long, split them into
+this document or a separate `docs/*.md`.
 
-## 1. 기본 작업 흐름
+## 1. Default workflow
 
-1. 탐색: `rg`로 심볼과 파일 위치를 먼저 확인하고, 필요한 파일만 읽는다.
-2. 범위 판단: 단일 파일, 다중 파일, 공개 API, 문서/릴리스, 위험 작업 중 어디에 해당하는지 분류한다.
-3. 계획: 여러 서브시스템, 공개 API, 대량 변경, 불명확한 요구사항은 구현 전에 짧게 계획을 세운다.
-4. 구현: 기존 모듈 경계와 아키텍처 패턴을 우선한다.
-5. 검증: 변경 범위에 맞는 테스트와 문서 확인을 수행한다.
-6. 보고: 변경 요약, 주요 파일, 실행한 검증, 남은 위험 또는 미실행 검증을 짧게 남긴다.
+1. Explore: locate symbols and files with `rg` first, and read only the files you need.
+2. Scope: classify the task as single-file, multi-file, public API, docs/release, or risky.
+3. Plan: for multiple subsystems, public API, large changes, or unclear requirements, write a short plan before implementing.
+4. Implement: prefer existing module boundaries and architecture patterns.
+5. Verify: run the tests and doc checks that fit the change scope.
+6. Report: leave a short summary of the change, key files, verification run, and any remaining risk or skipped verification.
 
-## 2. 작업 범위별 기준
+## 2. Criteria by scope
 
-| 범위 | 기준 |
+| Scope | Criteria |
 | --- | --- |
-| 단일 파일 수정 | 요건이 명확하면 메인 세션에서 직접 처리한다. |
-| 다중 파일 기능 | 관련 파일을 먼저 좁혀 읽고, 필요하면 서브 에이전트로 탐색/구현/검토를 나눈다. |
-| 공개 API 변경 | `src/lib.rs` re-export, 예제, 문서 영향까지 확인한다. |
-| 문서/릴리스 영향 | `REFERENCE.html`, `README.md`, `docs/CHANGELOG.md`, `docs/HANDOFF.md` 중 필요한 문서를 갱신한다. |
-| 위험 작업 | 사전 확인 없이 진행하지 않는다. |
+| Single-file edit | Handle directly in the main session when requirements are clear. |
+| Multi-file feature | Narrow down and read related files first; split exploration/implementation/review into subagents if needed. |
+| Public API change | Check `src/lib.rs` re-exports, examples, and doc impact. |
+| Docs/release impact | Update whichever of `REFERENCE.html`, `README.md`, `docs/CHANGELOG.md`, `docs/HANDOFF.md` is needed. |
+| Risky work | Do not proceed without prior confirmation. |
 
-위험 작업에는 공개 API 삭제/이름변경, 의존성·버전 변경, 대량 리팩터, 파일 삭제, destructive Git 작업이 포함된다.
+Risky work includes public API removal/rename, dependency/version changes, large refactors, file deletion, and destructive Git operations.
 
-## 3. 서브 에이전트 사용
+## 3. Using subagents
 
-서브 에이전트는 적극적으로 사용한다. 특히 다음 경우에 권장한다.
+Use subagents freely. They are recommended especially for:
 
-- 3개 이상 파일을 탐색해야 하는 작업
-- 여러 서브시스템을 동시에 건드리는 기능
-- 긴 대화 뒤 실제 코드 작성으로 넘어가는 경우
-- 탐색, 구현, 리뷰를 병렬로 나누면 품질이 좋아지는 경우
+- work that requires exploring 3+ files
+- features that touch multiple subsystems at once
+- moving from a long conversation into actual code writing
+- cases where splitting exploration, implementation, and review in parallel improves quality
 
-메인 에이전트는 서브 에이전트 결과를 그대로 확정하지 않는다. 최종 통합, 충돌 확인, 테스트 선택, 완료 보고는 메인 에이전트가 맡는다.
+The main agent does not accept subagent results as final. Final integration, conflict checking, test selection, and the completion report are the main agent's job.
 
-서브 에이전트 프롬프트에는 반드시 다음을 포함한다.
+A subagent prompt must always include:
 
-1. 수정 또는 조사할 파일 경로
-2. 적용해야 할 아키텍처 패턴: borrow 우회, 렌더링 레이어 분리, 시스템 등록 순서 등
-3. 기대 결과물과 달라져야 할 동작
-4. 변경 금지 범위 또는 확인만 해야 하는 범위
+1. Paths to edit or investigate
+2. Architecture patterns to apply: borrow workaround, render layer separation, system registration order, etc.
+3. The expected result and what behavior should change
+4. The do-not-change scope, or the scope to only inspect
 
-## 4. 검증 기준
+## 4. Verification criteria
 
-검증은 변경 범위에 맞춰 선택한다.
+Choose verification to match the change scope.
 
-| 변경 유형 | 권장 검증 |
+| Change type | Recommended verification |
 | --- | --- |
-| 문서만 변경 | 링크, 문서 구조, `AGENTS.md` 200줄 이내 여부 확인 |
-| 단일 모듈 로직 | 관련 단위 테스트 또는 `cargo test <module_or_test>` |
-| 공개 API/예제 영향 | 관련 테스트 + 예제 컴파일 가능성 확인 |
-| 렌더링/플랫폼 영향 | 가능한 범위에서 `cargo build`, 필요 시 WASM 빌드 확인 |
-| 릴리스/패키징 영향 | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets`, `cargo doc --no-deps`, package dry run 검토 |
+| Docs only | Check links, doc structure, and that `AGENTS.md` is under 200 lines |
+| Single-module logic | Related unit tests or `cargo test <module_or_test>` |
+| Public API/example impact | Related tests + confirm examples still compile |
+| Rendering/platform impact | `cargo build` where possible, and a WASM build check if needed |
+| Release/packaging impact | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets`, `cargo doc --no-deps`, review a package dry run |
 
-모든 작업에서 전체 게이트를 항상 돌릴 필요는 없다. 다만 실행하지 않은 검증이 있으면 완료 보고에 명시한다.
+You do not always have to run the full gate for every task. But if you skip any verification, state it in the completion report.
 
-## 5. 문서 갱신 기준
+## 5. Doc-update criteria
 
-공개 API, 사용법, 예제, 릴리스 노트에 영향이 있으면 문서를 함께 갱신한다.
+When public API, usage, examples, or release notes are affected, update docs alongside.
 
-- 공개 API 설명 또는 예제 변경: `REFERENCE.html`
-- 사용자 시작 방법, 요구사항, 체크 명령 변경: `README.md`
-- 릴리스 사용자에게 보일 변경: `docs/CHANGELOG.md`
-- 개발 이력, 아키텍처 결정, 작업 인수인계: `docs/HANDOFF.md`
-- 에이전트 운영 규칙: `AGENTS.md` 요약 + 이 문서 상세
+- Public API descriptions or example changes: `REFERENCE.html`
+- User getting-started steps, requirements, or check commands: `README.md`
+- Changes visible to release users: `docs/CHANGELOG.md`
+- Dev history, architecture decisions, handoff notes: `docs/HANDOFF.md`
+- Agent operating rules: `AGENTS.md` summary + details in this document
 
-`AGENTS.md`가 200줄을 넘길 수 있는 내용은 새 `docs/*.md` 문서로 분리하고, `AGENTS.md`에는 한 줄 요약과 링크만 추가한다.
+Content that could push `AGENTS.md` over 200 lines goes into a new `docs/*.md`, with only a one-line summary and link added to `AGENTS.md`.
 
-## 6. 연관 프로젝트 확인
+## 6. Related-project checks
 
-기본 검증 범위는 이 엔진 저장소다. `rust-survivors`는 기본적으로 빌드하거나 수정하지 않는다.
+The default verification scope is this engine repo. By default, do not build or modify `rust-survivors`.
 
-다음 경우에만 `rust-survivors` 확인을 수행한다.
+Check `rust-survivors` only when:
 
-- 사용자가 명시적으로 요청한 경우
-- 엔진 공개 API의 파괴적 변경 가능성이 명확한 경우
-- 변경 목적이 `rust-survivors` 연동 문제 해결인 경우
+- the user explicitly requests it
+- there is a clear possibility of a breaking change to the engine's public API
+- the purpose of the change is to fix a `rust-survivors` integration issue
 
-확인을 수행했으면 어떤 명령 또는 검색을 했는지 완료 보고에 남긴다.
+If you ran a check, note which commands or searches you used in the completion report.
 
-## 7. Git 작업 기준
+## 7. Git rules
 
-stage, commit, push는 사용자가 명시적으로 요청했을 때만 수행한다. 작업 중 다른 사람이 만든 변경은 되돌리지 않는다.
+Run stage, commit, and push only when the user explicitly requests it. Do not revert changes made by someone else during the work.
 
-금지 또는 사전 확인 대상:
+Forbidden or requiring prior confirmation:
 
-- `git reset --hard`, `git checkout --`, 강제 push 같은 destructive Git 작업
-- 관련 없는 파일의 되돌리기
-- 사용자가 요청하지 않은 자동 커밋
-- 변경 의도가 불명확한 대량 포맷팅
+- destructive Git operations such as `git reset --hard`, `git checkout --`, force push
+- reverting unrelated files
+- auto-commits the user did not request
+- large reformatting with unclear intent
 
-## 8. 완료 보고 형식
+## 8. Completion report format
 
-완료 보고는 짧고 구체적으로 작성한다.
+Keep completion reports short and concrete.
 
-- 변경 요약
-- 주요 파일
-- 실행한 검증
-- 미실행 검증 또는 남은 위험
+- Change summary
+- Key files
+- Verification run
+- Skipped verification or remaining risk
 
-문서만 변경한 경우 코드 테스트를 생략할 수 있으며, 대신 라인 수, 링크, 문서 구조 검증 결과를 보고한다.
+For docs-only changes you may skip code tests; instead report line counts, links, and doc-structure verification results.
