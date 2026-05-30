@@ -9,8 +9,9 @@
 
 `examples/` now separates top-level feature demos from playable example games under
 `examples/games/`. The first playable examples are the platformer
-(`cargo run --example platformer_game`) and scene-flow game
-(`cargo run --example scene_flow_game`), which start closing the previous validation gap.
+(`cargo run --example platformer_game`), scene-flow game
+(`cargo run --example scene_flow_game`), and maze-escape
+(`cargo run --example maze_escape_game`), which start closing the previous validation gap.
 The active direction remains: widen the feature set breadth-first, and prove each feature
 with a small playable example.
 
@@ -22,7 +23,7 @@ the API gaps it is likely to surface.
 | # | Example game | Engine capability validated/extended | Likely gaps to surface |
 |---|--------------|----------------------------------------|------------------------|
 | **A** | Platformer (jump, run, platforms) ✅ done | `CharacterController`, `move_character`, physics platforms/sensors, `AnimationStateMachine`, atlas animation, camera follow | surfaced gaps: one-way platforms remain future work; tilemap↔physics binding still wants a higher-level ergonomic helper |
-| **B** | Top-down maze escape (chasing enemies) | `PathGrid`/`find_path`, `BehaviorTree`, `SpatialGrid` collision | pathfinding → behavior-tree handoff flow |
+| **B** | Top-down maze escape (chasing enemies) ✅ done | `PathGrid`/`find_path`, `BehaviorTree`, `SpatialGrid` collision (`examples/games/maze_escape/maze_escape.rs`) | surfaced + fixed: `BehaviorTree`/`Sequence`/`Selector`/`Inverter`/`AlwaysSucceed`/`BehaviorSystem` were not re-exported from `engine::`; `SpatialGrid` was trapped inside `CollisionGridSystem` (now mirrored to a `World` resource each frame); no `PathGrid::from_tilemap` (added). Still open: `BlackboardValue` cannot hold `Vec<IVec2>`, so `ComputePathToPlayer` writes only the next step and recomputes each tick. |
 | **C** | Puzzle (match-grid / Sokoban) | grid logic, `Tween`/`Easing`, `save`/`load`, UI | grid movement, undo, progress-save API friction |
 | **D** | Simple shooter (bullets, waves) | `ParticleEmitter`, `Timer`, collision layers, audio buses | pooling/spawn bursts, perf; complements rust-survivors |
 | **E** | Scene-flow game (menu → play → result) ✅ done | `SceneCmd` Push/Replace/Pop, UI buttons, `GameState`, scene-owned systems, explicit entity cleanup | surfaced gap: preserving cross-scene diagnostics/state across `Replace` requires carrying a handle outside the reset `World` |
@@ -30,9 +31,7 @@ the API gaps it is likely to surface.
 
 ## Recommended order
 
-1. **B / C / D** to widen genre coverage.
-2. **F (skeletal animation)** as the first genuinely new feature once the existing
-   surface is validated.
+1. **C / D** to widen genre coverage. (A, B, E, F now done.)
 
 ## Alignment check — previously "planned" items vs the reset vision
 

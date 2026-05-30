@@ -47,7 +47,9 @@ Where to read to find a given thing:
 | PhysicsWorld, PhysicsBody, PhysicsSystem, CollisionEvent | `src/physics/` |
 | CharacterController, RaycastHit, cast_ray, cast_ray_with_normal, move_character | `src/physics/character.rs`, `src/physics/world.rs` |
 | add_kinematic_box, add_kinematic_circle | `src/physics/world.rs` |
-| SpatialGrid, Collider, CollisionLayer | `src/collision/` |
+| SpatialGrid, Collider, CollisionLayer (SpatialGrid is mirrored to a World resource by CollisionGridSystem) | `src/collision/` |
+| BehaviorTree, BehaviorNode, Sequence, Selector, Inverter, AlwaysSucceed, BehaviorSystem, Blackboard | `src/behavior.rs` |
+| PathGrid, find_path, PathGrid::from_tilemap | `src/pathfinding.rs` |
 | AnimationPlayer, AnimationClip, AnimationSystem, BlendWeight | `src/animation/player.rs`, `src/animation/system.rs` |
 | AnimationStateMachine, StateMachineSystem, TransitionCond, AnimParam | `src/animation/state_machine.rs` |
 | BlendTree1D, BlendEntry, BlendTreeSystem (1D parameter-driven auto transitions + crossfade) | `src/animation/blend_tree.rs`, `src/animation/blend_system.rs` |

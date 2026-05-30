@@ -58,7 +58,10 @@ pub use asset::{
 pub use atlas::{AtlasSprite, TextureAtlas};
 #[cfg(not(target_arch = "wasm32"))]
 pub use audio::{AudioChannelState, AudioEffect, AudioManager};
-pub use behavior::{Blackboard, BlackboardValue};
+pub use behavior::{
+    AlwaysSucceed, BehaviorNode, BehaviorStatus, BehaviorSystem, BehaviorTree, Blackboard,
+    BlackboardValue, Inverter, Selector, Sequence,
+};
 pub use camera::Camera;
 pub use collision::{
     Collider, CollisionDebugSystem, CollisionGridSystem, CollisionLayer, DebugConfig, SpatialGrid,

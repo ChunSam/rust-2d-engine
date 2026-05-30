@@ -40,6 +40,10 @@ path = "examples/games/platformer/platformer.rs"
 name = "scene_flow_game"
 path = "examples/games/scene_flow/scene_flow.rs"
 
+[[example]]
+name = "maze_escape_game"
+path = "examples/games/maze_escape/maze_escape.rs"
+
 [dependencies]
 winit    = "0.30"
 wgpu     = { version = "22", features = ["webgl"] }

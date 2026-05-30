@@ -62,7 +62,10 @@ pub struct GridEntry {
 ///
 /// 매 프레임 `rebuild` 로 갱신하고 `query_radius` / `query_aabb` 로 조회.
 /// 기본 셀 크기: 128 픽셀.
-#[derive(Debug)]
+///
+/// `CollisionGridSystem` 이 매 프레임 rebuild 한 결과를 World 리소스로 미러링하므로,
+/// 외부 시스템에서 `world.resource::<SpatialGrid>()` 로 read-only 질의가 가능하다.
+#[derive(Debug, Clone)]
 pub struct SpatialGrid {
     /// 셀 한 변 길이 (픽셀)
     pub cell: f32,
@@ -188,6 +191,10 @@ impl CollisionGridSystem {
 impl System for CollisionGridSystem {
     fn run(&mut self, world: &mut World, _dt: f32) {
         self.grid.rebuild(world);
+        // Mirror the rebuilt grid to a World resource so external systems
+        // (AI, gameplay) can call `query_radius` / `query_aabb` without
+        // reaching into this system. Cost: one clone per frame.
+        world.insert_resource(self.grid.clone());
     }
 }
 
