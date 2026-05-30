@@ -530,13 +530,13 @@ fn run(&amp;mut self, world: &amp;mut World, _dt: f32) {
 }</code></pre>
 <blockquote>텍스트는 스크린 스페이스에 그려진다 (카메라 영향 없음).</blockquote>
 <h3 id="ui-사각형">UI 사각형</h3>
-<p><code>UiQueue</code>에 <code>DrawRect</code>를 넣으면 스프라이트 위, 텍스트 아래 레이어에 그려진다.</p>
+<p><code>UiQueue</code>에 <code>DrawRect</code>를 넣으면 스프라이트 위, 텍스트 아래의 screen-space UI primitive 레이어에 그려진다. <code>DrawRect</code>와 <code>DrawImage</code>는 같은 <code>z</code> 기준으로 정렬되며, 같은 <code>z</code>에서는 이미지가 먼저, 사각형이 나중에 그려진다.</p>
 <pre><code class="language-rust">use engine::{DrawRect, UiQueue};
 
 let rect = DrawRect::new(x, y, width, height, [r, g, b, a]).with_z(0.9);
 world.resource_mut::&lt;UiQueue&gt;().unwrap().push(rect);</code></pre>
 <h3 id="ui-이미지">UI 이미지</h3>
-<p><code>UiImageQueue</code>에 <code>DrawImage</code>를 넣으면 카메라 영향을 받지 않는 screen-space 텍스처 쿼드를 그린다.</p>
+<p><code>UiImageQueue</code>에 <code>DrawImage</code>를 넣으면 카메라 영향을 받지 않는 screen-space 텍스처 쿼드를 같은 UI primitive 레이어에 그린다.</p>
 <pre><code class="language-rust">use engine::{DrawImage, UiImageQueue, UvRect};
 
 let icon = DrawImage::textured(16.0, 16.0, 32.0, 32.0, &quot;assets/icons.png&quot;)
