@@ -36,6 +36,10 @@ crate-type = ["cdylib", "rlib"]
 name = "platformer_game"
 path = "examples/games/platformer/platformer.rs"
 
+[[example]]
+name = "scene_flow_game"
+path = "examples/games/scene_flow/scene_flow.rs"
+
 [dependencies]
 winit    = "0.30"
 wgpu     = { version = "22", features = ["webgl"] }

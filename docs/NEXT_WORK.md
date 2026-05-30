@@ -8,10 +8,11 @@
 ## Context
 
 `examples/` now separates top-level feature demos from playable example games under
-`examples/games/`. The first playable example game is the platformer
-(`cargo run --example platformer_game`), which starts closing the previous validation
-gap. The active direction remains: widen the feature set breadth-first, and prove each
-feature with a small playable example.
+`examples/games/`. The first playable examples are the platformer
+(`cargo run --example platformer_game`) and scene-flow game
+(`cargo run --example scene_flow_game`), which start closing the previous validation gap.
+The active direction remains: widen the feature set breadth-first, and prove each feature
+with a small playable example.
 
 ## Candidate feature × playable-example pairs
 
@@ -24,14 +25,13 @@ the API gaps it is likely to surface.
 | **B** | Top-down maze escape (chasing enemies) | `PathGrid`/`find_path`, `BehaviorTree`, `SpatialGrid` collision | pathfinding → behavior-tree handoff flow |
 | **C** | Puzzle (match-grid / Sokoban) | grid logic, `Tween`/`Easing`, `save`/`load`, UI | grid movement, undo, progress-save API friction |
 | **D** | Simple shooter (bullets, waves) | `ParticleEmitter`, `Timer`, collision layers, audio buses | pooling/spawn bursts, perf; complements rust-survivors |
-| **E** | Scene-flow game (menu → play → result) | `SceneCmd` Push/Replace/Pop, UI buttons, `GameState` | resource cleanup across scene transitions |
+| **E** | Scene-flow game (menu → play → result) ✅ done | `SceneCmd` Push/Replace/Pop, UI buttons, `GameState`, scene-owned systems, explicit entity cleanup | surfaced gap: preserving cross-scene diagnostics/state across `Replace` requires carrying a handle outside the reset `World` |
 | **F** | Skeletal-animation showcase character ✅ done | NEW: 2D cutout skeletal animation (`src/skeletal.rs`, `examples/skeletal_puppet.rs`) | surfaced + fixed `HierarchySystem` depth-3 cap; scale-vs-attachment-size rule noted in `docs/SKELETAL.md` |
 
 ## Recommended order
 
-1. **E — Scene flow.** Every game's skeleton; polishing it once lets later examples reuse it.
-2. Then **B / C / D** to widen genre coverage.
-3. **F (skeletal animation)** as the first genuinely new feature once the existing
+1. **B / C / D** to widen genre coverage.
+2. **F (skeletal animation)** as the first genuinely new feature once the existing
    surface is validated.
 
 ## Alignment check — previously "planned" items vs the reset vision

@@ -2382,25 +2382,6 @@ impl App {
             }
         }
 
-        let ui_rects: Vec<DrawRect> = self
-            .world
-            .resource_mut::<UiQueue>()
-            .map(|q| std::mem::take(&mut q.items))
-            .unwrap_or_default();
-        if !ui_rects.is_empty() {
-            if let Some(sr) = &mut self.sprite_renderer {
-                sr.render_ui_rects_from_slice(
-                    &gpu.device,
-                    &gpu.queue,
-                    render_view,
-                    &mut enc,
-                    &ui_rects,
-                    logical_w,
-                    logical_h,
-                );
-            }
-        }
-
         let ui_images = self
             .world
             .resource_mut::<UiImageQueue>()
@@ -2414,6 +2395,25 @@ impl App {
                     render_view,
                     &mut enc,
                     &ui_images,
+                    logical_w,
+                    logical_h,
+                );
+            }
+        }
+
+        let ui_rects: Vec<DrawRect> = self
+            .world
+            .resource_mut::<UiQueue>()
+            .map(|q| std::mem::take(&mut q.items))
+            .unwrap_or_default();
+        if !ui_rects.is_empty() {
+            if let Some(sr) = &mut self.sprite_renderer {
+                sr.render_ui_rects_from_slice(
+                    &gpu.device,
+                    &gpu.queue,
+                    render_view,
+                    &mut enc,
+                    &ui_rects,
                     logical_w,
                     logical_h,
                 );
@@ -2747,8 +2747,16 @@ impl ApplicationHandler for App {
 
             // ── 마우스 커서 이동 ─────────────────────────────────────────────
             WindowEvent::CursorMoved { position, .. } => {
+                let scale_factor = self
+                    .window
+                    .as_ref()
+                    .map(|w| w.scale_factor() as f32)
+                    .unwrap_or(1.0);
                 if let Some(input) = self.world.resource_mut::<InputState>() {
-                    input.set_cursor(Vec2::new(position.x as f32, position.y as f32));
+                    input.set_cursor(Vec2::new(
+                        position.x as f32 / scale_factor,
+                        position.y as f32 / scale_factor,
+                    ));
                 }
             }
 
@@ -2780,7 +2788,15 @@ impl ApplicationHandler for App {
                 id,
                 ..
             }) => {
-                let pos = Vec2::new(location.x as f32, location.y as f32);
+                let scale_factor = self
+                    .window
+                    .as_ref()
+                    .map(|w| w.scale_factor() as f32)
+                    .unwrap_or(1.0);
+                let pos = Vec2::new(
+                    location.x as f32 / scale_factor,
+                    location.y as f32 / scale_factor,
+                );
                 if let Some(ts) = self.world.resource_mut::<TouchState>() {
                     match phase {
                         winit::event::TouchPhase::Started => ts.on_touch_started(id, pos),

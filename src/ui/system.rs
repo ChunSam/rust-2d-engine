@@ -78,6 +78,7 @@ impl System for UiSystem {
             };
             if btn.state != ButtonState::Disabled {
                 let prev = btn.state;
+                let started_in_rect = in_rect && just_pressed;
                 btn.state = if in_rect {
                     if is_held {
                         ButtonState::Pressed
@@ -87,10 +88,10 @@ impl System for UiSystem {
                 } else {
                     ButtonState::Normal
                 };
-                if prev == ButtonState::Pressed && just_released && in_rect {
+                if started_in_rect || (in_rect && just_released && prev == ButtonState::Pressed) {
                     ui_events.push(UiEvent::ButtonClicked(entity));
                 }
-                if in_rect && just_pressed {
+                if started_in_rect {
                     btn.state = ButtonState::Pressed;
                 }
             }
@@ -543,4 +544,34 @@ fn in_bounds(cursor: Vec2, pos: Vec2, size: Vec2) -> bool {
         && cursor.x <= pos.x + size.x
         && cursor.y >= pos.y
         && cursor.y <= pos.y + size.y
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn button_click_handles_press_and_release_in_same_frame() {
+        let mut world = World::new();
+        world.insert_resource(ViewportSize::new(200, 120));
+        world.insert_resource(Events::<UiEvent>::default());
+
+        let mut input = InputState::default();
+        input.set_cursor(Vec2::new(20.0, 20.0));
+        input.press_mouse(MouseButton::Left);
+        input.release_mouse(MouseButton::Left);
+        world.insert_resource(input);
+
+        let entity = world.spawn();
+        world.add_component(entity, UiNode::new(10.0, 10.0, 80.0, 40.0));
+        world.add_component(entity, Button::new("Click"));
+
+        let mut system = UiSystem;
+        system.run(&mut world, 0.016);
+
+        let events = world.resource::<Events<UiEvent>>().unwrap().read();
+        assert!(events
+            .iter()
+            .any(|event| matches!(event, UiEvent::ButtonClicked(clicked) if *clicked == entity)));
+    }
 }
