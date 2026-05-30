@@ -7,11 +7,11 @@
 
 ## Context
 
-`examples/` currently holds only tech demos (`gpu_particles`, `minimap`,
-`split_screen`, `loading_bar`, `touch_demo`, `mp_client`/`mp_server`,
-`runtime_policies`) and the beginner `basic`. There is **no actual playable game yet**.
-Closing that gap is the active direction: widen the feature set breadth-first, and prove
-each feature with a small playable example.
+`examples/` now separates top-level feature demos from playable example games under
+`examples/games/`. The first playable example game is the platformer
+(`cargo run --example platformer_game`), which starts closing the previous validation
+gap. The active direction remains: widen the feature set breadth-first, and prove each
+feature with a small playable example.
 
 ## Candidate feature × playable-example pairs
 
@@ -20,7 +20,7 @@ the API gaps it is likely to surface.
 
 | # | Example game | Engine capability validated/extended | Likely gaps to surface |
 |---|--------------|----------------------------------------|------------------------|
-| **A** | Platformer (jump, run, platforms) | `CharacterController`, `move_character`, tilemap collision, `AnimationStateMachine` | one-way platforms, coyote-time, tilemap↔physics binding ergonomics |
+| **A** | Platformer (jump, run, platforms) ✅ done | `CharacterController`, `move_character`, physics platforms/sensors, `AnimationStateMachine`, atlas animation, camera follow | surfaced gaps: one-way platforms remain future work; tilemap↔physics binding still wants a higher-level ergonomic helper |
 | **B** | Top-down maze escape (chasing enemies) | `PathGrid`/`find_path`, `BehaviorTree`, `SpatialGrid` collision | pathfinding → behavior-tree handoff flow |
 | **C** | Puzzle (match-grid / Sokoban) | grid logic, `Tween`/`Easing`, `save`/`load`, UI | grid movement, undo, progress-save API friction |
 | **D** | Simple shooter (bullets, waves) | `ParticleEmitter`, `Timer`, collision layers, audio buses | pooling/spawn bursts, perf; complements rust-survivors |
@@ -29,12 +29,9 @@ the API gaps it is likely to surface.
 
 ## Recommended order
 
-1. **A — Platformer first.** Validates the most unproven core in one shot (character
-   controller + tilemap collision + animation state machine) and best exercises the
-   foundational genre-agnostic 2D feature set.
-2. **E — Scene flow.** Every game's skeleton; polishing it once lets later examples reuse it.
-3. Then **B / C / D** to widen genre coverage.
-4. **F (skeletal animation)** as the first genuinely new feature once the existing
+1. **E — Scene flow.** Every game's skeleton; polishing it once lets later examples reuse it.
+2. Then **B / C / D** to widen genre coverage.
+3. **F (skeletal animation)** as the first genuinely new feature once the existing
    surface is validated.
 
 ## Alignment check — previously "planned" items vs the reset vision

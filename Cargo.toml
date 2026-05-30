@@ -21,6 +21,7 @@ include     = [
     "Cargo.toml",
     "Cargo.lock",
     "examples/*.rs",
+    "examples/games/**",
     "examples/wasm/build.sh",
     "examples/wasm/index.html",
     "scripts/**",
@@ -30,6 +31,10 @@ include     = [
 [lib]
 name = "engine"
 crate-type = ["cdylib", "rlib"]
+
+[[example]]
+name = "platformer_game"
+path = "examples/games/platformer/platformer.rs"
 
 [dependencies]
 winit    = "0.30"
