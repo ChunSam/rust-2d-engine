@@ -2146,8 +2146,9 @@ The positions of `Panel` children are computed by `LayoutSystem`. It must be reg
 | ~~WASM build regression + unsafe cleanup~~ | ~~recover wasm32 build broken by missing `push_event_bounded` import in network.rs + remove unnecessary `unsafe impl Send/Sync` from BehaviorTree~~ | — | done (`af6fc59`) |
 | ~~vision reset~~ | ~~established `docs/VISION.md` (forkable general-purpose 2D skeleton, breadth-first + example-verification loop), `docs/NEXT_WORK.md` candidate list~~ | — | done |
 | ~~2D skeletal animation~~ | ~~cutout model: `src/skeletal.rs` + `SkeletonBuilder` + `examples/skeletal_puppet.rs`. Improved HierarchySystem with arbitrary-depth propagation~~ | — | done |
+| ~~Sokoban playable example (candidate C)~~ | ~~`examples/games/sokoban/sokoban.rs`: discrete grid push logic, 3 levels, undo/redo, progress save/load. Engine gap fixed: reusable genre-agnostic `History<T>` snapshot undo (`src/history.rs`), since the only prior undo was the editor's private command history. Board rendered via immediate-mode `DebugDrawQueue` filled rects (no ECS entity churn). `save`/`load_or_default` reused unchanged.~~ | — | done |
 
-> **Current status**: entering the post-v1.0 breadth-expansion stage. Vision (`docs/VISION.md`) = a forkable general-purpose 2D skeleton, features verified with small playable examples. Next candidates are in `docs/NEXT_WORK.md`. Confirmed native·wasm32 builds, 264 tests, 0 clippy warnings.
+> **Current status**: post-v1.0 breadth-expansion. Vision (`docs/VISION.md`) = a forkable general-purpose 2D skeleton, features verified with small playable examples. Candidate D (simple shooter) is the next recommended item in `docs/NEXT_WORK.md`. Confirmed native·wasm32 builds (lib + sokoban example), 245 lib tests passing (incl. 4 new `History` tests), 0 clippy warnings.
 
 ---
 

@@ -13,6 +13,7 @@ pub mod ecs;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_particle;
 pub mod hierarchy;
+pub mod history;
 pub mod input;
 pub mod locale;
 pub mod material;
@@ -73,6 +74,7 @@ pub use ecs::{Commands, Entity, Events, System, World};
 #[cfg(not(target_arch = "wasm32"))]
 pub use gpu_particle::GpuParticleEmitter;
 pub use hierarchy::{attach, detach, Children, GlobalTransform, HierarchySystem, Parent};
+pub use history::History;
 pub use input::{GamepadAxis, GamepadButton, GamepadState, InputMap, InputState, TouchState};
 pub use locale::{LocaleBundle, LocaleData, LocaleResource, TextDirection};
 pub use material::ShaderMaterial;

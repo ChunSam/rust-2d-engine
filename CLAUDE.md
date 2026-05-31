@@ -58,6 +58,7 @@ Where to read to find a given thing:
 | Slider (horizontal slider), CheckBox (toggle checkbox) | `src/ui/slider.rs`, `src/ui/checkbox.rs` |
 | Tag, EntityDef, SceneDef, Prefab, spawn_entity_def, spawn_scene_def | `src/prefab.rs` |
 | Timer, Tween, Easing | `src/timer.rs`, `src/tween.rs` |
+| History (generic snapshot undo/redo for grid puzzles, turn-based, editors) | `src/history.rs` |
 | ParticleEmitter, ParticleSystem | `src/particle.rs` |
 | Tilemap, TilemapAtlas, TilemapSystem | `src/tilemap.rs` |
 | AudioManager (playback, positional audio, bus mixer, fades) | `src/audio.rs` |
