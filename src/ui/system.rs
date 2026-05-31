@@ -78,6 +78,9 @@ impl System for UiSystem {
             };
             if btn.state != ButtonState::Disabled {
                 let prev = btn.state;
+                let started_in_rect = in_rect && just_pressed;
+                let clicked =
+                    just_released && in_rect && (prev == ButtonState::Pressed || just_pressed);
                 btn.state = if in_rect {
                     if is_held {
                         ButtonState::Pressed
@@ -87,10 +90,10 @@ impl System for UiSystem {
                 } else {
                     ButtonState::Normal
                 };
-                if prev == ButtonState::Pressed && just_released && in_rect {
+                if clicked {
                     ui_events.push(UiEvent::ButtonClicked(entity));
                 }
-                if in_rect && just_pressed {
+                if started_in_rect {
                     btn.state = ButtonState::Pressed;
                 }
             }
@@ -543,4 +546,97 @@ fn in_bounds(cursor: Vec2, pos: Vec2, size: Vec2) -> bool {
         && cursor.x <= pos.x + size.x
         && cursor.y >= pos.y
         && cursor.y <= pos.y + size.y
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_button_world(cursor: Vec2) -> (World, Entity) {
+        let mut world = World::new();
+        world.insert_resource(ViewportSize::new(200, 120));
+        world.insert_resource(Events::<UiEvent>::default());
+
+        let mut input = InputState::default();
+        input.set_cursor(cursor);
+        world.insert_resource(input);
+
+        let entity = world.spawn();
+        world.add_component(entity, UiNode::new(10.0, 10.0, 80.0, 40.0));
+        world.add_component(entity, Button::new("Click"));
+
+        (world, entity)
+    }
+
+    fn click_count(world: &World, entity: Entity) -> usize {
+        world
+            .resource::<Events<UiEvent>>()
+            .unwrap()
+            .read()
+            .iter()
+            .filter(|event| matches!(event, UiEvent::ButtonClicked(clicked) if *clicked == entity))
+            .count()
+    }
+
+    #[test]
+    fn button_click_emits_once_on_release_in_bounds() {
+        let (mut world, entity) = setup_button_world(Vec2::new(20.0, 20.0));
+        let mut system = UiSystem;
+
+        world
+            .resource_mut::<InputState>()
+            .unwrap()
+            .press_mouse(MouseButton::Left);
+        system.run(&mut world, 0.016);
+        assert_eq!(click_count(&world, entity), 0);
+        assert_eq!(
+            world.get::<Button>(entity).unwrap().state,
+            ButtonState::Pressed
+        );
+
+        world.resource_mut::<Events<UiEvent>>().unwrap().flush();
+        world.resource_mut::<InputState>().unwrap().flush();
+        world
+            .resource_mut::<InputState>()
+            .unwrap()
+            .release_mouse(MouseButton::Left);
+        system.run(&mut world, 0.016);
+        assert_eq!(click_count(&world, entity), 1);
+    }
+
+    #[test]
+    fn button_click_handles_press_and_release_in_same_frame_once() {
+        let (mut world, entity) = setup_button_world(Vec2::new(20.0, 20.0));
+
+        let input = world.resource_mut::<InputState>().unwrap();
+        input.press_mouse(MouseButton::Left);
+        input.release_mouse(MouseButton::Left);
+
+        let mut system = UiSystem;
+        system.run(&mut world, 0.016);
+
+        assert_eq!(click_count(&world, entity), 1);
+    }
+
+    #[test]
+    fn button_click_does_not_emit_when_released_outside() {
+        let (mut world, entity) = setup_button_world(Vec2::new(20.0, 20.0));
+        let mut system = UiSystem;
+
+        world
+            .resource_mut::<InputState>()
+            .unwrap()
+            .press_mouse(MouseButton::Left);
+        system.run(&mut world, 0.016);
+
+        world.resource_mut::<Events<UiEvent>>().unwrap().flush();
+        let input = world.resource_mut::<InputState>().unwrap();
+        input.flush();
+        input.set_cursor(Vec2::new(120.0, 20.0));
+        input.release_mouse(MouseButton::Left);
+
+        system.run(&mut world, 0.016);
+
+        assert_eq!(click_count(&world, entity), 0);
+    }
 }

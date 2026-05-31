@@ -2,6 +2,8 @@ use glam::IVec2;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 
+use crate::tilemap::Tilemap;
+
 /// 통행 가능 여부를 저장하는 격자 (row-major 배열)
 pub struct PathGrid {
     pub width: i32,
@@ -41,6 +43,44 @@ impl PathGrid {
     /// 범위 밖 좌표는 `false` 반환 (패닉 없음)
     pub fn is_walkable(&self, x: i32, y: i32) -> bool {
         self.index(x, y).map(|i| self.cells[i]).unwrap_or(false)
+    }
+
+    /// Build a `PathGrid` from a `Tilemap`, judging each tile via the
+    /// `is_blocked` predicate. The grid's `(x, y)` coordinates map 1:1 to the
+    /// tilemap's `tiles[y][x]`. Cells where `is_blocked` returns `true` are
+    /// marked unwalkable. Jagged tile rows use the longest row as width;
+    /// missing cells are treated as the empty tile (`0`).
+    ///
+    /// # Example
+    /// ```
+    /// use engine::{PathGrid, Tilemap, TilemapAtlas};
+    /// use glam::Vec2;
+    ///
+    /// let atlas = TilemapAtlas::new("tiles.png", 4, 4);
+    /// // 0 = floor, 1 = wall
+    /// let tiles = vec![
+    ///     vec![0, 0, 0],
+    ///     vec![0, 1, 0],
+    ///     vec![0, 0, 0],
+    /// ];
+    /// let map = Tilemap::new(atlas, tiles, 32.0, Vec2::ZERO);
+    /// let grid = PathGrid::from_tilemap(&map, |id| id == 1);
+    /// assert!(grid.is_walkable(0, 0));
+    /// assert!(!grid.is_walkable(1, 1));
+    /// ```
+    pub fn from_tilemap(tilemap: &Tilemap, is_blocked: impl Fn(u32) -> bool) -> Self {
+        let height = tilemap.tiles.len() as i32;
+        let width = tilemap.tiles.iter().map(|row| row.len()).max().unwrap_or(0) as i32;
+
+        let mut grid = Self::new(width, height);
+        for (row_idx, row) in tilemap.tiles.iter().enumerate() {
+            for (col_idx, &tile_id) in row.iter().enumerate() {
+                if is_blocked(tile_id) {
+                    grid.set_walkable(col_idx as i32, row_idx as i32, false);
+                }
+            }
+        }
+        grid
     }
 
     fn index(&self, x: i32, y: i32) -> Option<usize> {
@@ -219,6 +259,43 @@ mod tests {
         let pos = IVec2::new(2, 3);
         let result = find_path(&grid, pos, pos);
         assert_eq!(result, Some(vec![pos]));
+    }
+
+    #[test]
+    fn from_tilemap_marks_blocked_tiles_unwalkable() {
+        use crate::tilemap::{Tilemap, TilemapAtlas};
+        use glam::Vec2;
+
+        // 3x3, only the center (1,1) is blocked
+        let atlas = TilemapAtlas::new("tiles.png", 4, 4);
+        let tiles = vec![vec![0, 0, 0], vec![0, 1, 0], vec![0, 0, 0]];
+        let map = Tilemap::new(atlas, tiles, 32.0, Vec2::ZERO);
+        let grid = PathGrid::from_tilemap(&map, |id| id == 1);
+
+        assert_eq!(grid.width, 3);
+        assert_eq!(grid.height, 3);
+        assert!(grid.is_walkable(0, 0));
+        assert!(grid.is_walkable(2, 0));
+        assert!(!grid.is_walkable(1, 1));
+        assert!(grid.is_walkable(1, 0));
+    }
+
+    #[test]
+    fn from_tilemap_with_jagged_rows_uses_max_width() {
+        use crate::tilemap::{Tilemap, TilemapAtlas};
+        use glam::Vec2;
+
+        let atlas = TilemapAtlas::new("tiles.png", 4, 4);
+        // Second row is shorter → missing cells treated as empty tile (0)
+        let tiles = vec![vec![0, 0, 1], vec![0, 0]];
+        let map = Tilemap::new(atlas, tiles, 32.0, Vec2::ZERO);
+        let grid = PathGrid::from_tilemap(&map, |id| id == 1);
+
+        assert_eq!(grid.width, 3);
+        assert_eq!(grid.height, 2);
+        // (2,0) blocked, missing (2,1) stays walkable
+        assert!(!grid.is_walkable(2, 0));
+        assert!(grid.is_walkable(2, 1));
     }
 
     #[test]

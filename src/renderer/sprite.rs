@@ -279,6 +279,40 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn ui_primitives_sort_by_z_type_then_queue_order() {
+        let rects = vec![
+            DrawRect::new(0.0, 0.0, 10.0, 10.0, [1.0, 0.0, 0.0, 1.0]).with_z(1.0),
+            DrawRect::new(0.0, 0.0, 20.0, 20.0, [0.0, 1.0, 0.0, 1.0]).with_z(0.5),
+            DrawRect::new(0.0, 0.0, 30.0, 30.0, [0.0, 0.0, 1.0, 1.0]).with_z(1.0),
+        ];
+        let images = vec![
+            DrawImage::textured(0.0, 0.0, 10.0, 10.0, "image-a.png").with_z(1.0),
+            DrawImage::textured(0.0, 0.0, 20.0, 20.0, "image-b.png").with_z(0.25),
+            DrawImage::textured(0.0, 0.0, 30.0, 30.0, "image-c.png").with_z(1.0),
+        ];
+
+        let order: Vec<String> = sorted_ui_primitives(&rects, &images)
+            .iter()
+            .map(|primitive| match primitive.kind {
+                UiPrimitiveKind::Image => primitive.texture_key.clone().unwrap(),
+                UiPrimitiveKind::Rect => format!("rect-{}", primitive.order),
+            })
+            .collect();
+
+        assert_eq!(
+            order,
+            vec![
+                "image-b.png",
+                "rect-1",
+                "image-a.png",
+                "image-c.png",
+                "rect-0",
+                "rect-2",
+            ]
+        );
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -402,6 +436,74 @@ fn assign_instance_offsets(
     }
 
     (sprite_instances, material_instances)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum UiPrimitiveKind {
+    Image,
+    Rect,
+}
+
+impl UiPrimitiveKind {
+    fn sort_rank(self) -> u8 {
+        match self {
+            UiPrimitiveKind::Image => 0,
+            UiPrimitiveKind::Rect => 1,
+        }
+    }
+}
+
+struct UiPrimitive {
+    z: f32,
+    kind: UiPrimitiveKind,
+    order: usize,
+    texture_key: Option<String>,
+    instance: InstanceRaw,
+}
+
+fn ui_quad_instance(x: f32, y: f32, w: f32, h: f32, color: [f32; 4], uv: UvRect) -> InstanceRaw {
+    let cx = x + w * 0.5;
+    let cy = y + h * 0.5;
+    let model = Mat4::from_scale_rotation_translation(
+        Vec3::new(w, h, 1.0),
+        Quat::IDENTITY,
+        Vec3::new(cx, cy, 0.0),
+    );
+    InstanceRaw {
+        model: model.to_cols_array_2d(),
+        color,
+        uv_offset: [uv.u_offset, uv.v_offset],
+        uv_size: [uv.u_size, uv.v_size],
+    }
+}
+
+fn sorted_ui_primitives(rects: &[DrawRect], images: &[DrawImage]) -> Vec<UiPrimitive> {
+    let mut primitives = Vec::with_capacity(rects.len() + images.len());
+
+    primitives.extend(images.iter().enumerate().map(|(order, image)| UiPrimitive {
+        z: image.z,
+        kind: UiPrimitiveKind::Image,
+        order,
+        texture_key: image.texture_key(),
+        instance: ui_quad_instance(image.x, image.y, image.w, image.h, image.color, image.uv),
+    }));
+
+    primitives.extend(rects.iter().enumerate().map(|(order, rect)| UiPrimitive {
+        z: rect.z,
+        kind: UiPrimitiveKind::Rect,
+        order,
+        texture_key: None,
+        instance: ui_quad_instance(rect.x, rect.y, rect.w, rect.h, rect.color, UvRect::FULL),
+    }));
+
+    primitives.sort_by(|a, b| {
+        a.z.partial_cmp(&b.z)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| a.kind.sort_rank().cmp(&b.kind.sort_rank()))
+            .then_with(|| a.order.cmp(&b.order))
+    });
+
+    primitives
 }
 
 // ─── 카메라 유니폼 ─────────────────────────────────────────────────────────────
@@ -1240,76 +1342,16 @@ impl SpriteRenderer {
         width: u32,
         height: u32,
     ) {
-        if rects.is_empty() {
-            return;
-        }
-
-        // 화면 좌상단 (0,0), 우하단 (width,height) 직교 투영
-        let screen_proj = Mat4::orthographic_rh(0.0, width as f32, height as f32, 0.0, -1.0, 1.0);
-        let cam = CameraUniform {
-            view_proj: screen_proj.to_cols_array_2d(),
-        };
-        queue.write_buffer(&self.ui_camera_buf, 0, bytemuck::bytes_of(&cam));
-
-        // z 오름차순 안정 정렬
-        let mut sorted: Vec<&DrawRect> = rects.iter().collect();
-        sorted.sort_by(|a, b| a.z.partial_cmp(&b.z).unwrap_or(std::cmp::Ordering::Equal));
-
-        // DrawRect → InstanceRaw 변환 (중심 좌표 기준)
-        let instances: Vec<InstanceRaw> = sorted
-            .iter()
-            .map(|rect| {
-                let cx = rect.x + rect.w * 0.5;
-                let cy = rect.y + rect.h * 0.5;
-                let model = Mat4::from_scale_rotation_translation(
-                    Vec3::new(rect.w, rect.h, 1.0),
-                    Quat::IDENTITY,
-                    Vec3::new(cx, cy, 0.0),
-                );
-                InstanceRaw {
-                    model: model.to_cols_array_2d(),
-                    color: rect.color,
-                    uv_offset: [0.0, 0.0],
-                    uv_size: [1.0, 1.0],
-                }
-            })
-            .collect();
-
-        // 인스턴스 버퍼 용량 초과 시 동적 재할당
-        if instances.len() > self.ui_instance_capacity {
-            self.ui_instance_capacity = instances.len().next_power_of_two();
-            self.ui_instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("ui instance buffer"),
-                size: (self.ui_instance_capacity * std::mem::size_of::<InstanceRaw>()) as u64,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-        }
-        queue.write_buffer(&self.ui_instance_buf, 0, bytemuck::cast_slice(&instances));
-
-        // UI 렌더 패스 (LoadOp::Load 로 스프라이트 위에 합성)
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("ui pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            occlusion_query_set: None,
-            timestamp_writes: None,
-        });
-
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.ui_camera_bind_group, &[]);
-        pass.set_bind_group(1, &self.white_texture.bind_group, &[]);
-        pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-        pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
-        pass.set_vertex_buffer(1, self.ui_instance_buf.slice(..));
-        pass.draw_indexed(0..INDICES.len() as u32, 0, 0..instances.len() as u32);
+        self.render_ui_primitives_from_slices(
+            device,
+            queue,
+            view,
+            encoder,
+            rects,
+            &[],
+            width,
+            height,
+        );
     }
 
     /// 화면 고정(screen-space) UI 이미지를 렌더링한다.
@@ -1326,7 +1368,35 @@ impl SpriteRenderer {
         width: u32,
         height: u32,
     ) {
-        if images.is_empty() {
+        self.render_ui_primitives_from_slices(
+            device,
+            queue,
+            view,
+            encoder,
+            &[],
+            images,
+            width,
+            height,
+        );
+    }
+
+    /// 화면 고정(screen-space) UI 사각형과 이미지를 하나의 z 정렬 스트림으로 렌더링한다.
+    ///
+    /// `DrawRect`와 `DrawImage`는 같은 z 좌표계를 공유한다. 같은 z에서는 이미지가
+    /// 먼저, 사각형이 나중에 그려지며, 같은 타입 안에서는 큐 삽입 순서를 유지한다.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_ui_primitives_from_slices(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        view: &wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+        rects: &[DrawRect],
+        images: &[DrawImage],
+        width: u32,
+        height: u32,
+    ) {
+        if rects.is_empty() && images.is_empty() {
             return;
         }
 
@@ -1336,29 +1406,9 @@ impl SpriteRenderer {
         };
         queue.write_buffer(&self.ui_camera_buf, 0, bytemuck::bytes_of(&cam));
 
-        let mut sorted: Vec<&DrawImage> = images.iter().collect();
-        sorted.sort_by(|a, b| a.z.partial_cmp(&b.z).unwrap_or(std::cmp::Ordering::Equal));
-
-        let entries: Vec<(Option<String>, InstanceRaw)> = sorted
-            .iter()
-            .map(|image| {
-                let cx = image.x + image.w * 0.5;
-                let cy = image.y + image.h * 0.5;
-                let model = Mat4::from_scale_rotation_translation(
-                    Vec3::new(image.w, image.h, 1.0),
-                    Quat::IDENTITY,
-                    Vec3::new(cx, cy, 0.0),
-                );
-                (
-                    image.texture_key(),
-                    InstanceRaw {
-                        model: model.to_cols_array_2d(),
-                        color: image.color,
-                        uv_offset: [image.uv.u_offset, image.uv.v_offset],
-                        uv_size: [image.uv.u_size, image.uv.v_size],
-                    },
-                )
-            })
+        let entries: Vec<(Option<String>, InstanceRaw)> = sorted_ui_primitives(rects, images)
+            .into_iter()
+            .map(|primitive| (primitive.texture_key, primitive.instance))
             .collect();
         let instances: Vec<InstanceRaw> = entries.iter().map(|(_, instance)| *instance).collect();
 
@@ -1375,7 +1425,7 @@ impl SpriteRenderer {
 
         let instance_size = std::mem::size_of::<InstanceRaw>() as u64;
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("ui image pass"),
+            label: Some("ui primitive pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view,
                 resolve_target: None,

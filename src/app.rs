@@ -2382,37 +2382,24 @@ impl App {
             }
         }
 
-        let ui_rects: Vec<DrawRect> = self
-            .world
-            .resource_mut::<UiQueue>()
-            .map(|q| std::mem::take(&mut q.items))
-            .unwrap_or_default();
-        if !ui_rects.is_empty() {
-            if let Some(sr) = &mut self.sprite_renderer {
-                sr.render_ui_rects_from_slice(
-                    &gpu.device,
-                    &gpu.queue,
-                    render_view,
-                    &mut enc,
-                    &ui_rects,
-                    logical_w,
-                    logical_h,
-                );
-            }
-        }
-
         let ui_images = self
             .world
             .resource_mut::<UiImageQueue>()
             .map(|q| std::mem::take(&mut q.items))
             .unwrap_or_default();
-        if !ui_images.is_empty() {
+        let ui_rects: Vec<DrawRect> = self
+            .world
+            .resource_mut::<UiQueue>()
+            .map(|q| std::mem::take(&mut q.items))
+            .unwrap_or_default();
+        if !ui_rects.is_empty() || !ui_images.is_empty() {
             if let Some(sr) = &mut self.sprite_renderer {
-                sr.render_ui_images_from_slice(
+                sr.render_ui_primitives_from_slices(
                     &gpu.device,
                     &gpu.queue,
                     render_view,
                     &mut enc,
+                    &ui_rects,
                     &ui_images,
                     logical_w,
                     logical_h,

@@ -13,6 +13,7 @@ pub mod ecs;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_particle;
 pub mod hierarchy;
+pub mod history;
 pub mod input;
 pub mod locale;
 pub mod material;
@@ -57,8 +58,11 @@ pub use asset::{
 };
 pub use atlas::{AtlasSprite, TextureAtlas};
 #[cfg(not(target_arch = "wasm32"))]
-pub use audio::{AudioEffect, AudioManager};
-pub use behavior::{Blackboard, BlackboardValue};
+pub use audio::{AudioChannelState, AudioEffect, AudioManager};
+pub use behavior::{
+    AlwaysSucceed, BehaviorNode, BehaviorStatus, BehaviorSystem, BehaviorTree, Blackboard,
+    BlackboardValue, Inverter, Selector, Sequence,
+};
 pub use camera::Camera;
 pub use collision::{
     Collider, CollisionDebugSystem, CollisionGridSystem, CollisionLayer, DebugConfig, SpatialGrid,
@@ -70,6 +74,7 @@ pub use ecs::{Commands, Entity, Events, System, World};
 #[cfg(not(target_arch = "wasm32"))]
 pub use gpu_particle::GpuParticleEmitter;
 pub use hierarchy::{attach, detach, Children, GlobalTransform, HierarchySystem, Parent};
+pub use history::History;
 pub use input::{GamepadAxis, GamepadButton, GamepadState, InputMap, InputState, TouchState};
 pub use locale::{LocaleBundle, LocaleData, LocaleResource, TextDirection};
 pub use material::ShaderMaterial;

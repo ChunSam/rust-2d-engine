@@ -21,6 +21,7 @@ include     = [
     "Cargo.toml",
     "Cargo.lock",
     "examples/*.rs",
+    "examples/games/**",
     "examples/wasm/build.sh",
     "examples/wasm/index.html",
     "scripts/**",
@@ -30,6 +31,22 @@ include     = [
 [lib]
 name = "engine"
 crate-type = ["cdylib", "rlib"]
+
+[[example]]
+name = "platformer_game"
+path = "examples/games/platformer/platformer.rs"
+
+[[example]]
+name = "scene_flow_game"
+path = "examples/games/scene_flow/scene_flow.rs"
+
+[[example]]
+name = "maze_escape_game"
+path = "examples/games/maze_escape/maze_escape.rs"
+
+[[example]]
+name = "sokoban_game"
+path = "examples/games/sokoban/sokoban.rs"
 
 [dependencies]
 winit    = "0.30"
@@ -53,7 +70,7 @@ rhai        = { version = "1", features = ["sync"] }
 # ── 네이티브 전용 (OS API 의존) ──────────────────────────────────────────────
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rapier2d    = { version = "0.22", features = ["default"] }
-rodio       = { version = "0.19", default-features = false, features = ["wav", "vorbis"] }
+rodio       = { version = "0.19", default-features = false, features = ["wav", "vorbis", "mp3"] }
 dirs        = "5"
 gilrs       = "0.10"
 notify      = "6"

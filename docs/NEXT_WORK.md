@@ -7,11 +7,13 @@
 
 ## Context
 
-`examples/` currently holds only tech demos (`gpu_particles`, `minimap`,
-`split_screen`, `loading_bar`, `touch_demo`, `mp_client`/`mp_server`,
-`runtime_policies`) and the beginner `basic`. There is **no actual playable game yet**.
-Closing that gap is the active direction: widen the feature set breadth-first, and prove
-each feature with a small playable example.
+`examples/` now separates top-level feature demos from playable example games under
+`examples/games/`. The first playable examples are the platformer
+(`cargo run --example platformer_game`), scene-flow game
+(`cargo run --example scene_flow_game`), and maze-escape
+(`cargo run --example maze_escape_game`), which start closing the previous validation gap.
+The active direction remains: widen the feature set breadth-first, and prove each feature
+with a small playable example.
 
 ## Candidate feature × playable-example pairs
 
@@ -20,22 +22,16 @@ the API gaps it is likely to surface.
 
 | # | Example game | Engine capability validated/extended | Likely gaps to surface |
 |---|--------------|----------------------------------------|------------------------|
-| **A** | Platformer (jump, run, platforms) | `CharacterController`, `move_character`, tilemap collision, `AnimationStateMachine` | one-way platforms, coyote-time, tilemap↔physics binding ergonomics |
-| **B** | Top-down maze escape (chasing enemies) | `PathGrid`/`find_path`, `BehaviorTree`, `SpatialGrid` collision | pathfinding → behavior-tree handoff flow |
-| **C** | Puzzle (match-grid / Sokoban) | grid logic, `Tween`/`Easing`, `save`/`load`, UI | grid movement, undo, progress-save API friction |
+| **A** | Platformer (jump, run, platforms) ✅ done | `CharacterController`, `move_character`, physics platforms/sensors, `AnimationStateMachine`, atlas animation, camera follow | surfaced gaps: one-way platforms remain future work; tilemap↔physics binding still wants a higher-level ergonomic helper |
+| **B** | Top-down maze escape (chasing enemies) ✅ done | `PathGrid`/`find_path`, `BehaviorTree`, `SpatialGrid` collision (`examples/games/maze_escape/maze_escape.rs`) | surfaced + fixed: `BehaviorTree`/`Sequence`/`Selector`/`Inverter`/`AlwaysSucceed`/`BehaviorSystem` were not re-exported from `engine::`; `SpatialGrid` was trapped inside `CollisionGridSystem` (now mirrored to a `World` resource each frame); no `PathGrid::from_tilemap` (added). Still open: `BlackboardValue` cannot hold `Vec<IVec2>`, so `ComputePathToPlayer` writes only the next step and recomputes each tick. |
+| **C** | Sokoban (box pushing) ✅ done | discrete grid logic, multi-level progression, undo/redo, `save`/`load` progress (`examples/games/sokoban/sokoban.rs`) | surfaced + fixed: no reusable game-facing undo — only the editor had a private command history; added genre-agnostic `History<T>` snapshot undo/redo (`src/history.rs`, re-exported from `engine::`). `save`/`load_or_default` reused unchanged (no friction). Immediate-mode `DebugDrawQueue` filled rects render board state without ECS entity churn. |
 | **D** | Simple shooter (bullets, waves) | `ParticleEmitter`, `Timer`, collision layers, audio buses | pooling/spawn bursts, perf; complements rust-survivors |
-| **E** | Scene-flow game (menu → play → result) | `SceneCmd` Push/Replace/Pop, UI buttons, `GameState` | resource cleanup across scene transitions |
+| **E** | Scene-flow game (menu → play → result) ✅ done | `SceneCmd` Push/Replace/Pop, UI buttons, `GameState`, scene-owned systems, explicit entity cleanup | surfaced gap: preserving cross-scene diagnostics/state across `Replace` requires carrying a handle outside the reset `World` |
 | **F** | Skeletal-animation showcase character ✅ done | NEW: 2D cutout skeletal animation (`src/skeletal.rs`, `examples/skeletal_puppet.rs`) | surfaced + fixed `HierarchySystem` depth-3 cap; scale-vs-attachment-size rule noted in `docs/SKELETAL.md` |
 
 ## Recommended order
 
-1. **A — Platformer first.** Validates the most unproven core in one shot (character
-   controller + tilemap collision + animation state machine) and best exercises the
-   foundational genre-agnostic 2D feature set.
-2. **E — Scene flow.** Every game's skeleton; polishing it once lets later examples reuse it.
-3. Then **B / C / D** to widen genre coverage.
-4. **F (skeletal animation)** as the first genuinely new feature once the existing
-   surface is validated.
+1. **D** (simple shooter) to widen genre coverage. (A, B, C, E, F now done.)
 
 ## Alignment check — previously "planned" items vs the reset vision
 
