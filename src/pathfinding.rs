@@ -70,12 +70,7 @@ impl PathGrid {
     /// ```
     pub fn from_tilemap(tilemap: &Tilemap, is_blocked: impl Fn(u32) -> bool) -> Self {
         let height = tilemap.tiles.len() as i32;
-        let width = tilemap
-            .tiles
-            .iter()
-            .map(|row| row.len())
-            .max()
-            .unwrap_or(0) as i32;
+        let width = tilemap.tiles.iter().map(|row| row.len()).max().unwrap_or(0) as i32;
 
         let mut grid = Self::new(width, height);
         for (row_idx, row) in tilemap.tiles.iter().enumerate() {

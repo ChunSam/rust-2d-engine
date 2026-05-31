@@ -10,9 +10,9 @@
 use engine::{
     behavior::{Blackboard, BlackboardValue},
     App, BehaviorNode, BehaviorStatus, BehaviorSystem, BehaviorTree, Camera, Collider,
-    CollisionGridSystem, CollisionLayer, DrawText, Entity, InputState, KeyCode, PathGrid,
-    Selector, Sequence, ShouldQuit, SpatialGrid, Sprite, System, TextQueue, Tilemap, TilemapAtlas,
-    Transform, WindowConfig, World,
+    CollisionGridSystem, CollisionLayer, DrawText, Entity, InputState, KeyCode, PathGrid, Selector,
+    Sequence, ShouldQuit, SpatialGrid, Sprite, System, TextQueue, Tilemap, TilemapAtlas, Transform,
+    WindowConfig, World,
 };
 use glam::{IVec2, Vec2};
 
@@ -397,16 +397,14 @@ impl System for PlayerInputSystem {
 struct WinLoseSystem;
 impl System for WinLoseSystem {
     fn run(&mut self, world: &mut World, _dt: f32) {
-        let Some((player, goal, enemies, status)) =
-            world.resource::<MazeSession>().map(|s| {
-                (
-                    s.player,
-                    s.goal,
-                    s.enemies.iter().map(|(e, _)| *e).collect::<Vec<_>>(),
-                    s.status,
-                )
-            })
-        else {
+        let Some((player, goal, enemies, status)) = world.resource::<MazeSession>().map(|s| {
+            (
+                s.player,
+                s.goal,
+                s.enemies.iter().map(|(e, _)| *e).collect::<Vec<_>>(),
+                s.status,
+            )
+        }) else {
             return;
         };
         if status != Status::Playing {
